@@ -6,7 +6,7 @@
 #
 # Reproduces the incident's structural collision shape against a private,
 # throwaway HERDR_SESSION (never the captain's default): one tab labeled "1"
-# in a pre-existing workspace carrying today's primary label, `Atlas`, with a
+# in a pre-existing workspace carrying today's primary label, `Themis`, with a
 # live long-running process in that pane. The 2026-07-02 incident itself used
 # the then-current `firstmate` label; docs/herdr-backend.md preserves that
 # historical fact. This test then drives the real spawn-time container_ensure +
@@ -50,17 +50,17 @@ fm_backend_source herdr || fail "fm_backend_source herdr failed"
 fm_backend_herdr_version_check || fail "version_check failed against the real installed herdr"
 
 # --- 1. reproduce the label-collision startup-workspace shape ---------------
-# Explicitly label the startup workspace "Atlas" to create today's collision
+# Explicitly label the startup workspace "Themis" to create today's collision
 # deterministically. Herdr's unlabeled workspace-label derivation is not a
 # stable test contract, while the adopted-workspace state is the behavior
 # this regression must exercise. The seeded tab remains labeled "1".
 
-LIVE_CWD="$SCRATCH/Atlas"
+LIVE_CWD="$SCRATCH/Themis"
 mkdir -p "$LIVE_CWD"
 
 fm_backend_herdr_server_ensure "$SESSION" || fail "could not start the isolated session's server"
 
-CREATE_OUT=$(fm_backend_herdr_cli "$SESSION" workspace create --cwd "$LIVE_CWD" --label Atlas --no-focus) \
+CREATE_OUT=$(fm_backend_herdr_cli "$SESSION" workspace create --cwd "$LIVE_CWD" --label Themis --no-focus) \
   || fail "could not create the label-collision startup workspace"
 LIVE_WSID=$(printf '%s' "$CREATE_OUT" | jq -r '.result.workspace.workspace_id // empty')
 LIVE_TAB_ID=$(printf '%s' "$CREATE_OUT" | jq -r '.result.tab.tab_id // empty')
@@ -70,8 +70,8 @@ if [ -z "$LIVE_WSID" ] || [ -z "$LIVE_TAB_ID" ] || [ -z "$LIVE_PANE_ID" ]; then
 fi
 
 LIVE_LABEL=$(herdr workspace list --session "$SESSION" 2>&1 | jq -r --arg id "$LIVE_WSID" '.result.workspaces[]? | select(.workspace_id == $id) | .label')
-[ "$LIVE_LABEL" = Atlas ] || fail "the startup workspace label should be 'Atlas', got '$LIVE_LABEL' - repro setup is wrong"
-pass "repro setup: a pre-existing workspace labeled 'Atlas' collides with the primary home's own label"
+[ "$LIVE_LABEL" = Themis ] || fail "the startup workspace label should be 'Themis', got '$LIVE_LABEL' - repro setup is wrong"
+pass "repro setup: a pre-existing workspace labeled 'Themis' collides with the primary home's own label"
 
 # Simulate a live long-running agent in that pane: a heartbeat loop that
 # appends to a marker file, so liveness is independently verifiable (not just

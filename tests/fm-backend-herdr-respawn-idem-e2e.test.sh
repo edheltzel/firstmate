@@ -76,8 +76,8 @@ CONTAINER=${RAW%%$'\t'*}
 SEEDED_TAB_ID=${RAW#*$'\t'}
 WSID=${CONTAINER#*:}
 WS_LABEL=$(herdr workspace list --session "$SESSION" 2>&1 | jq -r --arg id "$WSID" '.result.workspaces[]? | select(.workspace_id == $id) | .label')
-[ "$WS_LABEL" = "Atlas" ] || fail "the restart regression workspace should use the current primary label 'Atlas', got '$WS_LABEL'"
-pass "repro setup: the restart regression workspace uses the current primary label 'Atlas'"
+[ "$WS_LABEL" = "Themis" ] || fail "the restart regression workspace should use the current primary label 'Themis', got '$WS_LABEL'"
+pass "repro setup: the restart regression workspace uses the current primary label 'Themis'"
 
 CREW_LABEL="fm-respawn-crew1"
 CREW_IDS=$(fm_backend_herdr_create_task "$CONTAINER" "$CREW_LABEL" "$PROJ_CWD" "$SEEDED_TAB_ID") \
@@ -114,7 +114,7 @@ sleep 0.5
 fm_backend_herdr_server_ensure "$SESSION" || fail "the isolated session's server did not come back up after the restart"
 
 RESTARTED_WS_LABEL=$(herdr workspace list --session "$SESSION" 2>&1 | jq -r --arg id "$WSID" '.result.workspaces[]? | select(.workspace_id == $id) | .label')
-[ "$RESTARTED_WS_LABEL" = "Atlas" ] || fail "the current primary label should survive restart exactly, got '$RESTARTED_WS_LABEL'"
+[ "$RESTARTED_WS_LABEL" = "Themis" ] || fail "the current primary label should survive restart exactly, got '$RESTARTED_WS_LABEL'"
 
 if ! herdr pane get "$CREW_PANE_ID" --session "$SESSION" >/dev/null 2>&1; then
   fail "repro setup is wrong: the crewmate-shaped pane should survive a session restart alive (docs/herdr-backend.md 'ID stability'), but it is gone"

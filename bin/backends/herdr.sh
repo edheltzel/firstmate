@@ -44,7 +44,7 @@
 # never overrides a real invocation. It exists only so this file's own unit
 # tests, which source it directly without that preamble, resolve to a sane
 # default (the firstmate repo root - never a secondmate home, so
-# fm_backend_herdr_workspace_label falls through to "Atlas" when a test does
+# fm_backend_herdr_workspace_label falls through to "Themis" when a test does
 # not care about home-specific labeling).
 FM_BACKEND_HERDR_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-${FM_ROOT:-$FM_BACKEND_HERDR_ROOT}}"
@@ -86,8 +86,8 @@ FM_BACKEND_HERDR_SECONDMATE_MARKER=".fm-secondmate-home"
 
 # fm_backend_herdr_workspace_label: the per-firstmate-HOME herdr workspace
 # label (docs/herdr-backend.md "Task container shape"). The PRIMARY home (no
-# readable, non-empty secondmate marker) resolves to the constant "Atlas". A
-# valid SECONDMATE home resolves to "Themis-<secondmate-id>", so its tasks land
+# readable, non-empty secondmate marker) resolves to the constant "Themis". A
+# valid SECONDMATE home resolves to "Archon-<secondmate-id>", so its tasks land
 # in their own workspace, obviously distinguishable from the primary's (and
 # from every other secondmate's) in herdr's spaces sidebar. Empty or unreadable
 # markers fail closed to the primary label. Read fresh from FM_HOME on every
@@ -97,16 +97,25 @@ FM_BACKEND_HERDR_SECONDMATE_MARKER=".fm-secondmate-home"
 # home. fm-spawn.sh briefly shadows FM_HOME to a secondmate's own home when the
 # PRIMARY spawns that secondmate (its own process's FM_HOME still names the
 # primary at that point) - see fm-spawn.sh's herdr case arm.
+#
+# This is the SINGLE owner of the task workspace name. Every create, find,
+# adopt, and recovery path (workspace_ensure, workspace_find, list_live) routes
+# through it, so the contract lives in exactly one place. The primary label was
+# "Atlas" and secondmates "Themis-<id>" through commit 989bea45; the captain's
+# current naming contract (primary "Themis", secondmate "Archon-<id>")
+# supersedes that older customization. "Atlas" remains the captain's separate
+# coding-agent/status-line brand and is no longer a herdr workspace label -
+# this function is not that brand.
 fm_backend_herdr_workspace_label() {
   local marker="$FM_HOME/$FM_BACKEND_HERDR_SECONDMATE_MARKER" id
   if [ -f "$marker" ] && [ -r "$marker" ]; then
     id=$(tr -d '[:space:]' < "$marker" 2>/dev/null)
     if [ -n "$id" ]; then
-      printf 'Themis-%s' "$id"
+      printf 'Archon-%s' "$id"
       return 0
     fi
   fi
-  printf 'Atlas'
+  printf 'Themis'
 }
 
 # fm_backend_herdr_cli: run `herdr <args...>` scoped to <session>, setting
@@ -202,7 +211,7 @@ fm_backend_herdr_workspace_find() {  # <session>
   # NOTE: the jq variable is $want, NOT $label - `label` is a jq reserved
   # keyword (label/break), so declaring a jq variable named "label" is a
   # compile error that `2>/dev/null` would silently swallow, making this find
-  # ALWAYS return empty and every spawn mint a fresh "Atlas" workspace
+  # ALWAYS return empty and every spawn mint a fresh "Themis" workspace
   # (the workspace leak).
   printf '%s' "$list" | jq -r --arg want "$label" \
     '.result.workspaces[]? | select(.label == $want) | .workspace_id' 2>/dev/null | head -1
