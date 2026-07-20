@@ -69,8 +69,9 @@ A metadata-routed selector returns the recorded backend target (`terminal=` for 
 Only metadata-routed task selectors carry secondmate-marker and Codex-harness context; explicit endpoint escape hatches do not.
 These five sentences are the single owner of the task-selector vocabulary; backend guides and other documents point here instead of restating the resolution order.
 `fm-teardown.sh <id>` takes a task id directly and uses the same recorded backend target fields after loading `state/<id>.meta`.
-Herdr workspaces are derived from `FM_HOME`: the primary home uses `Themis`, and a secondmate home with a readable, non-empty `.fm-secondmate-home` marker uses `Archon-<secondmate-id>`.
-Spawn, list-live, and recovery paths read that label from the active home, so a secondmate's own crewmates stay inside that secondmate home's herdr space.
+Herdr worker workspaces are derived from the PROJECT: an ordinary worker (ship or scout) lands in its project's reusable `<Fleet display name>-Fleet` workspace, where the Fleet display name is the project's configured `fleet=` alias in `data/projects.md` or, by default, its repository name (`bin/fm-project-mode.sh` owns the registry line format including the optional `fleet=<Display>` token and resolves it with `--fleet`; the [`project-management` skill](../.agents/skills/project-management/SKILL.md) is the captain-facing pointer to that format).
+The persistent secondmate agent instead uses its own `Archon-<secondmate-id>` supervisor workspace, read from the `.fm-secondmate-home` marker; `Themis` is the primary supervisor identity and `Archon` the secondmate identity, and neither is ever an ordinary worker workspace label.
+Spawn, list-live, and recovery resolve the same project label deterministically, so two workers for one project share its workspace (even across homes) while two different projects never do.
 For normal herdr operations, `HERDR_SESSION` selects the named session, but destructive test cleanup must not rely on `HERDR_SESSION` alone.
 Use the explicit guarded cleanup path described in [`docs/herdr-backend.md`](herdr-backend.md) instead of `herdr server stop`.
 For normal zellij operations, `FM_ZELLIJ_SESSION` selects the named session and defaults to `firstmate`.

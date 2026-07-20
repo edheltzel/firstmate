@@ -705,22 +705,17 @@ case "$BACKEND" in
     WT_TARGET="$WID"
     ;;
   herdr)
-    # fm_backend_herdr_workspace_label resolves the target workspace from
-    # FM_HOME. For every KIND except secondmate, this process's own FM_HOME is
-    # already the right home (the primary spawning its own crewmate/scout, or
-    # a secondmate spawning ITS OWN crewmate/scout from its own process's
-    # FM_HOME - the latter needs no glue at all). A --secondmate spawn is the
-    # one case that does: it is the PRIMARY's own fm-spawn.sh process
-    # launching a DIFFERENT home (PROJ_ABS, already validated above as the
-    # secondmate's home), so FM_HOME here still names the primary. Shadow it
-    # to PROJ_ABS for just these two calls (bash restores it automatically
-    # after each prefixed simple-command call) so the secondmate's tab lands
-    # in the secondmate's own workspace, not the primary's "Themis" one.
-    HERDR_LABEL_HOME=$FM_HOME
-    if [ "$KIND" = secondmate ]; then
-      HERDR_LABEL_HOME=$PROJ_ABS
-    fi
-    HERDR_CONTAINER_RAW=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_container_ensure "$PROJ_ABS") || exit 1
+    # fm_backend_herdr_workspace_label resolves the target workspace from KIND +
+    # PROJ_ABS, never from FM_HOME, so no FM_HOME shadow is needed. An ordinary
+    # worker (ship/scout) lands in its PROJECT's own reusable
+    # "<Fleet display name>-Fleet" workspace (docs/herdr-backend.md "Fleet
+    # workspaces"); a --secondmate spawn lands in the secondmate's own
+    # "Archon-<id>" supervisor workspace, read from the .fm-secondmate-home
+    # marker at PROJ_ABS. This process's own FM_HOME still names the spawning
+    # home, whose data/projects.md the Fleet-name lookup reads for a worker's
+    # project - correct whether the primary or a secondmate is spawning, since
+    # each spawns from its own process's own FM_HOME.
+    HERDR_CONTAINER_RAW=$(fm_backend_herdr_container_ensure "$KIND" "$PROJ_ABS") || exit 1
     # fm_backend_herdr_container_ensure echoes "<session>:<workspace_id>\t<seeded_default_tab_id>"
     # (the second field empty when this call ADOPTED a pre-existing workspace
     # rather than creating a fresh one). Split on the guaranteed single tab
@@ -731,7 +726,7 @@ case "$BACKEND" in
     HERDR_SEEDED_DEFAULT_TAB_ID=${HERDR_CONTAINER_RAW#*$'\t'}
     HERDR_SES=${CONTAINER%%:*}
     HERDR_WORKSPACE_ID=${CONTAINER#*:}
-    HERDR_TASK_IDS=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_create_task "$CONTAINER" "$W" "$PROJ_ABS" "$HERDR_SEEDED_DEFAULT_TAB_ID") || exit 1
+    HERDR_TASK_IDS=$(fm_backend_herdr_create_task "$CONTAINER" "$W" "$PROJ_ABS" "$HERDR_SEEDED_DEFAULT_TAB_ID") || exit 1
     read -r HERDR_TAB_ID HERDR_PANE_ID <<EOF
 $HERDR_TASK_IDS
 EOF

@@ -52,7 +52,10 @@ pass "real herdr: version_check accepts the installed binary's protocol"
 # one - docs/herdr-backend.md "Default-tab prune"). Split on the guaranteed
 # single tab character; only fm_backend_herdr_create_task is ever allowed to
 # act on the seeded tab id, and only for the container that just created it.
-CONTAINER_RAW=$(fm_backend_herdr_container_ensure /tmp) || fail "container_ensure failed"
+# An ordinary worker (kind ship) for a project lands in that project's own
+# "<Fleet display name>-Fleet" workspace. cwd /tmp -> basename "tmp"; with no
+# registry the Fleet name defaults to the repo name, so the label is "tmp-Fleet".
+CONTAINER_RAW=$(fm_backend_herdr_container_ensure ship /tmp) || fail "container_ensure failed"
 CONTAINER=${CONTAINER_RAW%%$'\t'*}
 SEEDED_TAB_ID=${CONTAINER_RAW#*$'\t'}
 case "$CONTAINER" in
@@ -60,19 +63,41 @@ case "$CONTAINER" in
   *) fail "container_ensure returned an unexpected shape: $CONTAINER" ;;
 esac
 [ -n "$SEEDED_TAB_ID" ] || fail "the first container_ensure in a brand-new isolated session must CREATE the workspace and report its seeded default tab id"
-pass "real herdr: container_ensure starts the isolated session's server, creates the Themis workspace ($CONTAINER), and reports its seeded default tab id ($SEEDED_TAB_ID)"
+CONTAINER_LABEL=$(herdr workspace list --session "$SESSION" 2>&1 | jq -r --arg id "${CONTAINER#*:}" '.result.workspaces[]? | select(.workspace_id == $id) | .label')
+[ "$CONTAINER_LABEL" = "tmp-Fleet" ] || fail "the ordinary worker's real herdr workspace label should be 'tmp-Fleet', got '$CONTAINER_LABEL'"
+pass "real herdr: container_ensure starts the isolated session's server, creates the project 'tmp-Fleet' worker workspace ($CONTAINER), and reports its seeded default tab id ($SEEDED_TAB_ID)"
 
-# A second container_ensure must reuse (ADOPT) the same workspace (idempotent)
-# and report an EMPTY seeded tab id - the created-vs-adopted gate that fixes
-# the 2026-07-02 self-kill incident (docs/herdr-backend.md "Default-tab
-# prune"): only the call that actually just created a workspace may identify
-# a tab as prunable.
-CONTAINER2_RAW=$(fm_backend_herdr_container_ensure /tmp) || fail "second container_ensure failed"
+# A second container_ensure for the SAME project must reuse (ADOPT) the same
+# workspace (multi-task reuse) and report an EMPTY seeded tab id - the
+# created-vs-adopted gate that fixes the 2026-07-02 self-kill incident
+# (docs/herdr-backend.md "Default-tab prune"): only the call that actually just
+# created a workspace may identify a tab as prunable.
+CONTAINER2_RAW=$(fm_backend_herdr_container_ensure ship /tmp) || fail "second container_ensure failed"
 CONTAINER2=${CONTAINER2_RAW%%$'\t'*}
 SEEDED_TAB_ID2=${CONTAINER2_RAW#*$'\t'}
 [ "$CONTAINER2" = "$CONTAINER" ] || fail "container_ensure is not idempotent: '$CONTAINER' vs '$CONTAINER2'"
 [ -z "$SEEDED_TAB_ID2" ] || fail "an ADOPTED (reused) workspace must report an EMPTY seeded default tab id, got '$SEEDED_TAB_ID2'"
-pass "real herdr: container_ensure is idempotent (reuses/adopts the existing Themis workspace, reports no seeded default tab on adoption)"
+pass "real herdr: container_ensure is idempotent (a second task for one project reuses its 'tmp-Fleet' workspace, reports no seeded default tab on adoption)"
+
+# --- cross-project separation + configurable Fleet alias ---------------------
+# Two DIFFERENT projects must land in two DIFFERENT workspaces, and a configured
+# fleet= alias must override the repo-name default. Uses a scratch FM_HOME with
+# a registry so the alias flows through fm-project-mode.sh --fleet end to end.
+XP_SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/fm-herdr-smoke-xp.XXXXXX")
+XP_HOME="$XP_SCRATCH/home"
+mkdir -p "$XP_HOME/data" "$XP_HOME/projects/Echo" "$XP_HOME/projects/atlas-config"
+printf -- '- Echo [no-mistakes] - voice (added 2026-07-17)\n- atlas-config [direct-PR fleet=Atlas] - config (added 2026-07-17)\n' > "$XP_HOME/data/projects.md"
+XP_ECHO_RAW=$(FM_HOME="$XP_HOME" fm_backend_herdr_container_ensure ship "$XP_HOME/projects/Echo") || fail "Echo worker container_ensure failed"
+XP_ECHO_WS=${XP_ECHO_RAW%%$'\t'*}; XP_ECHO_WS=${XP_ECHO_WS#*:}
+XP_ATLAS_RAW=$(FM_HOME="$XP_HOME" fm_backend_herdr_container_ensure ship "$XP_HOME/projects/atlas-config") || fail "atlas-config worker container_ensure failed"
+XP_ATLAS_WS=${XP_ATLAS_RAW%%$'\t'*}; XP_ATLAS_WS=${XP_ATLAS_WS#*:}
+XP_ECHO_LABEL=$(herdr workspace list --session "$SESSION" 2>&1 | jq -r --arg id "$XP_ECHO_WS" '.result.workspaces[]? | select(.workspace_id == $id) | .label')
+XP_ATLAS_LABEL=$(herdr workspace list --session "$SESSION" 2>&1 | jq -r --arg id "$XP_ATLAS_WS" '.result.workspaces[]? | select(.workspace_id == $id) | .label')
+[ "$XP_ECHO_LABEL" = "Echo-Fleet" ] || fail "the Echo worker workspace should be 'Echo-Fleet', got '$XP_ECHO_LABEL'"
+[ "$XP_ATLAS_LABEL" = "Atlas-Fleet" ] || fail "the atlas-config worker workspace should use the fleet=Atlas alias -> 'Atlas-Fleet', got '$XP_ATLAS_LABEL'"
+[ "$XP_ECHO_WS" != "$XP_ATLAS_WS" ] || fail "two different projects must never share a workspace, both got '$XP_ECHO_WS'"
+rm -rf "$XP_SCRATCH"
+pass "real herdr: different projects get distinct workspaces (Echo-Fleet vs Atlas-Fleet) and a configured fleet= alias overrides the repo-name default, end to end"
 
 # --- create_task + duplicate refusal + default-tab prune ---------------------
 
@@ -177,46 +202,48 @@ SM_HOME="$SM_SCRATCH/secondmate-home"
 mkdir -p "$SM_HOME"
 printf 'smoketest-sm1\n' > "$SM_HOME/.fm-secondmate-home"
 
-SM_CONTAINER_RAW=$(FM_HOME="$SM_HOME" fm_backend_herdr_container_ensure /tmp) || fail "secondmate-shaped container_ensure failed"
+SM_CONTAINER_RAW=$(fm_backend_herdr_container_ensure secondmate "$SM_HOME") || fail "secondmate container_ensure failed"
 SM_CONTAINER=${SM_CONTAINER_RAW%%$'\t'*}
 SM_SEEDED_TAB_ID=${SM_CONTAINER_RAW#*$'\t'}
 case "$SM_CONTAINER" in
   "$SESSION":w*) : ;;
   *) fail "secondmate container_ensure returned an unexpected shape: $SM_CONTAINER" ;;
 esac
-[ "$SM_CONTAINER" != "$CONTAINER" ] || fail "a secondmate-shaped home must get a DIFFERENT workspace than the primary's, got the same: $SM_CONTAINER"
-[ -n "$SM_SEEDED_TAB_ID" ] || fail "the secondmate-shaped home's container_ensure must CREATE its own workspace and report its seeded default tab id"
-pass "real herdr: a secondmate-shaped home (.fm-secondmate-home) gets its OWN herdr workspace, distinct from the primary's, in the SAME session"
+[ "$SM_CONTAINER" != "$CONTAINER" ] || fail "the secondmate agent must get a DIFFERENT workspace than the worker's, got the same: $SM_CONTAINER"
+[ -n "$SM_SEEDED_TAB_ID" ] || fail "the secondmate agent's container_ensure must CREATE its own workspace and report its seeded default tab id"
+pass "real herdr: a --secondmate spawn gets its OWN herdr workspace, distinct from the worker's, in the SAME session"
 
 SM_WSID=${SM_CONTAINER#*:}
 SM_LABEL_REAL=$(herdr workspace list --session "$SESSION" 2>&1 | jq -r --arg id "$SM_WSID" '.result.workspaces[]? | select(.workspace_id == $id) | .label')
 [ "$SM_LABEL_REAL" = "Archon-smoketest-sm1" ] || fail "the secondmate workspace's real herdr label should be Archon-smoketest-sm1, got '$SM_LABEL_REAL'"
-pass "real herdr: the secondmate-shaped home's workspace is labeled Archon-<secondmate-id> in herdr itself"
+pass "real herdr: the secondmate agent's workspace is labeled Archon-<secondmate-id> in herdr itself (never a Fleet worker label)"
 
 SM_TASK_LABEL="fm-smtask1"
-SM_TASK_IDS=$(FM_HOME="$SM_HOME" fm_backend_herdr_create_task "$SM_CONTAINER" "$SM_TASK_LABEL" /tmp "$SM_SEEDED_TAB_ID") || fail "secondmate create_task failed"
+SM_TASK_IDS=$(fm_backend_herdr_create_task "$SM_CONTAINER" "$SM_TASK_LABEL" "$SM_HOME" "$SM_SEEDED_TAB_ID") || fail "secondmate create_task failed"
 read -r SM_TAB_ID SM_PANE_ID <<EOF
 $SM_TASK_IDS
 EOF
 if [ -z "$SM_TAB_ID" ] || [ -z "$SM_PANE_ID" ]; then
   fail "secondmate create_task did not return tab/pane ids"
 fi
-pass "real herdr: a task spawned into the secondmate-shaped home lands as a tab inside the secondmate's OWN workspace"
+pass "real herdr: a task spawned into the secondmate agent lands as a tab inside the secondmate's OWN Archon workspace"
 
-# list_live for each home must never see the OTHER home's task.
-PRIMARY_LIVE=$(fm_backend_herdr_list_live "$SESSION")
+# list_live is scoped to the injected label: the worker project's Fleet must
+# never see the secondmate's task, and the secondmate's Archon workspace must
+# see only its own task, never the worker project's.
+PRIMARY_LIVE=$(fm_backend_herdr_list_live "$SESSION" tmp-Fleet)
 case "$PRIMARY_LIVE" in
-  *"$SM_TASK_LABEL"*) fail "the primary home's list_live must not see a secondmate-shaped home's task"$'\n'"$PRIMARY_LIVE" ;;
+  *"$SM_TASK_LABEL"*) fail "the worker project's list_live must not see the secondmate's task"$'\n'"$PRIMARY_LIVE" ;;
 esac
-SM_LIVE=$(FM_HOME="$SM_HOME" fm_backend_herdr_list_live "$SESSION")
+SM_LIVE=$(fm_backend_herdr_list_live "$SESSION" Archon-smoketest-sm1)
 case "$SM_LIVE" in
   *"$SM_TASK_LABEL"*) : ;;
-  *) fail "the secondmate-shaped home's list_live did not see its own task"$'\n'"$SM_LIVE" ;;
+  *) fail "the secondmate's list_live did not see its own task"$'\n'"$SM_LIVE" ;;
 esac
 case "$SM_LIVE" in
-  *"$LABEL"*) fail "the secondmate-shaped home's list_live must not see the primary's task ($LABEL)"$'\n'"$SM_LIVE" ;;
+  *"$LABEL"*) fail "the secondmate's list_live must not see the worker project's task ($LABEL)"$'\n'"$SM_LIVE" ;;
 esac
-pass "real herdr: list_live stays scoped to each home's own workspace - neither home sees the other's tasks"
+pass "real herdr: list_live stays scoped to the injected workspace label - the worker project and the secondmate never see each other's tasks"
 
 # --- restart stability in the MULTI-workspace shape --------------------------
 # P2 (herdr-verification-p2.md "ID stability") verified this for a single
@@ -230,7 +257,7 @@ sleep 0.5
 fm_backend_herdr_server_ensure "$SESSION" || fail "the isolated session's server did not come back up after the stop"
 
 POST_LIST=$(herdr workspace list --session "$SESSION" 2>&1)
-POST_PRIMARY_ID=$(printf '%s' "$POST_LIST" | jq -r '.result.workspaces[]? | select(.label == "Themis") | .workspace_id')
+POST_PRIMARY_ID=$(printf '%s' "$POST_LIST" | jq -r '.result.workspaces[]? | select(.label == "tmp-Fleet") | .workspace_id')
 POST_SM_ID=$(printf '%s' "$POST_LIST" | jq -r --arg l "Archon-smoketest-sm1" '.result.workspaces[]? | select(.label == $l) | .workspace_id')
 [ "$POST_PRIMARY_ID" = "${CONTAINER#*:}" ] || fail "the primary workspace id did not survive the restart: before=${CONTAINER#*:} after=$POST_PRIMARY_ID"
 [ "$POST_SM_ID" = "$SM_WSID" ] || fail "the secondmate workspace id did not survive the restart: before=$SM_WSID after=$POST_SM_ID"
@@ -330,7 +357,7 @@ pass "real herdr: kill removes the pane and is idempotent/best-effort"
 # deletes the workspace itself (verified real-herdr behavior), so the stale
 # $CONTAINER from container_ensure at test start no longer names a live
 # workspace.
-CONTAINER_RAW=$(fm_backend_herdr_container_ensure /tmp) || fail "container_ensure for the second task failed"
+CONTAINER_RAW=$(fm_backend_herdr_container_ensure ship /tmp) || fail "container_ensure for the second task failed"
 CONTAINER=${CONTAINER_RAW%%$'\t'*}
 SEEDED_TAB_ID=${CONTAINER_RAW#*$'\t'}
 [ -n "$SEEDED_TAB_ID" ] || fail "the workspace was deleted when its last tab was killed, so this container_ensure must CREATE a fresh one and report its seeded default tab id"
@@ -339,7 +366,7 @@ TASK_IDS2=$(fm_backend_herdr_create_task "$CONTAINER" "$LABEL2" /tmp "$SEEDED_TA
 read -r _TAB_ID2 PANE_ID2 <<EOF
 $TASK_IDS2
 EOF
-live=$(fm_backend_herdr_list_live "$SESSION")
+live=$(fm_backend_herdr_list_live "$SESSION" tmp-Fleet)
 assert_contains_local() { case "$1" in *"$2"*) : ;; *) fail "$3"$'\n'"--- got ---"$'\n'"$1" ;; esac; }
 assert_contains_local "$live" "$LABEL2" "list_live did not report the freshly created task tab by label"
 pass "real herdr: list_live discovers a live task tab by fm-<id> label"

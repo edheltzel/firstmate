@@ -43,9 +43,10 @@
 # global before sourcing fm-backend.sh (which sources this file), so this
 # never overrides a real invocation. It exists only so this file's own unit
 # tests, which source it directly without that preamble, resolve to a sane
-# default (the firstmate repo root - never a secondmate home, so
-# fm_backend_herdr_workspace_label falls through to "Themis" when a test does
-# not care about home-specific labeling).
+# default (the firstmate repo root). FM_HOME no longer selects the workspace
+# label - fm_backend_herdr_workspace_label takes <kind> and <project-abs>
+# explicitly - but it still names the home whose data/projects.md registry the
+# Fleet-name lookup (fm-project-mode.sh --fleet) reads for an ordinary worker.
 FM_BACKEND_HERDR_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-${FM_ROOT:-$FM_BACKEND_HERDR_ROOT}}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
@@ -84,38 +85,47 @@ FM_BACKEND_HERDR_ESCALATED_PREFIX=".herdr-escalated-"
 # The primary firstmate home never carries this marker.
 FM_BACKEND_HERDR_SECONDMATE_MARKER=".fm-secondmate-home"
 
-# fm_backend_herdr_workspace_label: the per-firstmate-HOME herdr workspace
-# label (docs/herdr-backend.md "Task container shape"). The PRIMARY home (no
-# readable, non-empty secondmate marker) resolves to the constant "Themis". A
-# valid SECONDMATE home resolves to "Archon-<secondmate-id>", so its tasks land
-# in their own workspace, obviously distinguishable from the primary's (and
-# from every other secondmate's) in herdr's spaces sidebar. Empty or unreadable
-# markers fail closed to the primary label. Read fresh from FM_HOME on every
-# call rather than cached at source time: FM_HOME is the home's own durable
-# identity, not env plumbing threaded through a call chain, so the label is
-# automatically stable across every respawn/recovery for the life of that
-# home. fm-spawn.sh briefly shadows FM_HOME to a secondmate's own home when the
-# PRIMARY spawns that secondmate (its own process's FM_HOME still names the
-# primary at that point) - see fm-spawn.sh's herdr case arm.
-#
-# This is the SINGLE owner of the task workspace name. Every create, find,
-# adopt, and recovery path (workspace_ensure, workspace_find, list_live) routes
-# through it, so the contract lives in exactly one place. The primary label was
-# "Atlas" and secondmates "Themis-<id>" through commit 989bea45; the captain's
-# current naming contract (primary "Themis", secondmate "Archon-<id>")
-# supersedes that older customization. "Atlas" remains the captain's separate
-# coding-agent/status-line brand and is no longer a herdr workspace label -
-# this function is not that brand.
-fm_backend_herdr_workspace_label() {
-  local marker="$FM_HOME/$FM_BACKEND_HERDR_SECONDMATE_MARKER" id
-  if [ -f "$marker" ] && [ -r "$marker" ]; then
-    id=$(tr -d '[:space:]' < "$marker" 2>/dev/null)
-    if [ -n "$id" ]; then
-      printf 'Archon-%s' "$id"
-      return 0
+# fm_backend_herdr_workspace_label: the herdr workspace label for a spawn, the
+# SINGLE owner of the worker/secondmate workspace name (docs/herdr-backend.md
+# "Fleet workspaces"). Resolved from the spawn KIND and the project/home path,
+# never from FM_HOME, so two workers for the SAME project share one workspace no
+# matter which home spawned them, and two DIFFERENT projects never share one:
+#   - An ordinary worker (kind ship or scout) lands in its PROJECT's reusable
+#     "<Fleet display name>-Fleet" workspace. The Fleet display name is the
+#     configured fleet= alias for basename(<project-abs>) or, by default, that
+#     repository name itself - resolved by bin/fm-project-mode.sh --fleet, the
+#     single registry parser (data/projects.md), so delivery-mode and Fleet
+#     resolution can never disagree about which project a spawn is for.
+#   - The persistent SECONDMATE agent (kind secondmate) lands in its own
+#     "Archon-<secondmate-id>" supervisor workspace, read from the
+#     .fm-secondmate-home marker at <project-abs> (the secondmate's home); an
+#     empty or unreadable marker fails closed to the bare "Archon" supervisor
+#     label, never a worker/Fleet label.
+# "Themis" is the primary supervisor identity and "Archon" the secondmate
+# identity; NEITHER is ever an ordinary worker workspace label. Resolution is
+# deterministic, so creation, reuse, respawn, and recovery all agree, and the
+# resolved label is injected into workspace_find/_ensure/list_live rather than
+# each re-deriving it. Superseded labels (never emitted now): the home-keyed
+# "Atlas"/"Themis"/"Themis-<id>" primary/secondmate labels from commit 989bea45
+# and the prior a5b0cfa customization.
+fm_backend_herdr_workspace_label() {  # <kind> <project-abs>
+  local kind=$1 project_abs=$2 marker id name fleet
+  if [ "$kind" = secondmate ]; then
+    marker="$project_abs/$FM_BACKEND_HERDR_SECONDMATE_MARKER"
+    if [ -f "$marker" ] && [ -r "$marker" ]; then
+      id=$(tr -d '[:space:]' < "$marker" 2>/dev/null)
+      if [ -n "$id" ]; then
+        printf 'Archon-%s' "$id"
+        return 0
+      fi
     fi
+    printf 'Archon'
+    return 0
   fi
-  printf 'Themis'
+  name=${project_abs##*/}
+  fleet=$(FM_HOME="$FM_HOME" "$FM_BACKEND_HERDR_ROOT/bin/fm-project-mode.sh" --fleet "$name" 2>/dev/null) || fleet=$name
+  [ -n "$fleet" ] || fleet=$name
+  printf '%s-Fleet' "$fleet"
 }
 
 # fm_backend_herdr_cli: run `herdr <args...>` scoped to <session>, setting
@@ -197,21 +207,20 @@ fm_backend_herdr_server_ensure() {  # <session>
   return 1
 }
 
-# fm_backend_herdr_workspace_find: this HOME's own workspace id inside
-# <session> (fm_backend_herdr_workspace_label), or empty (never creates).
-# Read-only, safe for recovery/list paths. Label-collision semantics
-# (docs/herdr-backend.md "Label collisions"): herdr enforces no label
+# fm_backend_herdr_workspace_find: the workspace id in <session> whose label is
+# the injected <label> (resolved once by fm_backend_herdr_workspace_label), or
+# empty (never creates). Read-only, safe for recovery/list paths. Label-collision
+# semantics (docs/herdr-backend.md "Label collisions"): herdr enforces no label
 # uniqueness at all, so this adopts the FIRST matching workspace `jq` returns
 # (list order, normally creation order/oldest) rather than disambiguating -
 # identical in spirit to the pre-existing tab duplicate-label check below.
-fm_backend_herdr_workspace_find() {  # <session>
-  local session=$1 label list
-  label=$(fm_backend_herdr_workspace_label)
+fm_backend_herdr_workspace_find() {  # <session> <label>
+  local session=$1 label=$2 list
   list=$(fm_backend_herdr_cli "$session" workspace list 2>/dev/null) || return 0
   # NOTE: the jq variable is $want, NOT $label - `label` is a jq reserved
   # keyword (label/break), so declaring a jq variable named "label" is a
   # compile error that `2>/dev/null` would silently swallow, making this find
-  # ALWAYS return empty and every spawn mint a fresh "Themis" workspace
+  # ALWAYS return empty and every spawn mint a fresh duplicate workspace
   # (the workspace leak).
   printf '%s' "$list" | jq -r --arg want "$label" \
     '.result.workspaces[]? | select(.label == $want) | .workspace_id' 2>/dev/null | head -1
@@ -312,17 +321,16 @@ fm_backend_herdr_workspace_prune_seeded_default_tab() {  # <session> <workspace_
 # focuses regardless of --no-focus (herdr always needs something focused to
 # attach to). --no-focus is passed unconditionally anyway, for defense in
 # depth and because it is a no-op in the already-safe case.
-fm_backend_herdr_workspace_ensure() {  # <session> <cwd>
-  local session=$1 cwd=$2 wsid out label
+fm_backend_herdr_workspace_ensure() {  # <session> <cwd> <label>
+  local session=$1 cwd=$2 label=$3 wsid out
   FM_BACKEND_HERDR_WS_ID=""
   FM_BACKEND_HERDR_WS_SEEDED_TAB_ID=""
-  wsid=$(fm_backend_herdr_workspace_find "$session")
+  wsid=$(fm_backend_herdr_workspace_find "$session" "$label")
   if [ -n "$wsid" ]; then
     FM_BACKEND_HERDR_WS_ID=$wsid
     printf '%s' "$wsid"
     return 0
   fi
-  label=$(fm_backend_herdr_workspace_label)
   out=$(fm_backend_herdr_cli "$session" workspace create --cwd "$cwd" --label "$label" --no-focus 2>/dev/null) || return 1
   wsid=$(printf '%s' "$out" | jq -r '.result.workspace.workspace_id // empty' 2>/dev/null)
   [ -n "$wsid" ] || return 1
@@ -339,21 +347,25 @@ fm_backend_herdr_workspace_ensure() {  # <session> <cwd>
 }
 
 # fm_backend_herdr_container_ensure: the full spawn-time container-ensure
-# sequence (version gate, server, workspace). Echoes
+# sequence (version gate, server, workspace). Takes <kind> and <project-abs> and
+# resolves the workspace label ONCE (fm_backend_herdr_workspace_label) so an
+# ordinary worker lands in its project's "<Fleet display name>-Fleet" workspace
+# and the secondmate agent in its "Archon-<id>" one; the project directory is
+# also the fresh workspace's cwd. Echoes
 # "<session>:<workspace_id>\t<seeded_default_tab_id>" - a single TAB character
 # always separates the two fields (the second is empty for an ADOPTED
 # workspace) so a caller can split unambiguously with
 # CONTAINER=${RAW%%$'\t'*}; SEEDED_TAB_ID=${RAW#*$'\t'}. The seeded tab id
 # must be threaded through to fm_backend_herdr_create_task, which is the only
 # function allowed to prune it (fm_backend_herdr_workspace_prune_seeded_default_tab).
-fm_backend_herdr_container_ensure() {  # <cwd-for-a-fresh-workspace>
-  local cwd=${1:-$PWD} session label
+fm_backend_herdr_container_ensure() {  # <kind> <project-abs>
+  local kind=$1 cwd=$2 session label
   fm_backend_herdr_version_check || return 1
   session=$(fm_backend_herdr_session)
   fm_backend_herdr_server_ensure "$session" || return 1
-  fm_backend_herdr_workspace_ensure "$session" "$cwd" >/dev/null || { label=$(fm_backend_herdr_workspace_label); echo "error: failed to ensure herdr workspace '$label' in session '$session'" >&2; return 1; }
+  label=$(fm_backend_herdr_workspace_label "$kind" "$cwd")
+  fm_backend_herdr_workspace_ensure "$session" "$cwd" "$label" >/dev/null || { echo "error: failed to ensure herdr workspace '$label' in session '$session'" >&2; return 1; }
   if [ -z "$FM_BACKEND_HERDR_WS_ID" ]; then
-    label=$(fm_backend_herdr_workspace_label)
     echo "error: failed to ensure herdr workspace '$label' in session '$session'" >&2
     return 1
   fi
@@ -1179,26 +1191,27 @@ EOF
 }
 
 # fm_backend_herdr_list_live: recovery/orphan discovery. Lists every tab whose
-# label looks like a firstmate task window (fm-<id>) in <session>'s, THIS
-# HOME'S OWN workspace (fm_backend_herdr_workspace_label - never another
-# home's), by LABEL - never by trusting a stored pane id, since ids are not
-# guaranteed stable across every server lifecycle (see herdr-verification-p2.md
-# "ID stability"). A caller running as a given home (e.g. a secondmate
-# recovering its own in-flight work) naturally scopes to that home's own
-# workspace because FM_HOME already names it - no glue needed, unlike the
-# primary-spawns-a-secondmate path in fm-spawn.sh. Read-only: a session/
-# workspace that does not exist yet simply lists nothing. One
-# "<session>:<pane_id>\t<label>" line per live task tab.
-fm_backend_herdr_list_live() {  # <session>
-  local session=$1 wsid tabs tab_id label pane_id
-  wsid=$(fm_backend_herdr_workspace_find "$session") || return 0
+# label looks like a firstmate task window (fm-<id>) in <session>'s workspace
+# whose label is the injected <label> - the PROJECT's own "<Fleet>-Fleet"
+# workspace for an ordinary worker, or the secondmate's "Archon-<id>" one - by
+# LABEL, never by trusting a stored pane id, since ids are not guaranteed stable
+# across every server lifecycle (see herdr-verification-p2.md "ID stability").
+# The caller resolves the workspace label from the task's own KIND + project
+# (fm_backend_herdr_workspace_label) and passes it, so recovery scopes to the
+# same workspace creation used - workers for different projects are separate
+# workspaces and never cross-listed. Read-only: a session/workspace that does not
+# exist yet simply lists nothing. One "<session>:<pane_id>\t<label>" line per
+# live task tab.
+fm_backend_herdr_list_live() {  # <session> <label>
+  local session=$1 label=$2 wsid tabs tab_id tlabel pane_id
+  wsid=$(fm_backend_herdr_workspace_find "$session" "$label") || return 0
   [ -n "$wsid" ] || return 0
   tabs=$(fm_backend_herdr_cli "$session" tab list --workspace "$wsid" 2>/dev/null) || return 0
-  while IFS=$'\t' read -r tab_id label; do
+  while IFS=$'\t' read -r tab_id tlabel; do
     [ -n "$tab_id" ] || continue
     pane_id=$(fm_backend_herdr_pane_for_tab "$session" "$wsid" "$tab_id") || continue
     [ -n "$pane_id" ] || continue
-    printf '%s:%s\t%s\n' "$session" "$pane_id" "$label"
+    printf '%s:%s\t%s\n' "$session" "$pane_id" "$tlabel"
   done < <(printf '%s' "$tabs" | jq -r '.result.tabs[]? | select(.label | startswith("fm-")) | "\(.tab_id)\t\(.label)"' 2>/dev/null)
 }
 

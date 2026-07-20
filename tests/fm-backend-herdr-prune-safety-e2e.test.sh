@@ -50,17 +50,19 @@ fm_backend_source herdr || fail "fm_backend_source herdr failed"
 fm_backend_herdr_version_check || fail "version_check failed against the real installed herdr"
 
 # --- 1. reproduce the label-collision startup-workspace shape ---------------
-# Explicitly label the startup workspace "Themis" to create today's collision
-# deterministically. Herdr's unlabeled workspace-label derivation is not a
-# stable test contract, while the adopted-workspace state is the behavior
-# this regression must exercise. The seeded tab remains labeled "1".
+# Explicitly label the startup workspace with the project's own derived
+# "<name>-Fleet" label to create today's collision deterministically. Herdr's
+# unlabeled workspace-label derivation is not a stable test contract, while the
+# adopted-workspace state is the behavior this regression must exercise. The
+# project basename "proj" has no registry alias, so its worker label is
+# "proj-Fleet". The seeded tab remains labeled "1".
 
-LIVE_CWD="$SCRATCH/Themis"
+LIVE_CWD="$SCRATCH/proj"
 mkdir -p "$LIVE_CWD"
 
 fm_backend_herdr_server_ensure "$SESSION" || fail "could not start the isolated session's server"
 
-CREATE_OUT=$(fm_backend_herdr_cli "$SESSION" workspace create --cwd "$LIVE_CWD" --label Themis --no-focus) \
+CREATE_OUT=$(fm_backend_herdr_cli "$SESSION" workspace create --cwd "$LIVE_CWD" --label proj-Fleet --no-focus) \
   || fail "could not create the label-collision startup workspace"
 LIVE_WSID=$(printf '%s' "$CREATE_OUT" | jq -r '.result.workspace.workspace_id // empty')
 LIVE_TAB_ID=$(printf '%s' "$CREATE_OUT" | jq -r '.result.tab.tab_id // empty')
@@ -70,8 +72,8 @@ if [ -z "$LIVE_WSID" ] || [ -z "$LIVE_TAB_ID" ] || [ -z "$LIVE_PANE_ID" ]; then
 fi
 
 LIVE_LABEL=$(herdr workspace list --session "$SESSION" 2>&1 | jq -r --arg id "$LIVE_WSID" '.result.workspaces[]? | select(.workspace_id == $id) | .label')
-[ "$LIVE_LABEL" = Themis ] || fail "the startup workspace label should be 'Themis', got '$LIVE_LABEL' - repro setup is wrong"
-pass "repro setup: a pre-existing workspace labeled 'Themis' collides with the primary home's own label"
+[ "$LIVE_LABEL" = proj-Fleet ] || fail "the startup workspace label should be 'proj-Fleet', got '$LIVE_LABEL' - repro setup is wrong"
+pass "repro setup: a pre-existing workspace labeled 'proj-Fleet' collides with the project worker's own derived label"
 
 # Simulate a live long-running agent in that pane: a heartbeat loop that
 # appends to a marker file, so liveness is independently verifiable (not just
@@ -88,7 +90,7 @@ pass "repro setup: a live long-running process is running in the startup workspa
 # --- 2. run the real spawn-time path: container_ensure adopts the startup --
 # workspace by label match; create_task must NOT prune its tab.
 
-RAW=$(fm_backend_herdr_container_ensure "$LIVE_CWD") || fail "container_ensure failed"
+RAW=$(FM_HOME="$SCRATCH" fm_backend_herdr_container_ensure ship "$LIVE_CWD") || fail "container_ensure failed"
 CONTAINER=${RAW%%$'\t'*}
 SEEDED_TAB_ID=${RAW#*$'\t'}
 [ "$CONTAINER" = "$SESSION:$LIVE_WSID" ] || fail "container_ensure should have ADOPTED the pre-existing label-colliding workspace ($LIVE_WSID), got '$CONTAINER'"
@@ -128,7 +130,7 @@ fm_backend_herdr_kill "$SESSION:$LIVE_PANE_ID"
 
 HAPPY_CWD="$SCRATCH/happy-project"
 mkdir -p "$HAPPY_CWD"
-HAPPY_RAW=$(fm_backend_herdr_container_ensure "$HAPPY_CWD") || fail "happy-path container_ensure failed"
+HAPPY_RAW=$(FM_HOME="$SCRATCH" fm_backend_herdr_container_ensure ship "$HAPPY_CWD") || fail "happy-path container_ensure failed"
 HAPPY_CONTAINER=${HAPPY_RAW%%$'\t'*}
 HAPPY_SEEDED=${HAPPY_RAW#*$'\t'}
 [ -n "$HAPPY_SEEDED" ] || fail "happy path: expected a genuinely fresh workspace with a non-empty seeded default tab id"

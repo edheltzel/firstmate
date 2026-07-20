@@ -38,6 +38,9 @@ The optional `+yolo` posture changes routine approval authority but does not cha
 Default it off, and enable it only on the captain's explicit instruction.
 Destructive, irreversible, and security-sensitive decisions still require captain approval when it is on.
 
+An optional `fleet=<Display>` bracket token sets the project's herdr Fleet display name, so its ordinary workers land in a `<Display>-Fleet` herdr workspace instead of the `<repository-name>-Fleet` default (a single whitespace-free token, placed after the mode; `bin/fm-project-mode.sh`'s header owns the exact bracket format, `docs/herdr-backend.md` owns the herdr behavior).
+Set it only when the captain wants a workspace label different from the repository name.
+
 ## Add or clone an existing project
 
 Confirm the source URL, local project name, delivery mode, and autonomy posture.
