@@ -184,8 +184,8 @@
   Goal: Classify and control live OMP sessions correctly under tmux and Herdr, distinguishing a live wrapper from a dead one, without making TUI text the primary truth source.
 
   Requirements: R14, R21, R22, R23, R24, R26, R30, R38.
-  Acceptance examples: AE13, AE14, AE16, AE20, AE21, AE28, AE36, AE38.
-  Live-matrix scenarios: rows 14 and 15 (tmux and Herdr busy, idle, interrupt, exit, resume), row 20 (secondmate routed work), row 21 (forced recovery no second owner), row 22 (two-home isolation under the shared-code-root topology), row 27 (two consecutive response wakes), row 35 (confident-dead secondmate respawned once).
+  Acceptance examples: AE13, AE14, AE16, AE20, AE21, AE28, AE36, AE38, AE43.
+  Live-matrix scenarios: rows 14 and 15 (tmux and Herdr busy, idle, interrupt, exit, resume), row 20 (secondmate routed work), row 21 (forced recovery no second owner), row 22 (two-home isolation under the shared-code-root topology), row 27 (two consecutive response wakes), row 35 (confident-dead secondmate respawned once), row 41 (protected Herdr workspace labels unchanged).
 
   File surfaces:
   - bin/fm-backend.sh
@@ -201,10 +201,12 @@
   Completion and verification:
   - tmux and Herdr classify and control OMP sessions correctly, including a live-versus-dead wrapper distinction and confident-dead respawn, with two-home isolation proven under the production shared-code-root topology.
   - A confident-dead scenario proves a genuinely dead Bun or Node-presenting secondmate is respawned exactly once, and the live E2E covers generating, idle, interrupt, exit, resume, routed work, two consecutive response wakes with a rearm, and sole secondmate ownership through forced recovery.
+  - A Herdr regression check proves the OMP work leaves the protected workspace labels unchanged, with the primary workspace Themis, secondmate workspaces Archon-<secondmate-id>, and Atlas reserved for agent and status branding.
 
   Stop conditions and captain-settled constraints:
   - Consume U1's Herdr hosting and classification pre-verification, treating a failure as a blocker or the explicitly staged tmux-first deferral rather than proceeding to parity.
   - An over-conservative unknown classification must not prevent confident true-death detection and respawn.
+  - The OMP clean-cutover must not rename the protected Herdr workspace labels, the primary workspace Themis, the secondmate workspaces Archon-<secondmate-id>, and Atlas reserved for agent and status branding.
 
   Authority: see .agents/plans/omp-harness-integration-plan.md (U7) for full contract detail.
 - [ ] omp-u8-cleanup-recovery-trust - U8: OMP cleanup, recovery, and extension trust hardening blocked-by: omp-u4-worker-completion-extension blocked-by: omp-u5-primary-extensions blocked-by: omp-u6-startup-supervision blocked-by: omp-u7-liveness-controls (repo: Agent-Themis) (kind: ship) (since 2026-07-20)
@@ -240,8 +242,8 @@
   Goal: Declare OMP supported only after code, live evidence, documentation, and regressions agree.
 
   Requirements: R27, R28, R29, R30, R39.
-  Acceptance examples: AE1 through AE42 (the full acceptance set).
-  Live-matrix scenarios: the full pre-merge live ledger (rows 1 through 40), with each corruption-sensitive row passing at least 20 consecutive runs.
+  Acceptance examples: AE1 through AE43 (the full acceptance set).
+  Live-matrix scenarios: the full pre-merge live ledger (rows 1 through 41), with each corruption-sensitive row passing at least 20 consecutive runs.
 
   File surfaces:
   - AGENTS.md
@@ -254,11 +256,11 @@
 
   Completion and verification:
   - omp is added to verified adapter lists only after U0 through U8 acceptance and every required live row passes, with each corruption-sensitive row across at least 20 consecutive runs.
-  - The single sanitized durable evidence artifact is redacted, handed off, and attached, targeted tests, repository lint, the no-mistakes pipeline, and CI pass, and the final diff review confirms no stale five-harness lists and no rename of the Herdr Themis-<secondmate-id> workspace label.
+  - The single sanitized durable evidence artifact is redacted, handed off, and attached, targeted tests, repository lint, the no-mistakes pipeline, and CI pass, and the final diff review confirms no stale five-harness lists and no rename of the protected Herdr workspace labels, the primary workspace Themis, the secondmate workspaces Archon-<secondmate-id>, and Atlas reserved for agent and status branding.
 
   Stop conditions and captain-settled constraints:
   - Documentation may call OMP verified only when both CI and the pre-merge live ledger pass and redaction is confirmed.
-  - The clean-cutover must not rename the Herdr Themis-<secondmate-id> workspace label, which is unrelated repo terminology.
+  - The clean-cutover must not rename the protected Herdr workspace labels, the primary workspace Themis, the secondmate workspaces Archon-<secondmate-id>, and Atlas reserved for agent and status branding, which are unrelated repo terminology.
 
   Authority: see .agents/plans/omp-harness-integration-plan.md (U9) for full contract detail.
 ## Done

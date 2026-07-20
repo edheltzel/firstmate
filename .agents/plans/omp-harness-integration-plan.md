@@ -242,6 +242,7 @@ API availability does not prove end-to-end supervision, so the implementation mu
 - AE40. Given a live OMP secondmate launch, when it starts, then the effective model, reasoning level, approval policy, extension paths, and submitted charter match the intended values, confirmed live rather than by fixture alone.
 - AE41. Given a firstmate-launched OMP worker or secondmate whose environment is constructed from a cleared base, when a full environment diff is taken, then only the role-needed credentials and required runtime variables are present and every inherited ambient secret, including the X-mode pairing token and GitHub tokens, is absent from the environment, argv, and generated extensions.
 - AE42. Given the pre-merge live evidence, when it is prepared for handoff and attachment, then credential-bearing argv and captured environment values are redacted to variable names, and unredacted evidence is never attached to the validation run.
+- AE43. Given the OMP integration, when the Herdr workspace labels are checked, then the primary workspace remains `Themis`, secondmate workspaces remain `Archon-<secondmate-id>`, and `Atlas` remains reserved for agent and status branding, all unchanged by OMP.
 
 ### Success Criteria
 
@@ -794,7 +795,7 @@ U0 deliberately fixes misdetection and the crash without crossing that line.
 - Attempt recovery while the secondmate is live and prove no second owner starts.
 - Route one request through an idle secondmate and observe one response wake.
 
-**Test scenarios:** AE13, AE14, AE20, AE21, AE28, AE36, AE38, AE16
+**Test scenarios:** AE13, AE14, AE20, AE21, AE28, AE36, AE38, AE43, AE16
 
 **Verification:**
 
@@ -804,6 +805,7 @@ U0 deliberately fixes misdetection and the crash without crossing that line.
 - The live E2E covers generating, idle, interrupt, exit, resume, routed work, two consecutive response wakes with a rearm between them, and sole secondmate ownership through forced recovery.
 - A confident-dead scenario proves a genuinely dead Bun or Node-presenting secondmate is respawned exactly once.
 - A two-home E2E under the production shared-code-root topology proves task completion and watcher wakes remain scoped to the originating home and each extension resolved its own `FM_HOME`.
+- A Herdr regression check proves the OMP work leaves the protected workspace labels unchanged, with the primary workspace `Themis`, secondmate workspaces `Archon-<secondmate-id>`, and `Atlas` reserved for agent and status branding.
 
 **Dependencies:** U1, U3, U5, U6
 
@@ -874,9 +876,9 @@ U0 deliberately fixes misdetection and the crash without crossing that line.
 - Attach that sanitized artifact as durable validation evidence and document the verified OMP version scope.
 - Pin or fixture the OMP extension typings used by CI so type checks are reproducible without pretending CI executed the live matrix.
 - Run targeted tests, repository lint, the no-mistakes pipeline, and CI.
-- Review the final diff for stale five-harness lists, Pi aliases, ambient-discovery paths, generated artifacts, and unverified claims, and confirm the clean-cutover did not rename the Herdr `Themis-<secondmate-id>` workspace label, which is unrelated repo terminology.
+- Review the final diff for stale five-harness lists, Pi aliases, ambient-discovery paths, generated artifacts, and unverified claims, and confirm the clean-cutover did not rename the protected Herdr workspace labels, the primary workspace `Themis`, the secondmate workspaces `Archon-<secondmate-id>`, and `Atlas` reserved for agent and status branding, which are unrelated repo terminology.
 
-**Test scenarios:** AE1-AE42
+**Test scenarios:** AE1-AE43
 
 **Verification:**
 
@@ -916,6 +918,7 @@ U0 deliberately fixes misdetection and the crash without crossing that line.
 - Extension tests cover load markers as staleness diagnostics, exactly-once registration, tool blocking, a pre-tool checker that cannot spawn, bounded stop continuation driven to the allowance limit, child failure, wake-delivery failure surfaced rather than fail-open, the idle async out-of-band sink, a fail-closed `FM_HOME` guard, generated-worker permissions and integrity, and cleanup.
 - Teardown tests cover top-level tasks and nested secondmate children, editing both hardcoded removal lists.
 - Type tests compile tracked OMP extensions against the installed OMP package namespace.
+- A Herdr regression test asserts the OMP integration leaves the protected workspace labels unchanged, with the primary workspace `Themis`, secondmate workspaces `Archon-<secondmate-id>`, and `Atlas` reserved for agent and status branding.
 
 ### Live verification matrix
 
@@ -961,6 +964,7 @@ The final pre-merge live ledger must record the OMP version and run all required
 38. `FM_HOME` unset at extension load is refused rather than resolved against the shared code root.
 39. A PATH-hijacked, wrong-permission, or out-of-supported-range `omp` is rejected before extensions load for a firstmate-launched role, and that role's environment, built from a cleared base, carries only role-needed credentials with inherited ambient secrets absent.
 40. A live OMP secondmate launch confirms model, reasoning level, approval policy, extension paths, and charter.
+41. The OMP integration leaves the protected Herdr workspace labels unchanged, with the primary workspace `Themis`, secondmate workspaces `Archon-<secondmate-id>`, and `Atlas` reserved for agent and status branding.
 
 Each corruption-sensitive row (exactly-once completion in rows 6 and 30, no-duplicate wake in rows 12, 13, 23, 27, and 28, and streaming-queue in row 13) must pass at least 20 consecutive runs, or a higher count tied to a stated statistical-confidence target, because a single flaky pass is a genuine observation that would otherwise clear the anti-vacuous gate; a bare "more than once" floor is too weak for a race and leaves the bar executor-discretionary and unverifiable by a reviewer.
 
@@ -1015,7 +1019,7 @@ From an isolated OMP session:
 - Documentation contains only live-verified claims with dated OMP version evidence, and each corruption-sensitive claim passed N consecutive runs.
 - The single sanitized durable live-evidence artifact is redacted, handed off, and attached, and no unredacted credential appears in it.
 - Targeted tests, lint, no-mistakes validation, and CI pass.
-- Dead-end spike code, temporary profiles, captured secrets, generated extensions, scratch state, and abandoned adapter variants are absent from the final diff, and the clean-cutover did not rename the Herdr `Themis-<secondmate-id>` workspace label.
+- Dead-end spike code, temporary profiles, captured secrets, generated extensions, scratch state, and abandoned adapter variants are absent from the final diff, and the clean-cutover did not rename the protected Herdr workspace labels, the primary workspace `Themis`, the secondmate workspaces `Archon-<secondmate-id>`, and `Atlas` reserved for agent and status branding.
 
 ### Per-unit completion criteria
 

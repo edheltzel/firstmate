@@ -100,7 +100,7 @@ The plan's U1 Requirement tag deliberately excludes R12 and R15 through R20, whi
 
 ## Acceptance-example ownership
 
-Every acceptance example AE1 through AE42 is owned by at least one unit, and U9 re-runs the full AE1 through AE42 set as the final gate.
+Every acceptance example AE1 through AE43 is owned by at least one unit, and U9 re-runs the full AE1 through AE43 set as the final gate.
 AE16 is the existing-harness regression example that every unit re-verifies.
 
 | Unit | Acceptance examples |
@@ -112,13 +112,13 @@ AE16 is the existing-harness regression example that every unit re-verifies.
 | U4 | AE6, AE15, AE16, AE19, AE31, AE32, AE33 |
 | U5 | AE7, AE8, AE9, AE10, AE11, AE12, AE16, AE17, AE21, AE25, AE26, AE27, AE28, AE29, AE30 |
 | U6 | AE7, AE8, AE10, AE11, AE12, AE16, AE28, AE29 |
-| U7 | AE13, AE14, AE16, AE20, AE21, AE28, AE36, AE38 |
+| U7 | AE13, AE14, AE16, AE20, AE21, AE28, AE36, AE38, AE43 |
 | U8 | AE12, AE15, AE16, AE20, AE21, AE33, AE34, AE35, AE36 |
-| U9 | AE1 through AE42 (the full acceptance set) |
+| U9 | AE1 through AE43 (the full acceptance set) |
 
 ## Live-matrix ownership
 
-The plan's forty-row live verification matrix is produced by U1 as evidence and exercised across the units below, then re-run in full by U9.
+The plan's forty-one-row live verification matrix is produced by U1 as evidence and exercised across the units below, then re-run in full by U9.
 
 | Unit | Live-matrix scenarios |
 | --- | --- |
@@ -129,9 +129,9 @@ The plan's forty-row live verification matrix is produced by U1 as evidence and 
 | U4 | Rows 6, 18, 19, 25, 30, 31, 32 |
 | U5 | Rows 5, 8, 9, 10, 11, 12, 13, 22, 23, 27, 28, 29, 36, 37, 38 |
 | U6 | Rows 1, 8, 9, 12, 13, 27, 28 |
-| U7 | Rows 14, 15, 20, 21, 22, 27, 35 |
+| U7 | Rows 14, 15, 20, 21, 22, 27, 35, 41 (Herdr workspace labels unchanged) |
 | U8 | Rows 5, 24, 25, 32, 33, 34, 35 |
-| U9 | The full pre-merge live ledger, rows 1 through 40, with each corruption-sensitive row passing at least 20 consecutive runs |
+| U9 | The full pre-merge live ledger, rows 1 through 41, with each corruption-sensitive row passing at least 20 consecutive runs |
 
 ## Stop conditions
 
@@ -155,7 +155,7 @@ U9 attaches the artifact as durable validation evidence only after redaction has
 
 U9 declares OMP supported only after code, live evidence, documentation, and regressions agree.
 `omp` is added to verified adapter lists only after U0 through U8 acceptance and every required live row passes, with each corruption-sensitive row passing at least 20 consecutive runs.
-Targeted tests, repository lint, the no-mistakes pipeline, and CI must pass, and the final diff review must confirm no stale five-harness lists and no rename of the Herdr `Themis-<secondmate-id>` workspace label.
+Targeted tests, repository lint, the no-mistakes pipeline, and CI must pass, and the final diff review must confirm no stale five-harness lists and no rename of the protected Herdr workspace labels, the primary workspace `Themis`, the secondmate workspaces `Archon-<secondmate-id>`, and `Atlas` reserved for agent and status branding.
 Documentation may call OMP verified only when both CI and the pre-merge live ledger pass and redaction is confirmed.
 
 ## Authority
