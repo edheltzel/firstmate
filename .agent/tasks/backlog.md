@@ -128,11 +128,11 @@
   Authority: see .agents/plans/omp-harness-integration-plan.md (U4) for full contract detail.
 - [ ] omp-u5-primary-extensions - U5: hardened OMP primary extensions blocked-by: omp-u1-verification-ledger blocked-by: omp-u2-identity-config blocked-by: omp-u3-launch-profiles blocked-by: omp-u4-worker-completion-extension (repo: Agent-Themis) (kind: ship) (since 2026-07-20)
   Owning unit: U5 - Implement hardened OMP primary extensions.
-  Goal: Give primary OMP sessions native watcher delivery, pre-tool blocking, bounded turn-end enforcement, fail-visible error handling, and fail-closed home resolution.
+  Goal: Give primary OMP sessions native watcher delivery with extension-owned continuity, pre-tool blocking, bounded turn-end enforcement, fail-visible error handling, and fail-closed home resolution.
 
   Requirements: R15, R16, R17, R18, R19, R20, R24, R30, R36, R37.
-  Acceptance examples: AE7, AE8, AE9, AE10, AE11, AE12, AE16, AE17, AE21, AE25, AE26, AE27, AE28, AE29, AE30.
-  Live-matrix scenarios: row 5 (discovery disabled or isolated before import), rows 8 and 9 (stop continuation and repeated-failure), rows 10 and 11 (pre-tool blocks), rows 12 and 13 (idle and streaming wake), row 22 (two-home isolation), row 23 (double-load recovery), rows 27 and 28 (consecutive wakes and wake-after-continuation), row 29 (continuation-allowance exhaustion), row 36 (idle async out-of-band sink), row 37 (checker-spawn failure blocks), row 38 (FM_HOME unset refused).
+  Acceptance examples: AE7, AE8, AE9, AE10, AE11, AE12, AE16, AE17, AE21, AE25, AE26, AE27, AE28, AE29, AE30, AE44, AE45.
+  Live-matrix scenarios: row 5 (discovery disabled or isolated before import), rows 8 and 9 (stop continuation and repeated-failure), rows 10 and 11 (pre-tool blocks), rows 12 and 13 (idle and streaming wake), row 22 (two-home isolation), row 23 (double-load recovery), rows 27 and 28 (consecutive wakes and wake-after-continuation), row 29 (continuation-allowance exhaustion), row 36 (idle async failure recorded to the per-cycle exit log), row 37 (checker-spawn failure blocks), row 38 (FM_HOME unset refused), row 42 (successor launched and verified before the wake), row 43 (typed continuity-restoration failure at the retry limit).
 
   File surfaces:
   - bin/omp-extensions/fm-primary-omp-watch.ts (new)
@@ -145,11 +145,12 @@
   - tests/fm-turnend-guard.test.sh
 
   Completion and verification:
-  - Watcher delivery, pre-tool blocking, bounded turn-end enforcement, fail-visible error handling, the idle async sink, and the fail-closed FM_HOME guard pass fixture and live tests, including consecutive wakes and a wake after a continuation.
-  - Fixtures prove a wake-delivery, child-spawn, and pre-tool-checker-spawn failure each surface rather than fail open, and that the extension refuses to resolve against the shared code root when FM_HOME is unset.
+  - Watcher delivery with extension-owned continuity, pre-tool blocking, bounded turn-end enforcement, fail-visible error handling, the per-cycle exit log, and the fail-closed FM_HOME guard pass fixture and live tests, including consecutive wakes and a wake after a continuation.
+  - A continuity fixture blocks prompt delivery to prove the singleton successor launches and session-lock ownership is rechecked before the wake, proves single-flight, and hangs each successor arm to prove the bounded fallback delivers the typed continuity-restoration failure.
+  - Fixtures prove a wake-delivery, child-spawn, and pre-tool-checker-spawn failure each surface as typed watcher failures rather than failing open, that a failed follow-up never cancels continuity restoration, and that the extension refuses to resolve against the shared code root when FM_HOME is unset.
 
   Stop conditions and captain-settled constraints:
-  - Invert the Pi reference's fail-open handling so failures fail visible, and route an idle async wake-delivery failure to a durable out-of-band sink.
+  - Implement the landed watcher-continuity contract per docs/watcher-continuity.md rather than a shallow one-follow-up port: successor before wake, session-lock recheck, bounded exponential retry, single-flight, and a typed continuity-restoration failure at the retry limit.
   - Disable or isolate ambient discovery before any discovered extension executes its default export at import, and treat the self-written hash as a staleness diagnostic rather than integrity.
   - The turn may end loudly with a visible failure after the bounded continuation allowance is spent rather than recursing or ending silently blind.
 
@@ -185,7 +186,7 @@
 
   Requirements: R14, R21, R22, R23, R24, R26, R30, R38.
   Acceptance examples: AE13, AE14, AE16, AE20, AE21, AE28, AE36, AE38, AE43.
-  Live-matrix scenarios: rows 14 and 15 (tmux and Herdr busy, idle, interrupt, exit, resume), row 20 (secondmate routed work), row 21 (forced recovery no second owner), row 22 (two-home isolation under the shared-code-root topology), row 27 (two consecutive response wakes), row 35 (confident-dead secondmate respawned once), row 41 (protected Herdr workspace labels unchanged).
+  Live-matrix scenarios: rows 14 and 15 (tmux and Herdr busy, idle, interrupt, exit, resume), row 20 (secondmate routed work), row 21 (forced recovery no second owner), row 22 (two-home isolation under the shared-code-root topology), row 27 (two consecutive response wakes), row 35 (confident-dead secondmate respawned once), row 41 (landed Herdr workspace contract unchanged).
 
   File surfaces:
   - bin/fm-backend.sh
@@ -200,13 +201,13 @@
 
   Completion and verification:
   - tmux and Herdr classify and control OMP sessions correctly, including a live-versus-dead wrapper distinction and confident-dead respawn, with two-home isolation proven under the production shared-code-root topology.
-  - A confident-dead scenario proves a genuinely dead Bun or Node-presenting secondmate is respawned exactly once, and the live E2E covers generating, idle, interrupt, exit, resume, routed work, two consecutive response wakes with a rearm, and sole secondmate ownership through forced recovery.
-  - A Herdr regression check proves the OMP work leaves the protected workspace labels unchanged, with the primary workspace Themis, secondmate workspaces Archon-<secondmate-id>, and Atlas reserved for agent and status branding.
+  - OMP spawns route through the landed per-project Herdr workspace contract without change: an ordinary OMP worker lands in its project's <Fleet display name>-Fleet workspace resolved by bin/fm-project-mode.sh --fleet, an OMP secondmate in Archon-<secondmate-id>, and an OMP primary supervisor is Themis.
+  - A Herdr regression check proves the OMP work leaves that landed workspace contract unchanged: primary supervisor Themis, secondmate supervisor Archon-<secondmate-id> failing closed to a bare Archon, and per-project ordinary-worker <Fleet display name>-Fleet workspaces.
 
   Stop conditions and captain-settled constraints:
   - Consume U1's Herdr hosting and classification pre-verification, treating a failure as a blocker or the explicitly staged tmux-first deferral rather than proceeding to parity.
   - An over-conservative unknown classification must not prevent confident true-death detection and respawn.
-  - The OMP clean-cutover must not rename the protected Herdr workspace labels, the primary workspace Themis, the secondmate workspaces Archon-<secondmate-id>, and Atlas reserved for agent and status branding.
+  - The OMP work must not disturb the landed Herdr workspace contract: primary supervisor Themis, secondmate supervisor Archon-<secondmate-id>, and per-project ordinary-worker <Fleet display name>-Fleet workspaces.
 
   Authority: see .agents/plans/omp-harness-integration-plan.md (U7) for full contract detail.
 - [ ] omp-u8-cleanup-recovery-trust - U8: OMP cleanup, recovery, and extension trust hardening blocked-by: omp-u4-worker-completion-extension blocked-by: omp-u5-primary-extensions blocked-by: omp-u6-startup-supervision blocked-by: omp-u7-liveness-controls (repo: Agent-Themis) (kind: ship) (since 2026-07-20)
@@ -237,13 +238,13 @@
   - Edit both the top-level and nested secondmate hardcoded removal lists so neither generated artifact is missed.
 
   Authority: see .agents/plans/omp-harness-integration-plan.md (U8) for full contract detail.
-- [ ] omp-u9-publish-and-gate - U9: publish verified OMP adapter policy and run the full gate blocked-by: omp-u2-identity-config blocked-by: omp-u3-launch-profiles blocked-by: omp-u4-worker-completion-extension blocked-by: omp-u5-primary-extensions blocked-by: omp-u6-startup-supervision blocked-by: omp-u7-liveness-controls blocked-by: omp-u8-cleanup-recovery-trust (repo: Agent-Themis) (kind: ship) (since 2026-07-20)
+- [ ] omp-u9-publish-and-gate - U9: publish verified OMP adapter policy and run the full gate blocked-by: omp-u2-identity-config blocked-by: omp-u3-launch-profiles blocked-by: omp-u4-worker-completion-extension blocked-by: omp-u5-primary-extensions blocked-by: omp-u6-startup-supervision blocked-by: omp-u7-liveness-controls blocked-by: omp-u8-cleanup-recovery-trust blocked-by: omp-u0-early-detection-correctness (repo: Agent-Themis) (kind: ship) (since 2026-07-20)
   Owning unit: U9 - Publish verified adapter policy and run the full gate.
   Goal: Declare OMP supported only after code, live evidence, documentation, and regressions agree.
 
   Requirements: R27, R28, R29, R30, R39.
-  Acceptance examples: AE1 through AE43 (the full acceptance set).
-  Live-matrix scenarios: the full pre-merge live ledger (rows 1 through 41), with each corruption-sensitive row passing at least 20 consecutive runs.
+  Acceptance examples: AE1 through AE45 (the full acceptance set).
+  Live-matrix scenarios: the full pre-merge live ledger (rows 1 through 43), with each corruption-sensitive row passing at least 20 consecutive runs.
 
   File surfaces:
   - AGENTS.md
@@ -256,11 +257,11 @@
 
   Completion and verification:
   - omp is added to verified adapter lists only after U0 through U8 acceptance and every required live row passes, with each corruption-sensitive row across at least 20 consecutive runs.
-  - The single sanitized durable evidence artifact is redacted, handed off, and attached, targeted tests, repository lint, the no-mistakes pipeline, and CI pass, and the final diff review confirms no stale five-harness lists and no rename of the protected Herdr workspace labels, the primary workspace Themis, the secondmate workspaces Archon-<secondmate-id>, and Atlas reserved for agent and status branding.
+  - The single sanitized durable evidence artifact is redacted, handed off, and attached, targeted tests, repository lint, the no-mistakes pipeline, and CI pass, and the final diff review confirms no stale five-harness lists and no disturbance of the landed Herdr workspace contract: primary supervisor Themis, secondmate supervisor Archon-<secondmate-id>, and per-project ordinary-worker <Fleet display name>-Fleet workspaces.
 
   Stop conditions and captain-settled constraints:
   - Documentation may call OMP verified only when both CI and the pre-merge live ledger pass and redaction is confirmed.
-  - The clean-cutover must not rename the protected Herdr workspace labels, the primary workspace Themis, the secondmate workspaces Archon-<secondmate-id>, and Atlas reserved for agent and status branding, which are unrelated repo terminology.
+  - The clean-cutover must not disturb the landed Herdr workspace contract, the primary supervisor workspace Themis, the secondmate supervisor workspaces Archon-<secondmate-id>, and the per-project ordinary-worker <Fleet display name>-Fleet workspaces, which are unrelated repo terminology.
 
   Authority: see .agents/plans/omp-harness-integration-plan.md (U9) for full contract detail.
 ## Done

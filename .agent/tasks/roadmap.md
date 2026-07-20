@@ -38,7 +38,7 @@ U0 and U1 start in parallel because neither has a blocker.
 | U6 | omp-u6-startup-supervision | ship | U5 |
 | U7 | omp-u7-liveness-controls | ship | U1, U3, U5, U6 |
 | U8 | omp-u8-cleanup-recovery-trust | ship | U4, U5, U6, U7 |
-| U9 | omp-u9-publish-and-gate | ship | U2, U3, U4, U5, U6, U7, U8 |
+| U9 | omp-u9-publish-and-gate | ship | U0, U2, U3, U4, U5, U6, U7, U8 |
 
 The linear critical path runs U1 then U2 then U3 then U4 then U5 then U6 then U7 then U8 then U9.
 U0 is a self-contained early milestone that can land at any point before U9 and is not on the U1-through-U9 activation path.
@@ -100,7 +100,7 @@ The plan's U1 Requirement tag deliberately excludes R12 and R15 through R20, whi
 
 ## Acceptance-example ownership
 
-Every acceptance example AE1 through AE43 is owned by at least one unit, and U9 re-runs the full AE1 through AE43 set as the final gate.
+Every acceptance example AE1 through AE45 is owned by at least one unit, and U9 re-runs the full AE1 through AE45 set as the final gate.
 AE16 is the existing-harness regression example that every unit re-verifies.
 
 | Unit | Acceptance examples |
@@ -110,15 +110,15 @@ AE16 is the existing-harness regression example that every unit re-verifies.
 | U2 | AE1, AE2, AE3, AE4, AE16, AE22 |
 | U3 | AE5, AE16, AE17, AE18, AE39, AE40, AE41 |
 | U4 | AE6, AE15, AE16, AE19, AE31, AE32, AE33 |
-| U5 | AE7, AE8, AE9, AE10, AE11, AE12, AE16, AE17, AE21, AE25, AE26, AE27, AE28, AE29, AE30 |
+| U5 | AE7, AE8, AE9, AE10, AE11, AE12, AE16, AE17, AE21, AE25, AE26, AE27, AE28, AE29, AE30, AE44, AE45 |
 | U6 | AE7, AE8, AE10, AE11, AE12, AE16, AE28, AE29 |
 | U7 | AE13, AE14, AE16, AE20, AE21, AE28, AE36, AE38, AE43 |
 | U8 | AE12, AE15, AE16, AE20, AE21, AE33, AE34, AE35, AE36 |
-| U9 | AE1 through AE43 (the full acceptance set) |
+| U9 | AE1 through AE45 (the full acceptance set) |
 
 ## Live-matrix ownership
 
-The plan's forty-one-row live verification matrix is produced by U1 as evidence and exercised across the units below, then re-run in full by U9.
+The plan's forty-three-row live verification matrix is produced by U1 as evidence and exercised across the units below, then re-run in full by U9.
 
 | Unit | Live-matrix scenarios |
 | --- | --- |
@@ -127,11 +127,11 @@ The plan's forty-one-row live verification matrix is produced by U1 as evidence 
 | U2 | Row 26 |
 | U3 | Rows 2, 17, 39, 40 |
 | U4 | Rows 6, 18, 19, 25, 30, 31, 32 |
-| U5 | Rows 5, 8, 9, 10, 11, 12, 13, 22, 23, 27, 28, 29, 36, 37, 38 |
+| U5 | Rows 5, 8, 9, 10, 11, 12, 13, 22, 23, 27, 28, 29, 36, 37, 38, 42, 43 (watcher continuity: successor before wake, typed restoration failure) |
 | U6 | Rows 1, 8, 9, 12, 13, 27, 28 |
-| U7 | Rows 14, 15, 20, 21, 22, 27, 35, 41 (Herdr workspace labels unchanged) |
+| U7 | Rows 14, 15, 20, 21, 22, 27, 35, 41 (landed Herdr workspace contract unchanged: Themis primary, Archon-<id> secondmate, per-project <Fleet display name>-Fleet worker) |
 | U8 | Rows 5, 24, 25, 32, 33, 34, 35 |
-| U9 | The full pre-merge live ledger, rows 1 through 41, with each corruption-sensitive row passing at least 20 consecutive runs |
+| U9 | The full pre-merge live ledger, rows 1 through 43, with each corruption-sensitive row passing at least 20 consecutive runs |
 
 ## Stop conditions
 
@@ -142,6 +142,7 @@ The plan's stop conditions bound every unit and are reproduced there in full; th
 - A named OMP launch must resolve the executable from a trusted absolute path, verify its provenance, and confirm a supported version before extensions load.
 - An OMP primary extension must resolve its own `FM_HOME` fail-closed and never fall back to the shared code root.
 - The turn-end guard must not recurse indefinitely or exhaust OMP continuations silently, and it may end loudly with a visible failure after its bounded allowance.
+- The OMP primary watcher must own the landed extension-driven watcher-continuity contract per `docs/watcher-continuity.md`, starting and verifying a singleton successor and rechecking session-lock ownership before delivering the wake, applying bounded exponential retry, and surfacing a typed continuity-restoration failure at the retry limit rather than a re-arm reminder.
 - The pre-merge live evidence must be sanitized of captured credentials before it is handed off and attached.
 - Existing Claude, Codex, OpenCode, Pi, and Grok behavior and tests must remain unchanged.
 
@@ -155,7 +156,7 @@ U9 attaches the artifact as durable validation evidence only after redaction has
 
 U9 declares OMP supported only after code, live evidence, documentation, and regressions agree.
 `omp` is added to verified adapter lists only after U0 through U8 acceptance and every required live row passes, with each corruption-sensitive row passing at least 20 consecutive runs.
-Targeted tests, repository lint, the no-mistakes pipeline, and CI must pass, and the final diff review must confirm no stale five-harness lists and no rename of the protected Herdr workspace labels, the primary workspace `Themis`, the secondmate workspaces `Archon-<secondmate-id>`, and `Atlas` reserved for agent and status branding.
+Targeted tests, repository lint, the no-mistakes pipeline, and CI must pass, and the final diff review must confirm no stale five-harness lists and no disturbance of the landed Herdr workspace contract, the primary supervisor workspace `Themis`, the secondmate supervisor workspaces `Archon-<secondmate-id>`, and the per-project ordinary-worker `<Fleet display name>-Fleet` workspaces resolved by `bin/fm-project-mode.sh --fleet`.
 Documentation may call OMP verified only when both CI and the pre-merge live ledger pass and redaction is confirmed.
 
 ## Authority

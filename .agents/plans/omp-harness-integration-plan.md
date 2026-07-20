@@ -121,13 +121,13 @@ API availability does not prove end-to-end supervision, so the implementation mu
 
 #### Primary supervision
 
-- R15. A primary OMP watcher bridge must own a single watcher child, inject one follow-up turn for each actionable wake, resolve `FM_HOME` fail-closed at extension load, and preserve firstmate-home isolation.
+- R15. A primary OMP watcher bridge must own extension-driven watcher continuity per the landed `docs/watcher-continuity.md` contract: keep one in-flight watcher child or scheduled retry, and after an actionable child close start and verify a singleton successor and recheck session-lock ownership before delivering the wake, apply bounded exponential retry, and deliver a typed continuity-restoration failure when restoration cannot succeed so the model is never left blind; it must resolve `FM_HOME` fail-closed at extension load and preserve firstmate-home isolation.
 - R16. A primary OMP turn-end guard must run the shared watcher and working-directory seatbelts before bash commands execute.
 - R17. When a primary turn would end without required supervision, the guard must request at most one bounded continuation for that failed stop attempt.
 - R18. Repeated missing-supervision states must surface as an explicit visible failure instead of consuming OMP's continuation allowance silently or recursing; once the bounded allowance is spent the turn may end loudly with that visible failure, which is a deliberate bounded relaxation of the "no primary turn ends blind while work is active" invariant, not an absolute guarantee that the turn never ends unsupervised.
-- R19. Extension load, watcher-child, message-delivery, pre-tool-checker-spawn, and cleanup failures must remain observable and fail visible; no catch path may silently succeed, silently terminate supervision, or silently let a forbidden command run.
+- R19. Extension load, watcher-child, message-delivery, pre-tool-checker-spawn, and cleanup failures must remain observable and fail visible as typed watcher failures recorded to the per-cycle exit log the landed watcher-continuity contract defines; no catch path may silently succeed, silently terminate supervision, or silently let a forbidden command run, and a failed follow-up delivery must never cancel continuity restoration.
 - R20. Primary extension markers must identify the loaded content version and process so startup can distinguish loaded, stale, and missing integrations; this self-written hash is a staleness and freshness diagnostic only and must not be treated as tamper integrity (see R37).
-- R36. An async wake-delivery failure that occurs while the primary is idle, with no live turn to receive a surfaced error, must be recorded to a durable out-of-band sink that the watcher or session start reads, so the failure is not silently dropped.
+- R36. An async wake-delivery failure that occurs while the primary is idle, with no live turn to receive a surfaced error, must be recorded to the durable per-cycle exit log the landed watcher-continuity contract defines, which the watcher or session start reads, and continuity restoration must proceed independently of whether the wake prompt delivered, so the failure is neither silently dropped nor able to cancel re-arm.
 - R37. The extension trust model must rest on path-pinning, restrictive permissions, and discovery disablement or isolation before any untrusted extension code executes, because an OMP or Pi extension's default export runs at import and a discovered augmenting handler that is merely rejected has already run; a real integrity guarantee, if claimed, requires a trusted out-of-band committed manifest, not the self-written hash.
 
 #### Liveness, control, and recovery
@@ -168,11 +168,11 @@ API availability does not prove end-to-end supervision, so the implementation mu
 
 #### F3. Supervise through OMP
 
-1. The primary watcher bridge starts one home-scoped watcher child.
-2. An actionable wake returns from the watcher.
-3. The extension sends a follow-up message through OMP's native messaging API.
-4. Idle delivery starts a turn; streaming delivery queues the follow-up.
-5. The primary handles the wake and rearms supervision without duplicate children.
+1. The primary watcher bridge keeps one in-flight home-scoped watcher child or scheduled retry.
+2. An actionable child close returns a wake reason.
+3. The extension starts and verifies a singleton successor and rechecks session-lock ownership before delivering the wake, applying bounded exponential retry.
+4. It then delivers the follow-up through OMP's native messaging API; idle delivery starts a turn and streaming delivery queues the follow-up.
+5. If restoration exhausts its retry limit, the extension delivers the wake with a typed continuity-restoration failure so the primary is never left blind.
 
 #### F4. Prevent a blind primary turn end
 
@@ -225,7 +225,7 @@ API availability does not prove end-to-end supervision, so the implementation mu
 - AE23. Given a login-shell command name beginning with `-` encountered during the harness-detection ancestry walk, when detection runs, then no `basename` option error occurs, mirroring AE4 for the detection site as well as the lock site.
 - AE24. Given the early detection-correctness milestone has landed, when an OMP primary starts, then it is detected as `omp` and the `basename` crash is gone, while `omp` is absent from every first-class supervision allowlist and no OMP supervision block is emitted.
 - AE25. Given an OMP primary extension that loads with `FM_HOME` unset, when it resolves markers, lock, and wake-delivery paths, then it refuses and reports rather than silently resolving them against the shared code root.
-- AE26. Given an idle OMP primary whose watcher follow-up delivery fails, when the failure occurs, then it is recorded to the durable out-of-band sink and surfaced, never silently dropped.
+- AE26. Given an idle OMP primary whose watcher follow-up delivery fails, when the failure occurs, then it is recorded to the durable per-cycle exit log the landed watcher-continuity contract defines and surfaced, never silently dropped, and continuity restoration proceeds regardless of the delivery failure.
 - AE27. Given the pre-tool checker cannot spawn, when OMP invokes a forbidden bash command, then execution is blocked or the checker-spawn failure surfaces, and the forbidden command never runs silently.
 - AE28. Given two actionable wakes with a full handle-and-rearm between them, when both are delivered, then each is handled exactly once and supervision remains armed after the second.
 - AE29. Given an actionable wake that arrives immediately after a stop continuation, when it is delivered, then per-cycle continuation state has reset and the wake is handled exactly once.
@@ -242,7 +242,9 @@ API availability does not prove end-to-end supervision, so the implementation mu
 - AE40. Given a live OMP secondmate launch, when it starts, then the effective model, reasoning level, approval policy, extension paths, and submitted charter match the intended values, confirmed live rather than by fixture alone.
 - AE41. Given a firstmate-launched OMP worker or secondmate whose environment is constructed from a cleared base, when a full environment diff is taken, then only the role-needed credentials and required runtime variables are present and every inherited ambient secret, including the X-mode pairing token and GitHub tokens, is absent from the environment, argv, and generated extensions.
 - AE42. Given the pre-merge live evidence, when it is prepared for handoff and attachment, then credential-bearing argv and captured environment values are redacted to variable names, and unredacted evidence is never attached to the validation run.
-- AE43. Given the OMP integration, when the Herdr workspace labels are checked, then the primary workspace remains `Themis`, secondmate workspaces remain `Archon-<secondmate-id>`, and `Atlas` remains reserved for agent and status branding, all unchanged by OMP.
+- AE43. Given the OMP integration, when the Herdr workspace labels are checked, then the primary supervisor workspace remains `Themis`, secondmate supervisor workspaces remain `Archon-<secondmate-id>` and fail closed to a bare `Archon`, and an ordinary OMP worker still lands in its project's per-project `<Fleet display name>-Fleet` workspace resolved by `bin/fm-project-mode.sh --fleet`, all unchanged by OMP.
+- AE44. Given an actionable OMP watcher child close, when continuity restores, then the extension starts and verifies a singleton successor watcher and rechecks session-lock ownership before delivering the wake, and keeps at most one in-flight child or scheduled retry.
+- AE45. Given successor-arm restoration that fails up to the bounded retry limit, when continuity cannot be restored, then the extension delivers the original wake with a typed continuity-restoration failure and never leaves the primary blind.
 
 ### Success Criteria
 
@@ -301,6 +303,7 @@ API availability does not prove end-to-end supervision, so the implementation mu
 - Existing launch integration: `bin/fm-spawn.sh`
 - Existing Pi-family primary extensions: `.pi/extensions/fm-primary-pi-watch.ts`, `.pi/extensions/fm-primary-turnend-guard.ts`
 - Existing Pi supervision contract: `docs/supervision-protocols/pi.md`
+- Landed watcher-continuity contract: `docs/watcher-continuity.md`
 
 ---
 
@@ -328,8 +331,8 @@ API availability does not prove end-to-end supervision, so the implementation mu
   OMP's finite continuation allowance cannot become an implicit retry loop; when the allowance is spent the turn ends loudly with a visible failure, which is a deliberate bounded relaxation of the no-blind-end invariant, not its preservation.
 - KTD9. Use native events first, process liveness second, and TUI parsing last.
   Busy/composer parsing remains a fallback for supervision states that lifecycle hooks cannot represent.
-- KTD10. Fail visibly on extension load, child-process, wake-delivery, pre-tool-checker-spawn, and cleanup errors.
-  The Pi reference extensions fail open on exactly these paths, so OMP must implement its own fail-visible handling rather than porting the Pi behavior, and an async wake-delivery failure that occurs while idle is routed to a durable out-of-band sink because no live turn exists to receive a surfaced error.
+- KTD10. Fail visibly on extension load, child-process, wake-delivery, pre-tool-checker-spawn, and cleanup errors, and match the landed watcher-continuity contract rather than porting an outdated fail-open reference.
+  The landed Pi and OpenCode references now own extension-driven continuity, starting and verifying a singleton successor before delivering the wake, rechecking session-lock ownership, applying bounded exponential retry, and delivering a typed continuity-restoration failure, so OMP must implement that same contract per `docs/watcher-continuity.md` rather than a shallow one-follow-up port; failures surface as typed watcher failures recorded to the per-cycle exit log, and an idle async wake-delivery failure never cancels continuity restoration.
   Safety-critical paths may degrade to an explicit blocked or failed state, never silent success.
 - KTD11. Preserve all existing harness behavior through additive adapter branches and regression tests.
   Shared extraction is allowed only when current adapters remain byte-for-behavior equivalent under their test suites, and any extracted Pi-family helper gets a dedicated behavioral fixture because the existing Pi suites assert only entrypoint wiring and would not catch a regression inside a shared helper.
@@ -407,7 +410,7 @@ Spawn passes the generated file through OMP's explicit extension flag with ambie
 
 Store tracked OMP primary sources under `bin/omp-extensions/`, outside ambient OMP discovery roots, and load them through absolute firstmate-controlled paths.
 Each extension resolves `FM_HOME` fail-closed at load and refuses to fall back to the shared code root, mirroring the fail-closed guard `bin/fm-send.sh` already applies.
-The watcher extension owns one home-scoped child and uses the native follow-up mode proven by U1, failing visibly rather than porting the Pi reference's fail-open handling, and routing an async wake-delivery failure that occurs while idle to a durable out-of-band sink the watcher or session start reads.
+The watcher extension owns extension-driven continuity per `docs/watcher-continuity.md`: it keeps one in-flight child or scheduled retry, and after an actionable child close it starts and verifies a singleton successor and rechecks session-lock ownership before delivering the wake through the native follow-up mode proven by U1, applies bounded exponential retry, appends a per-cycle exit record, and delivers a typed continuity-restoration failure if restoration exhausts its retries, so the fleet is protected before the model handles the wake yet the model is never left blind.
 The guard invokes existing shell predicates, blocks unsafe bash calls, treats a pre-tool checker that cannot spawn as a visible failure rather than an allowed command, writes a staleness marker (not a tamper-integrity control), and enforces one bounded stop continuation only after U1 proves the required contracts.
 The trust weight rests on path-pinning, restrictive permissions, and discovery disablement or isolation, not on the self-written hash.
 
@@ -449,8 +452,8 @@ Session startup validates tracked primary-extension versions, loaded PIDs, and s
   Mitigation: land the scrub and nearest-ancestry rule in the same early milestone as the precedence fix, never precedence alone.
 - **In-process extension compromise:** unattended OMP extensions execute with agent privileges, and the self-written hash detects staleness, not tampering.
   Mitigation: path-pinning, restrictive permissions on generated and tracked extensions, discovery disablement or isolation before any code executes, executable provenance, and a trusted committed manifest if real integrity is claimed.
-- **Fail-open reference trap:** the Pi reference extensions fail open on wake-delivery, child-spawn, and checker-spawn errors, so a faithful port would silently violate the fail-visible contract.
-  Mitigation: U5 inverts the error handling, adds a durable out-of-band sink for idle async wake-delivery failure, and fixtures assert each failure surfaces rather than fails open.
+- **Watcher-continuity parity:** the landed Pi and OpenCode references own extension-driven continuity, so a shallow port that only delivers one follow-up per wake would silently drop the successor-before-wake, lock-recheck, bounded-retry, and typed-failure contract.
+  Mitigation: U5 implements the same landed watcher-continuity contract per `docs/watcher-continuity.md`, with fixtures that block prompt delivery to prove the successor launches first, prove single-flight and lock-recheck, and hang a successor to prove the typed continuity-restoration failure is delivered.
 - **Finite stop continuations:** repeated guard continuations can exhaust OMP's allowance.
   Mitigation: one continuation per failed attempt, an explicit loud failure at the limit, and a row that drives the allowance to its real limit rather than stopping at depth two.
 - **Duplicate lifecycle handlers:** explicit loading plus discovery may register the same extension twice, and a net-new discovered handler never touches the single load marker.
@@ -533,7 +536,7 @@ U0 deliberately fixes misdetection and the crash without crossing that line.
 
 **Goal:** Replace remaining OMP assumptions with dated, reproducible observations before permanent policy is written.
 
-**Requirements:** R6, R8, R11, R13, R14, R21-R24, R33, R38 (the OMP primitives underlying the supervision requirements; the firstmate guarantees R12 and R15-R20 are proven by U4-U8, not observable in the spike)
+**Requirements:** R6, R8, R11, R13, R14, R21-R24, R33, R38, R39 (the OMP primitives underlying the supervision requirements plus the sanitized evidence artifact U1 produces under R39's redaction discipline; the firstmate guarantees R12 and R15-R20 are proven by U4-U8, not observable in the spike)
 
 **Files:**
 
@@ -686,7 +689,7 @@ U0 deliberately fixes misdetection and the crash without crossing that line.
 
 ### U5. Implement hardened OMP primary extensions
 
-**Goal:** Give primary OMP sessions native watcher delivery, pre-tool blocking, bounded turn-end enforcement, fail-visible error handling, and fail-closed home resolution.
+**Goal:** Give primary OMP sessions native watcher delivery with extension-owned continuity, pre-tool blocking, bounded turn-end enforcement, fail-visible error handling, and fail-closed home resolution.
 
 **Requirements:** R15-R20, R24, R36, R37, R30
 
@@ -707,14 +710,15 @@ U0 deliberately fixes misdetection and the crash without crossing that line.
 - Bind only the stop, pre-tool, and follow-up API contracts proven by U1.
 - Load both primary extensions through absolute firstmate-controlled paths outside ambient OMP discovery roots, with ambient discovery disabled or isolated rather than rejected after import.
 - Resolve `FM_HOME` fail-closed at extension load, refusing to fall back to the shared code root, mirroring the guard `bin/fm-send.sh` applies.
-- Preserve one-child watcher ownership, lock ownership, home scoping, staleness markers that are not treated as integrity, and process-exit cleanup.
+- Preserve one in-flight watcher child or scheduled retry, lock ownership, home scoping, staleness markers that are not treated as integrity, and process-exit cleanup.
 - Deliver actionable wakes through the verified native follow-up mode for both idle and streaming states.
-- Invert the Pi reference's fail-open handling so wake-delivery, child, and checker failures fail visible, and route an async wake-delivery failure that occurs while idle to a durable out-of-band sink the watcher or session start reads.
+- Implement the landed watcher-continuity contract per `docs/watcher-continuity.md`: after an actionable child close, start and verify a singleton successor and recheck session-lock ownership before delivering the wake, apply bounded exponential retry, append a per-cycle exit record, and deliver a typed continuity-restoration failure when restoration exhausts its retries, so the successor launches before the wake and the model is never left blind.
+- Surface wake-delivery, child, and checker failures as typed watcher failures rather than porting a fail-open reference, and ensure a failed follow-up delivery never cancels continuity restoration.
 - Invoke the shared arm and working-directory predicates before bash execution and return OMP's verified block result; treat a pre-tool checker that cannot spawn as a visible failure, never as an allowed command.
 - Track one continuation per failed stop attempt, drive the allowance to its real limit, reset per-cycle state so a wake immediately after a continuation is handled exactly once, and surface repeated failure loudly without recursion.
 - Handle child `error`, child `close`, message-delivery rejection, registration failure, and cleanup failure explicitly.
 
-**Test scenarios:** AE7-AE12, AE17, AE21, AE25-AE30, AE16
+**Test scenarios:** AE7-AE12, AE17, AE21, AE25-AE30, AE44, AE45, AE16
 
 **Verification:**
 
@@ -725,7 +729,8 @@ U0 deliberately fixes misdetection and the crash without crossing that line.
 - `bash tests/fm-turnend-guard.test.sh`
 - Double-load and stale-marker recovery fixtures prove one registered handler set, one watcher PID, and one wake per event.
 - A rearm race after child `error` or `close` never leaves two watcher children.
-- Fixtures prove a wake-delivery failure, a child-spawn failure, and a pre-tool-checker-spawn failure each surface rather than fail open, and that an idle async wake-delivery failure lands in the out-of-band sink.
+- A continuity fixture blocks prompt delivery to prove the singleton successor launches and session-lock ownership is rechecked before the wake, proves single-flight, changes the session lock before close to prove ownership is rechecked, and hangs each successor arm to prove the bounded fallback delivers the typed continuity-restoration failure.
+- Fixtures prove a wake-delivery failure, a child-spawn failure, and a pre-tool-checker-spawn failure each surface as typed watcher failures rather than failing open, that a failed follow-up never cancels continuity restoration, and that an idle async wake-delivery failure is recorded to the per-cycle exit log.
 - A fixture proves the extension refuses to resolve against the shared code root when `FM_HOME` is unset.
 - Streaming delivery queues one follow-up without interrupting active output.
 
@@ -751,7 +756,8 @@ U0 deliberately fixes misdetection and the crash without crossing that line.
 - Add OMP content-version and PID markers separate from Pi markers, treated as staleness diagnostics, not integrity.
 - Diagnose missing, stale-version, and dead-process markers with OMP-specific recovery text.
 - Add `omp` to the supervision-instructions allowlist and emit an OMP supervision block that uses the native watcher tool or command verified by U1, honoring the rollout constraint that detection-activation never precedes the guard extension.
-- Document the one-continuation guard, its explicit loud-failure state after the allowance is spent, and the out-of-band async-failure sink.
+- Document the one-continuation turn-end guard and its explicit loud-failure state after the allowance is spent.
+- Document the extension-owned watcher-continuity contract in the OMP operating block, matching `docs/watcher-continuity.md` and the landed `pi.md` shape: the successor launches and is verified before the wake, continuity is extension-owned rather than model-memory-owned, and an exhausted retry surfaces a typed continuity-restoration failure rather than a re-arm reminder.
 - State the explicit captain-facing primary launch contract in `docs/supervision-protocols/omp.md`, because OMP loads the tracked primary extensions from `bin/omp-extensions/` outside its discovery roots with discovery disabled, so unlike Pi there is no plain-launch auto-discovery fallback and the captain must launch the primary with explicit extension flags for both primary extensions.
 - Keep other harness operating blocks unchanged.
 
@@ -786,6 +792,7 @@ U0 deliberately fixes misdetection and the crash without crossing that line.
 **Approach:**
 
 - Consume U1's Herdr hosting and classification pre-verification; if Herdr cannot host or classify an OMP or Bun agent, treat it as a blocker or the explicitly staged tmux-first deferral rather than proceeding to parity.
+- Route OMP spawns through the landed per-project Herdr workspace contract without change: an ordinary OMP worker lands in its project's `<Fleet display name>-Fleet` workspace resolved by `bin/fm-project-mode.sh --fleet`, an OMP secondmate in `Archon-<secondmate-id>`, and an OMP primary supervisor is `Themis`, so two OMP workers for the same project share one workspace and two projects never share one.
 - Extend process-liveness detection with the OMP and wrapper ancestry observed in U1, adding an ancestry rule that distinguishes a live OMP wrapper from a dead one because the tmux probe reads only the foreground command name.
 - Add minimal busy and idle patterns from normalized captures only where native lifecycle state is insufficient.
 - Codify verified interrupt, exit, resume, and submission behavior in the harness adapter.
@@ -805,7 +812,7 @@ U0 deliberately fixes misdetection and the crash without crossing that line.
 - The live E2E covers generating, idle, interrupt, exit, resume, routed work, two consecutive response wakes with a rearm between them, and sole secondmate ownership through forced recovery.
 - A confident-dead scenario proves a genuinely dead Bun or Node-presenting secondmate is respawned exactly once.
 - A two-home E2E under the production shared-code-root topology proves task completion and watcher wakes remain scoped to the originating home and each extension resolved its own `FM_HOME`.
-- A Herdr regression check proves the OMP work leaves the protected workspace labels unchanged, with the primary workspace `Themis`, secondmate workspaces `Archon-<secondmate-id>`, and `Atlas` reserved for agent and status branding.
+- A Herdr regression check proves the OMP work leaves the landed workspace contract unchanged, with the primary supervisor workspace `Themis`, secondmate supervisor workspaces `Archon-<secondmate-id>` failing closed to a bare `Archon`, and ordinary OMP workers landing in the per-project `<Fleet display name>-Fleet` workspace.
 
 **Dependencies:** U1, U3, U5, U6
 
@@ -876,9 +883,9 @@ U0 deliberately fixes misdetection and the crash without crossing that line.
 - Attach that sanitized artifact as durable validation evidence and document the verified OMP version scope.
 - Pin or fixture the OMP extension typings used by CI so type checks are reproducible without pretending CI executed the live matrix.
 - Run targeted tests, repository lint, the no-mistakes pipeline, and CI.
-- Review the final diff for stale five-harness lists, Pi aliases, ambient-discovery paths, generated artifacts, and unverified claims, and confirm the clean-cutover did not rename the protected Herdr workspace labels, the primary workspace `Themis`, the secondmate workspaces `Archon-<secondmate-id>`, and `Atlas` reserved for agent and status branding, which are unrelated repo terminology.
+- Review the final diff for stale five-harness lists, Pi aliases, ambient-discovery paths, generated artifacts, and unverified claims, and confirm the clean-cutover did not disturb the landed Herdr workspace contract, the primary supervisor workspace `Themis`, the secondmate supervisor workspaces `Archon-<secondmate-id>`, and the per-project ordinary-worker `<Fleet display name>-Fleet` workspaces, which are unrelated repo terminology.
 
-**Test scenarios:** AE1-AE43
+**Test scenarios:** AE1-AE45
 
 **Verification:**
 
@@ -904,7 +911,7 @@ U0 deliberately fixes misdetection and the crash without crossing that line.
 - The attached pre-merge live ledger passes independently of CI.
 - Repository no-mistakes validation and CI pass.
 
-**Dependencies:** U2-U8
+**Dependencies:** U0, U2-U8
 
 ---
 
@@ -915,10 +922,10 @@ U0 deliberately fixes misdetection and the crash without crossing that line.
 - Detection tests cover OMP marker precedence, nearest-ancestry authority over an inherited `OMPCODE`, a non-OMP child of an OMP primary detecting as its own harness for Claude, Codex, and Grok, ancestry fallback, unknown harness rejection, the early-milestone absence of `omp` from the supervision allowlist, and regression behavior for every existing harness.
 - Lock and detection tests cover OMP ancestry and option-safe executable-name handling at both `basename` sites.
 - Launch tests assert argument vectors for task and secondmate roles across model, effort, approval, extension, and brief substitutions, and cover executable-provenance and supported-version rejection and the role-scoped environment allowlist.
-- Extension tests cover load markers as staleness diagnostics, exactly-once registration, tool blocking, a pre-tool checker that cannot spawn, bounded stop continuation driven to the allowance limit, child failure, wake-delivery failure surfaced rather than fail-open, the idle async out-of-band sink, a fail-closed `FM_HOME` guard, generated-worker permissions and integrity, and cleanup.
+- Extension tests cover load markers as staleness diagnostics, exactly-once registration, tool blocking, a pre-tool checker that cannot spawn, bounded stop continuation driven to the allowance limit, watcher continuity with a successor launched and verified before the wake and a typed continuity-restoration failure at the retry limit, child failure, wake-delivery failure surfaced rather than fail-open, the idle async failure recorded to the per-cycle exit log, a fail-closed `FM_HOME` guard, generated-worker permissions and integrity, and cleanup.
 - Teardown tests cover top-level tasks and nested secondmate children, editing both hardcoded removal lists.
 - Type tests compile tracked OMP extensions against the installed OMP package namespace.
-- A Herdr regression test asserts the OMP integration leaves the protected workspace labels unchanged, with the primary workspace `Themis`, secondmate workspaces `Archon-<secondmate-id>`, and `Atlas` reserved for agent and status branding.
+- A Herdr regression test asserts the OMP integration leaves the landed workspace contract unchanged, with the primary supervisor workspace `Themis`, secondmate supervisor workspaces `Archon-<secondmate-id>` failing closed to a bare `Archon`, and per-project ordinary-worker `<Fleet display name>-Fleet` workspaces resolved by `bin/fm-project-mode.sh --fleet`.
 
 ### Live verification matrix
 
@@ -959,12 +966,14 @@ The final pre-merge live ledger must record the OMP version and run all required
 33. Primary-restart recovery preserves identity, one live owner, one watcher child, and no duplicate wake.
 34. Worker-exit recovery reconciles ownership and state with no duplicate owner and no lost state.
 35. Secondmate-restart recovery confidently classifies a dead Bun or Node-presenting owner and respawns it exactly once.
-36. An idle async wake-delivery failure lands in the durable out-of-band sink and is surfaced.
+36. An idle async wake-delivery failure lands in the durable per-cycle exit log and is surfaced, and continuity restoration proceeds regardless.
 37. A pre-tool checker that cannot spawn blocks or surfaces rather than allowing the forbidden command.
 38. `FM_HOME` unset at extension load is refused rather than resolved against the shared code root.
 39. A PATH-hijacked, wrong-permission, or out-of-supported-range `omp` is rejected before extensions load for a firstmate-launched role, and that role's environment, built from a cleared base, carries only role-needed credentials with inherited ambient secrets absent.
 40. A live OMP secondmate launch confirms model, reasoning level, approval policy, extension paths, and charter.
-41. The OMP integration leaves the protected Herdr workspace labels unchanged, with the primary workspace `Themis`, secondmate workspaces `Archon-<secondmate-id>`, and `Atlas` reserved for agent and status branding.
+41. The OMP integration leaves the landed Herdr workspace contract unchanged, with the primary supervisor workspace `Themis`, secondmate supervisor workspaces `Archon-<secondmate-id>` failing closed to a bare `Archon`, and per-project ordinary-worker `<Fleet display name>-Fleet` workspaces.
+42. After an actionable watcher child close, the extension starts and verifies a singleton successor and rechecks session-lock ownership before the wake is delivered, keeping one in-flight child or scheduled retry.
+43. Successor restoration driven to the bounded retry limit delivers the wake with a typed continuity-restoration failure and never leaves the primary blind.
 
 Each corruption-sensitive row (exactly-once completion in rows 6 and 30, no-duplicate wake in rows 12, 13, 23, 27, and 28, and streaming-queue in row 13) must pass at least 20 consecutive runs, or a higher count tied to a stated statistical-confidence target, because a single flaky pass is a genuine observation that would otherwise clear the anti-vacuous gate; a bare "more than once" floor is too weak for a race and leaves the bar executor-discretionary and unverifiable by a reviewer.
 
@@ -1011,7 +1020,7 @@ From an isolated OMP session:
 - Mixed Claude, Codex, and Grok workers and secondmates run under an OMP primary and each retains its own identity and supervision policy.
 - Primary sessions, task workers, and secondmates run through the verified OMP launch path; investigations use the same verified task-worker path.
 - Native OMP lifecycle events drive completion and primary supervision, with a per-turn completion binding and detectable drops.
-- Turn-end recovery is bounded, failure is visible and loud after the allowance is spent rather than silent or recursive, and an idle async wake-delivery failure is captured to the out-of-band sink.
+- Turn-end recovery is bounded, failure is visible and loud after the allowance is spent rather than silent or recursive, and the primary watcher owns the landed continuity contract, starting and verifying a singleton successor before the wake, applying bounded exponential retry, and recording an idle async wake-delivery failure to the per-cycle exit log.
 - The extension trust model rests on path-pinning, restrictive permissions, and discovery disablement or isolation; the self-written hash is a staleness diagnostic, not integrity; the named launch enforces executable provenance, a supported-version gate, and a role-scoped environment; and duplicate-load behavior and cleanup meet the trust contract.
 - Home isolation is fail-closed: an OMP extension refuses to resolve against the shared code root when `FM_HOME` is unset, and two homes sharing one code root do not cross signals.
 - tmux and Herdr worker and primary live scenarios pass, after U1 pre-verified that Herdr can host and classify an OMP or Bun agent, with confident-dead respawn across the R26 recovery modes.
@@ -1019,7 +1028,7 @@ From an isolated OMP session:
 - Documentation contains only live-verified claims with dated OMP version evidence, and each corruption-sensitive claim passed N consecutive runs.
 - The single sanitized durable live-evidence artifact is redacted, handed off, and attached, and no unredacted credential appears in it.
 - Targeted tests, lint, no-mistakes validation, and CI pass.
-- Dead-end spike code, temporary profiles, captured secrets, generated extensions, scratch state, and abandoned adapter variants are absent from the final diff, and the clean-cutover did not rename the protected Herdr workspace labels, the primary workspace `Themis`, the secondmate workspaces `Archon-<secondmate-id>`, and `Atlas` reserved for agent and status branding.
+- Dead-end spike code, temporary profiles, captured secrets, generated extensions, scratch state, and abandoned adapter variants are absent from the final diff, and the clean-cutover did not disturb the landed Herdr workspace contract, the primary supervisor workspace `Themis`, the secondmate supervisor workspaces `Archon-<secondmate-id>`, and the per-project ordinary-worker `<Fleet display name>-Fleet` workspaces.
 
 ### Per-unit completion criteria
 
@@ -1028,7 +1037,7 @@ From an isolated OMP session:
 - U2 is done when OMP identity is complete across every validator and configuration surface on top of U0's early fix, under dual markers, nearest-ancestry authority, ancestry fallback, and option-like command names.
 - U3 is done when task and secondmate launches preserve the intended model, effort, approval, extensions, and brief, and enforce executable provenance, a supported-version gate, and a role-scoped environment.
 - U4 is done when worker completion emits one signal per completed turn with per-turn binding, the generated extension is permission-locked and integrity-checked, hostile-checkout augmentation is prevented, and cleanup is proven.
-- U5 is done when watcher delivery, pre-tool blocking, bounded turn-end enforcement, fail-visible error handling, the idle async sink, and the fail-closed `FM_HOME` guard pass fixture and live tests, including consecutive wakes and a wake after a continuation.
+- U5 is done when watcher delivery with extension-owned continuity (successor-before-wake, lock-recheck, bounded exponential retry, typed continuity-restoration failure), pre-tool blocking, bounded turn-end enforcement, fail-visible error handling, the per-cycle exit log, and the fail-closed `FM_HOME` guard pass fixture and live tests, including consecutive wakes and a wake after a continuation.
 - U6 is done when startup diagnostics and supervision instructions prove the correct OMP extensions are loaded and usable, `omp` is added to the supervision allowlist only alongside its guard extension, and two consecutive live wakes with a rearm pass.
 - U7 is done when tmux and Herdr classify and control OMP sessions correctly, including a live-versus-dead wrapper distinction and confident-dead respawn, with two-home isolation proven under the production shared-code-root topology.
 - U8 is done when stale-marker recovery, all four R26 recovery modes, and teardown leave one valid primary integration and no task-owned residue.
