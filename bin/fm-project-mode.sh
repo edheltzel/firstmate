@@ -3,8 +3,15 @@
 # data/projects.md registry. This is the single authoritative parser of the
 # registry line format; other scripts call it rather than re-parsing the line.
 #
-#   fm-project-mode.sh <project-name>            -> "<mode> <yolo>"
-#   fm-project-mode.sh --fleet <project-name>    -> "<fleet-display-name>"
+#   fm-project-mode.sh <project-key>                     -> "<mode> <yolo>"
+#   fm-project-mode.sh --fleet <project-key> [<default>] -> "<fleet-display-name>"
+#
+# <project-key> is the registry KEY (the first field of a registry line), which
+# is the single canonical project identity. It is NOT necessarily the repository
+# directory basename: a project can be registered under a key that differs from
+# its clone directory name (e.g. the firstmate repo itself registered as
+# "Agent-Themis" while its checkout basename is "Firstmate"). Callers pass the
+# key, not a guessed-from-path name, so mode and Fleet resolution agree.
 #
 # Registry line format (data/projects.md):
 #   - <name> - <desc> (added <date>)                          -> no-mistakes off, fleet=<name>
@@ -20,10 +27,19 @@
 # and the herdr backend uses it verbatim as the "<Display>-Fleet" workspace label
 # (docs/herdr-backend.md "Fleet workspaces").
 #
-# Fleet display name = the configured fleet=<Display> alias if present, else the
-# project name itself (the repository name). This is the single authoritative
-# source of the Fleet display name; the herdr backend derives the ordinary-worker
-# workspace label "<fleet-display-name>-Fleet" from it (bin/backends/herdr.sh).
+# Fleet display name = the configured fleet=<Display> alias on the key's entry if
+# present, else the caller-supplied <default> (the repository basename), else the
+# key itself when no <default> is given. Keeping the display DEFAULT separate from
+# the lookup KEY is what lets a key that differs from the repository basename
+# resolve its mode correctly WITHOUT renaming the workspace: a delivery-identity
+# key such as "Agent-Themis" must not turn a "Firstmate-Fleet" workspace into
+# "Agent-Themis-Fleet". Only an explicit fleet=<Display> alias renames it. This is
+# the single authoritative source of the Fleet display name; the herdr backend
+# derives the ordinary-worker workspace label "<fleet-display-name>-Fleet" from it
+# (bin/backends/herdr.sh), passing the canonical key and the basename default.
+# A single-argument "--fleet <name>" call is still valid and unchanged: with no
+# <default>, the name serves as both key and display default (the case where the
+# registry key and the repository basename are the same).
 #
 # mode = how a finished change reaches main:
 #   no-mistakes  full pipeline -> PR -> captain merge (default)
@@ -50,11 +66,15 @@ if [ "${1:-}" = "--fleet" ]; then
   WANT=fleet
   shift
 fi
-NAME=${1:?usage: fm-project-mode.sh [--fleet] <project-name>}
+NAME=${1:?usage: fm-project-mode.sh [--fleet] <project-key> [<default-display>]}
+# The Fleet display DEFAULT (used only when the key's entry carries no fleet=
+# alias). Defaults to the key itself so a single-argument --fleet call keeps its
+# prior behavior. Unused in mode mode.
+FLEET_DEFAULT=${2:-$NAME}
 
 if [ ! -f "$REG" ]; then
   if [ "$WANT" = fleet ]; then
-    printf '%s\n' "$NAME"
+    printf '%s\n' "$FLEET_DEFAULT"
   else
     echo "warn: no registry at $REG; defaulting $NAME to no-mistakes off" >&2
     echo "no-mistakes off"
@@ -84,8 +104,8 @@ parsed=$(awk -v n="$NAME" '
 
 if [ -z "$parsed" ]; then
   if [ "$WANT" = fleet ]; then
-    echo "warn: project \"$NAME\" not in registry; Fleet name defaults to \"$NAME\"" >&2
-    printf '%s\n' "$NAME"
+    echo "warn: project \"$NAME\" not in registry; Fleet name defaults to \"$FLEET_DEFAULT\"" >&2
+    printf '%s\n' "$FLEET_DEFAULT"
   else
     echo "warn: project \"$NAME\" not in registry; defaulting to no-mistakes off" >&2
     echo "no-mistakes off"
@@ -102,7 +122,7 @@ if [ "$WANT" = fleet ]; then
   if [ -n "$fleet" ]; then
     printf '%s\n' "$fleet"
   else
-    printf '%s\n' "$NAME"
+    printf '%s\n' "$FLEET_DEFAULT"
   fi
   exit 0
 fi

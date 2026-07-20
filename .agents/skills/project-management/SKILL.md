@@ -26,6 +26,14 @@ Resolve the project name, destination, delivery mode, and autonomy posture befor
 Keep a newly added clone and its registry entry consistent, and roll back only artifacts created by the incomplete operation when a later initialization step fails and that rollback is safe.
 Do not overwrite or repurpose an existing path.
 
+The registry KEY (the first field of a registry line) is the project's single canonical identity, and it is NOT always the clone-directory basename.
+A project can be registered under a key that differs from its checkout directory name - most notably the firstmate repo itself, registered as `Agent-Themis` while its checkout basename is `Firstmate`.
+When they differ, that key must reach the whole spawn, or the delivery mode and Fleet workspace silently fall back to the basename and drop to `no-mistakes`.
+This is propagated deterministically, not by a second manual pass: name the canonical key once as `bin/fm-brief.sh`'s repo-name argument, and it persists to `data/<task-id>/project-key`, which `bin/fm-spawn.sh` reads as the default identity for the delivery-mode lookup and the herdr Fleet-label lookup, so the brief and the spawn always resolve one identity and cannot drift.
+`bin/fm-spawn.sh --project-key <key>` is the explicit override for a spawn that is not driven by such a brief.
+When the key equals the basename (the common case for clones under `projects/`), nothing extra is needed because the basename fallback is already correct.
+The basename remains the Fleet display default: a differing key never renames a `<basename>-Fleet` workspace unless the registry entry carries an explicit `fleet=<Display>` alias.
+
 ## Delivery posture
 
 Choose the delivery mode when adding or creating the project:

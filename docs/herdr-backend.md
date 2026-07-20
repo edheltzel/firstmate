@@ -70,9 +70,9 @@ So a captain watching one herdr session sees each project as a clearly labeled, 
 
 ### Label derivation (from the spawn kind and the project)
 
-`fm_backend_herdr_workspace_label <kind> <project-abs>` (`bin/backends/herdr.sh`) is the single owner of the workspace name, resolved from the spawn KIND and the project path - never from `$FM_HOME` - so the resolution is identical for creation, reuse, respawn, and recovery:
+`fm_backend_herdr_workspace_label <kind> <project-abs> [<project-key>]` (`bin/backends/herdr.sh`) is the single owner of the workspace name, resolved from the spawn KIND and the project path - never from `$FM_HOME` - so the resolution is identical for creation, reuse, respawn, and recovery:
 
-- An ordinary worker (kind `ship` or `scout`) resolves to `<Fleet display name>-Fleet`. The Fleet display name is the configured `fleet=<Display>` alias for `basename(<project-abs>)` in `data/projects.md`, or by default that repository name itself, resolved through `bin/fm-project-mode.sh --fleet` - the single registry parser, so delivery-mode and Fleet resolution can never disagree about which project a spawn is for. Examples: `Echo` -> `Echo-Fleet`; `atlas-config [... fleet=Atlas]` -> `Atlas-Fleet`.
+- An ordinary worker (kind `ship` or `scout`) resolves to `<Fleet display name>-Fleet`. The Fleet display name is resolved through `bin/fm-project-mode.sh --fleet <key> <basename-default>` - the single registry parser - which returns the `fleet=<Display>` alias on the canonical project KEY's entry in `data/projects.md`, else the repository basename default. The canonical key is the optional third argument (the same identity `fm-spawn.sh` uses for the delivery-mode lookup, from `--project-key` or the basename), so delivery-mode and Fleet resolution can never disagree about which project a spawn is for; it defaults to the basename when a caller passes only `<project-abs>`. The basename stays the display default, so a key that differs from it (e.g. `Agent-Themis` for the `Firstmate` checkout) never renames the workspace unless the registry carries an explicit `fleet=` alias. Examples: `Echo` -> `Echo-Fleet`; `atlas-config [... fleet=Atlas]` -> `Atlas-Fleet`; `Agent-Themis` at `.../Firstmate` -> `Firstmate-Fleet`.
 - The persistent SECONDMATE agent (kind `secondmate`) resolves to `Archon-<secondmate-id>`, read from the `.fm-secondmate-home` marker at `<project-abs>` (the secondmate's own home); an empty or unreadable marker fails closed to the bare `Archon` supervisor label, never a worker/Fleet label. `bin/fm-home-seed.sh` writes the marker at seed time with exactly that secondmate's id.
 
 Because the label derives from the project basename (the project clone, never the per-task treehouse worktree path) and the kind, it is deterministic and stable across every respawn, recovery, and firstmate restart, with no extra bookkeeping.
@@ -626,7 +626,7 @@ A home that already had a live `Atlas` (or `Themis-<secondmate-id>`) workspace b
 The captain's current contract keys the ordinary WORKER workspace to the PROJECT, not the spawning home: an ordinary worker (ship or scout) lands in its project's `<Fleet display name>-Fleet` workspace, where the Fleet display name is the project's configured `fleet=<Display>` alias in `data/projects.md` or, by default, its repository name.
 This supersedes the home-keyed worker labels from all three dated subsections above (the primary saw `Atlas` on `main`, which is why an Echo scout was created as an `Atlas` workspace).
 `Themis` remains the primary supervisor identity and `Archon-<secondmate-id>` the persistent secondmate identity; neither is a worker label, and the secondmate `Archon-<id>` workspace is unchanged.
-Resolution moved into the single `fm_backend_herdr_workspace_label <kind> <project-abs>`, with the resolved label injected through `workspace_ensure`/`workspace_find`/`list_live`; the Fleet display name comes from `bin/fm-project-mode.sh --fleet`, the single registry parser (which gained an optional `fleet=<Display>` bracket token, backward-compatible - absent means the repository name).
+Resolution moved into the single `fm_backend_herdr_workspace_label <kind> <project-abs> [<project-key>]`, with the resolved label injected through `workspace_ensure`/`workspace_find`/`list_live`; the Fleet display name comes from `bin/fm-project-mode.sh --fleet`, the single registry parser (which gained an optional `fleet=<Display>` bracket token, backward-compatible - absent means the repository name). A later pass added the optional canonical `<project-key>` argument (defaulting to the basename) so a project whose registry key differs from its clone-directory basename resolves the intended mode and Fleet through one identity; the basename stays the display default, so the differing key never renames a `<basename>-Fleet` workspace without an explicit `fleet=` alias.
 
 Scope note (disconfirming checks, brief step 5): the label derives from the project CLONE basename, not the per-task treehouse worktree path (verified: `test_workspace_label_from_clone_basename_not_worktree_path`), and no supervisor identity (`Themis`/`Atlas`/`Archon`) leaks into a worker label nor a `<...>-Fleet` into a secondmate label (verified: `test_workspace_label_no_supervisor_or_superseded_leak`). "Atlas" is not an in-repo agent/status-line brand; it was only ever the herdr workspace label here.
 
@@ -663,6 +663,34 @@ fm-lint.sh: ShellCheck 0.11.0 (pinned 0.11.0)
 
 Environment-only, unrelated to this change and confirmed pre-existing on the prior commit `a5b0cfa`: the fm-spawn-driven workspace-per-home E2E cannot complete because `treehouse get` times out in this environment, and two real-terminal `pane run` steps (the smoke's two-step `send_literal + send_key` and the prune-safety heartbeat) flake under the machine's `fish` login shell; the workspace-label assertions in those suites pass, and the send/capture functions are byte-identical to `main`.
 Old-named workspaces are left untouched; firstmate never force-deletes a stale `Atlas`/`Themis` worker workspace, and cleanup is a separate captain-approved action.
+
+### 2026-07-20 canonical project-key identity (Fleet lookup keys on the registry KEY, defaults to the basename)
+
+`fm_backend_herdr_workspace_label` gained an optional third `<project-key>` argument, threaded through `fm_backend_herdr_container_ensure` from `bin/fm-spawn.sh`'s new `--project-key` flag (the same canonical registry identity `fm-spawn` uses for the delivery-mode lookup).
+The Fleet lookup now resolves through `bin/fm-project-mode.sh --fleet <key> <basename-default>`: the `fleet=` alias on the key's entry if present, else the basename default.
+This lets a project whose registry KEY differs from its clone-directory basename (the firstmate repo registered as `Agent-Themis` at `.../Firstmate`) resolve its mode and Fleet through one identity, while the basename stays the display default so the differing key never renames a `<basename>-Fleet` workspace without an explicit `fleet=` alias.
+Absent the key argument the label derivation is byte-identical to before (key defaults to the basename), so every key==basename caller is unaffected.
+
+Live verification, 2026-07-20, herdr `0.7.4-preview.2026-07-17-813fec141faa` (protocol 16), macOS aarch64, run under an isolated `bin/fm-herdr-lab.sh` session with the running `default` session as tripwire.
+Two real workspaces were created in the lab through `fm_backend_herdr_container_ensure` and torn down cleanly (default session unchanged):
+
+```text
+key 'Agent-Themis' (no fleet alias), clone dir basename 'Firstmate'  -> workspace 'Firstmate-Fleet'  (no rename)
+key 'Keyed-Alias' (fleet=Shown),     clone dir basename 'CloneDir'   -> workspace 'Shown-Fleet'      (explicit alias renames)
+```
+
+Deterministic coverage, all green under ShellCheck 0.11.0:
+
+```sh
+bash tests/fm-project-mode.test.sh          # --fleet <key> <default> resolution; mode keys on the registry key
+bash tests/fm-backend-herdr.test.sh         # workspace_label with a key that differs from the basename (+/- fleet alias), back-compat
+bash tests/fm-spawn-project-key.test.sh     # fm-spawn meta records the resolved mode + project_key= for every worker kind
+bin/fm-lint.sh
+```
+
+`tests/fm-spawn-project-key.test.sh` reaches `fm-spawn`'s meta-write with a fake tmux pane and a real isolated worktree, so it proves the recorded delivery mode deterministically WITHOUT the interactive `treehouse get` step.
+That is deliberate: the full `fm-spawn --backend herdr` spawn still cannot reach the meta-write in this environment because interactive `treehouse get` in a spawned pane blocks on an SSH-key passphrase prompt for a remoted repo (and does not settle the pane cwd for a scratch repo) under the machine's `fish` login shell - the same pre-existing, change-independent limitation the `2026-07-20` section above records for the workspace-per-home E2E.
+The live Fleet-workspace behavior is instead proven directly through the real herdr server above, and the recorded-mode behavior through the deterministic meta-write test.
 
 ## Away-mode daemon: herdr supervisor-pane support
 

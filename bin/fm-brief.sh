@@ -26,6 +26,11 @@
 #   The flag must be explicit because {TASK} is filled after scaffolding and the
 #   caller-supplied repo string cannot reliably identify this repo. Briefs made
 #   without it carry a loud declaration so an omitted contract cannot be silent.
+# For a ship or scout task, the caller-supplied <repo-name> is the canonical
+# registry key; fm-brief records it verbatim to data/<task-id>/project-key so
+# fm-spawn.sh resolves the same identity (delivery mode + herdr Fleet) without a
+# second manual pass and cannot drift from this brief. A --secondmate charter has
+# no repo-name and writes no such file.
 # For ship tasks, the definition of done is shaped by the project's delivery mode
 # (data/projects.md via fm-project-mode.sh; see the project-management skill
 # and AGENTS.md task lifecycle):
@@ -188,6 +193,17 @@ exit 0
 fi
 
 REPO=${POS[1]}
+
+# Persist the canonical registry key alongside the brief so fm-spawn.sh resolves
+# the SAME identity firstmate gave here, deterministically, without a second
+# manual pass. This is the single point where firstmate names the project's
+# registry key (which may differ from the clone-directory basename, e.g. the
+# firstmate repo registered as "Agent-Themis" at ".../Firstmate"), and fm-brief
+# already uses it for the delivery-mode section below; recording it here is what
+# lets fm-spawn's mode and Fleet lookup agree with this brief instead of
+# re-deriving a basename that would fall through to no-mistakes. fm-spawn reads it
+# as the default project key; an explicit fm-spawn --project-key still overrides.
+printf '%s\n' "$REPO" > "$DATA/$ID/project-key"
 
 if [ "$HERDR_LAB" -eq 1 ]; then
 HERDR_LAB_HELPER=$(shell_quote "$FM_ROOT/bin/fm-herdr-lab.sh")

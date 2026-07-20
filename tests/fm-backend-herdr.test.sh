@@ -288,6 +288,49 @@ test_workspace_label_from_clone_basename_not_worktree_path() {
   pass "fm_backend_herdr_workspace_label: derives from the project basename, not the per-task worktree path (no checkout-basename leakage)"
 }
 
+# resolve <kind> <project-abs> <project-key> under FM_HOME=<home>. The 3rd arg is
+# the canonical registry key threaded from fm-spawn.sh, distinct from the clone
+# basename (the Agent-Themis/Firstmate case).
+_wslabel_key() {  # <home> <kind> <project-abs> <project-key>
+  FM_HOME="$1" bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_workspace_label "$1" "$2" "$3"' "$ROOT" "$2" "$3" "$4"
+}
+
+test_workspace_label_key_differs_from_basename_no_alias() {
+  local home
+  # The delivery-identity key differs from the clone basename and carries NO
+  # fleet= alias: the workspace must stay '<basename>-Fleet', NEVER be renamed to
+  # '<key>-Fleet' (bin/fm-project-mode.sh header; the Agent-Themis/Firstmate case).
+  home="$TMP_ROOT/fleet-key-noalias"; mkdir -p "$home/data" "$home/projects/Firstmate"
+  printf -- '- Agent-Themis [local-only] - key differs from clone dir (added 2026-07-20)\n' > "$home/data/projects.md"
+  out=$(_wslabel_key "$home" ship "$home/projects/Firstmate" Agent-Themis)
+  [ "$out" = "Firstmate-Fleet" ] || fail "a key that differs from the basename with no fleet= alias must keep '<basename>-Fleet', got '$out' (a delivery-identity key must not rename the workspace)"
+  pass "fm_backend_herdr_workspace_label: a canonical key differing from the basename does NOT rename the '<basename>-Fleet' workspace without an explicit fleet= alias"
+}
+
+test_workspace_label_key_differs_from_basename_with_alias() {
+  local home
+  # Same key-vs-basename mismatch, but now the key's entry carries fleet=Shown:
+  # only an explicit alias renames the workspace.
+  home="$TMP_ROOT/fleet-key-alias"; mkdir -p "$home/data" "$home/projects/Firstmate"
+  printf -- '- Agent-Themis [local-only fleet=Shown] - key with alias (added 2026-07-20)\n' > "$home/data/projects.md"
+  out=$(_wslabel_key "$home" ship "$home/projects/Firstmate" Agent-Themis)
+  [ "$out" = "Shown-Fleet" ] || fail "an explicit fleet= alias on the key's entry must win over the basename default, got '$out'"
+  pass "fm_backend_herdr_workspace_label: an explicit fleet= alias on a key-mismatched project renames the workspace (fleet=Shown -> Shown-Fleet)"
+}
+
+test_workspace_label_absent_key_arg_is_basename_backcompat() {
+  local home with_key without_key
+  # Back-compat: omitting the key arg is identical to passing basename==key. Both
+  # forms must agree so an existing 2-arg caller and a new 3-arg caller never split
+  # a project across two workspaces.
+  home="$TMP_ROOT/fleet-key-backcompat"; mkdir -p "$home/data" "$home/projects/Echo"
+  printf -- '- Echo [no-mistakes] - voice (added 2026-07-17)\n' > "$home/data/projects.md"
+  without_key=$(_wslabel "$home" ship "$home/projects/Echo")
+  with_key=$(_wslabel_key "$home" ship "$home/projects/Echo" Echo)
+  [ "$without_key" = "Echo-Fleet" ] && [ "$with_key" = "Echo-Fleet" ] || fail "the 2-arg and 3-arg forms must agree for key==basename, got without='$without_key' with='$with_key'"
+  pass "fm_backend_herdr_workspace_label: omitting the key arg equals passing key==basename (back-compat, no workspace split)"
+}
+
 test_workspace_label_secondmate_uses_marker_id() {
   local home
   home="$TMP_ROOT/sm-home"; mkdir -p "$home"; printf 'sshhip-h7\n' > "$home/.fm-secondmate-home"
@@ -2128,6 +2171,9 @@ test_workspace_label_alias_overrides_repo_name
 test_workspace_label_missing_alias_uses_repo_name
 test_workspace_label_different_projects_get_distinct_fleets
 test_workspace_label_from_clone_basename_not_worktree_path
+test_workspace_label_key_differs_from_basename_no_alias
+test_workspace_label_key_differs_from_basename_with_alias
+test_workspace_label_absent_key_arg_is_basename_backcompat
 test_workspace_label_secondmate_uses_marker_id
 test_workspace_label_secondmate_marker_trims_whitespace
 test_workspace_label_secondmate_empty_marker_fails_closed_to_archon

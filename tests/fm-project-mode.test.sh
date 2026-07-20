@@ -20,6 +20,8 @@ cat > "$SCRATCH/data/projects.md" <<'EOF'
 - Ali [no-mistakes +yolo] - health (added 2026-07-19)
 - Legacy - no bracket at all (added 2026-07-01)
 - FleetOnly [fleet=Custom] - only a fleet token, no mode (added 2026-07-20)
+- Agent-Themis [local-only] - registry key differs from its clone-dir basename (added 2026-07-20)
+- Aliased-Key [direct-PR fleet=Shown] - key differs from basename AND carries a fleet alias (added 2026-07-20)
 EOF
 
 run() { FM_HOME="$SCRATCH" FM_DATA_OVERRIDE="$SCRATCH/data" "$ROOT/bin/fm-project-mode.sh" "$@" 2>/dev/null; }
@@ -45,6 +47,28 @@ NOREG=$(fm_test_tmproot fm-project-mode-noreg)
 [ "$(FM_HOME="$NOREG" FM_DATA_OVERRIDE="$NOREG/data" "$ROOT/bin/fm-project-mode.sh" --fleet Whatever 2>/dev/null)" = "Whatever" ] \
   || fail "--fleet with no registry file at all should default to the given name"
 pass "fm-project-mode --fleet: no bracket, unregistered project, and missing registry all default deterministically to the name"
+
+# --- --fleet <key> <default>: key differs from the repository basename ---------
+# The herdr backend passes the canonical registry key AND the repository basename
+# default so a key-mismatched project resolves its mode/Fleet without renaming the
+# workspace (bin/fm-project-mode.sh header; the Agent-Themis/Firstmate case).
+[ "$(run --fleet Agent-Themis Firstmate)" = "Firstmate" ] \
+  || fail "--fleet <key> <default>: a registered key with no fleet= alias must return the basename DEFAULT, not the key, got '$(run --fleet Agent-Themis Firstmate)'"
+[ "$(run --fleet Aliased-Key Firstmate)" = "Shown" ] \
+  || fail "--fleet <key> <default>: an explicit fleet= alias must win over the basename default, got '$(run --fleet Aliased-Key Firstmate)'"
+[ "$(run --fleet Unregistered some-clone)" = "some-clone" ] \
+  || fail "--fleet <key> <default>: an unknown key must fall back to the basename DEFAULT, got '$(run --fleet Unregistered some-clone)'"
+[ "$(FM_HOME="$NOREG" FM_DATA_OVERRIDE="$NOREG/data" "$ROOT/bin/fm-project-mode.sh" --fleet AnyKey clone-dir 2>/dev/null)" = "clone-dir" ] \
+  || fail "--fleet <key> <default>: with no registry file, the basename DEFAULT is used"
+# Unknown key is still visibly diagnosed on stderr (the safest-fallback contract).
+WARN=$(FM_HOME="$SCRATCH" FM_DATA_OVERRIDE="$SCRATCH/data" "$ROOT/bin/fm-project-mode.sh" --fleet Unregistered some-clone 2>&1 >/dev/null)
+case "$WARN" in *"not in registry"*) : ;; *) fail "--fleet <key> <default>: an unknown key must still warn to stderr, got '$WARN'" ;; esac
+pass "fm-project-mode --fleet <key> <default>: key-vs-basename resolution (default wins over key, alias wins over default, unknown still warns)"
+
+# --- mode lookup keys on the registry KEY, not the clone basename -------------
+[ "$(run Agent-Themis)" = "local-only off" ] || fail "mode lookup by registry key Agent-Themis should be 'local-only off', got '$(run Agent-Themis)'"
+[ "$(run Firstmate)" = "no-mistakes off" ] || fail "the clone basename 'Firstmate' is NOT a registry key here, so it must fall back to 'no-mistakes off', got '$(run Firstmate)'"
+pass "fm-project-mode: the mode lookup keys on the registry key; a bare clone basename that is not a key falls back to the safe default"
 
 # --- mode/yolo output is byte-identical for existing callers (backward-compat) -
 [ "$(run Echo)" = "no-mistakes off" ] || fail "mode/yolo output changed for Echo: got '$(run Echo)'"

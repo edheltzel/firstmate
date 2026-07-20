@@ -1,8 +1,24 @@
 #!/usr/bin/env bash
 # Spawn a direct report: a crewmate in a treehouse or Orca worktree, or a
 # secondmate in its isolated firstmate home.
-# Usage: fm-spawn.sh <task-id> <project-dir> [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--scout]
+# Usage: fm-spawn.sh <task-id> <project-dir> [--project-key <key>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--scout]
 #        fm-spawn.sh <task-id> [<firstmate-home>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] --secondmate
+#   --project-key <key> names the canonical registry identity (data/projects.md) for
+#   a ship/scout spawn - the SAME key firstmate passes to fm-brief.sh as the repo
+#   name. It is used for BOTH the delivery-mode lookup and the herdr Fleet-label
+#   lookup, so a project whose registry key differs from its clone directory
+#   basename (e.g. the firstmate repo registered as "Agent-Themis" with checkout
+#   basename "Firstmate") resolves its intended mode and Fleet workspace instead of
+#   silently falling through to no-mistakes. Without the flag, the key defaults to
+#   the key fm-brief.sh persisted at data/<task-id>/project-key (the deterministic,
+#   no-double-pass propagation of the identity firstmate already named as the brief
+#   repo-name), else the repository basename (back-compat for callers that pass
+#   only a project dir, and correct whenever key==basename). An unknown key still
+#   falls back to no-mistakes and is visibly warned. It records project_key= in the task meta ONLY when the
+#   resolved key differs from the basename, keeping every key==basename task's meta
+#   byte-identical. It applies to a single ship/scout spawn only: it is rejected for
+#   a --secondmate spawn (whose identity is its home, mode=secondmate) and for a
+#   batch (whose id=repo pairs are heterogeneous clones where key==basename).
 #   --harness <name> is the explicit per-spawn harness/profile adapter. The old
 #   positional harness arg still works for back-compat.
 #   --model <name> and --effort <low|medium|high|xhigh|max> are concrete profile
@@ -84,7 +100,7 @@ set -eu
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
-  sed -n '2,78p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,94p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 case "${1:-}" in
@@ -119,10 +135,12 @@ HARNESS_ARG=
 MODEL=
 EFFORT=
 BACKEND_ARG=
+PROJECT_KEY_ARG=
 HARNESS_SET=0
 MODEL_SET=0
 EFFORT_SET=0
 BACKEND_SET=0
+PROJECT_KEY_SET=0
 POS=()
 want_value=
 for a in "$@"; do
@@ -135,6 +153,7 @@ for a in "$@"; do
       model) MODEL=$a; MODEL_SET=1 ;;
       effort) EFFORT=$a; EFFORT_SET=1 ;;
       backend) BACKEND_ARG=$a; BACKEND_SET=1 ;;
+      project-key) PROJECT_KEY_ARG=$a; PROJECT_KEY_SET=1 ;;
       *) echo "error: internal parser state for --$want_value" >&2; exit 1 ;;
     esac
     want_value=
@@ -151,6 +170,8 @@ for a in "$@"; do
     --effort=*) EFFORT=${a#--effort=}; EFFORT_SET=1 ;;
     --backend) want_value=backend ;;
     --backend=*) BACKEND_ARG=${a#--backend=}; BACKEND_SET=1 ;;
+    --project-key) want_value='project-key' ;;
+    --project-key=*) PROJECT_KEY_ARG=${a#--project-key=}; PROJECT_KEY_SET=1 ;;
     *) POS+=("$a") ;;
   esac
 done
@@ -159,6 +180,11 @@ done
 [ "$MODEL_SET" -eq 0 ] || [ -n "$MODEL" ] || { echo "error: --model requires a non-empty value" >&2; exit 1; }
 [ "$EFFORT_SET" -eq 0 ] || [ -n "$EFFORT" ] || { echo "error: --effort requires a non-empty value" >&2; exit 1; }
 [ "$BACKEND_SET" -eq 0 ] || [ -n "$BACKEND_ARG" ] || { echo "error: --backend requires a non-empty value" >&2; exit 1; }
+[ "$PROJECT_KEY_SET" -eq 0 ] || [ -n "$PROJECT_KEY_ARG" ] || { echo "error: --project-key requires a non-empty value" >&2; exit 1; }
+# --project-key names the canonical registry identity for a ship/scout spawn; a
+# secondmate's identity is its home, and it always records mode=secondmate, so the
+# flag is meaningless there and is rejected rather than silently ignored.
+[ "$PROJECT_KEY_SET" -eq 0 ] || [ "$KIND" != secondmate ] || { echo "error: --project-key does not apply to --secondmate spawns" >&2; exit 1; }
 case "$EFFORT" in
   ''|low|medium|high|xhigh|max) ;;
   *) echo "error: --effort must be one of low, medium, high, xhigh, max" >&2; exit 1 ;;
@@ -225,6 +251,9 @@ orca_spawn_abort_cleanup() {
           echo "window=$W"
           echo "worktree=${WT:-}"
           echo "project=$PROJ_ABS"
+          if [ "$KIND" != secondmate ] && [ "${PROJ_KEY:-}" != "${PROJ_BASENAME:-}" ]; then
+            echo "project_key=$PROJ_KEY"
+          fi
           echo "harness=$HARNESS"
           echo "kind=$KIND"
           echo "mode=${MODE:-no-mistakes}"
@@ -252,6 +281,11 @@ trap orca_spawn_abort_cleanup EXIT
 idpart=${POS[0]:-}
 idpart=${idpart%%=*}
 if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in */*) false ;; *) true ;; esac; then
+  # --project-key names ONE project's identity, so it cannot be a batch-shared arg
+  # across heterogeneous id=repo pairs. Batched items are clones under projects/,
+  # where the registry key equals the clone basename by construction, so each pair
+  # derives its key from the basename as before.
+  [ "$PROJECT_KEY_SET" -eq 0 ] || { echo "error: --project-key applies to a single spawn only, not a batch; spawn the key-mismatched project on its own" >&2; exit 1; }
   if [ "$KIND" != secondmate ] && [ -z "$HARNESS_ARG" ] && [ -f "$CONFIG/crew-dispatch.json" ]; then
     echo "error: config/crew-dispatch.json is active - pass an explicit harness resolved from the dispatch rules (the consultation backstop, so the rules are never silently skipped)." >&2
     exit 1
@@ -655,6 +689,33 @@ fi
 # (docs/herdr-backend.md "Known gaps").
 PROJ_ABS_REAL=$(cd "$PROJ_ABS" 2>/dev/null && pwd -P) || PROJ_ABS_REAL="$PROJ_ABS"
 
+# Canonical project identity for a ship/scout spawn (the --secondmate branch never
+# reaches here; its identity is its home and it records mode=secondmate). The
+# registry KEY is the one identity used for BOTH the delivery-mode lookup and the
+# herdr Fleet-label lookup, so they cannot disagree. An explicit --project-key
+# wins; otherwise the repository basename, which preserves back-compat for callers
+# that pass only a project directory (and is correct whenever the registry key
+# equals the clone directory name). An unknown key still falls back to
+# no-mistakes and is visibly warned by fm-project-mode.sh.
+if [ "$KIND" != secondmate ]; then
+  PROJ_BASENAME=$(basename "$PROJ_ABS")
+  # Precedence: an explicit --project-key wins; else the key fm-brief.sh persisted
+  # for this task (the deterministic, no-double-pass propagation of the identity
+  # firstmate already named at brief generation); else the repository basename
+  # (back-compat for callers that pass only a project dir, and correct when the
+  # key equals the basename). fm-project-mode.sh still diagnoses an unknown key.
+  PROJ_KEY=$PROJ_BASENAME
+  if [ "$PROJECT_KEY_SET" -eq 1 ]; then
+    PROJ_KEY=$PROJECT_KEY_ARG
+  elif [ -f "$DATA/$ID/project-key" ]; then
+    # head -n1 (not `read`) so a sidecar without a trailing newline still yields
+    # its key instead of being clobbered to empty; an empty/whitespace value keeps
+    # the basename default.
+    sidecar_key=$(head -n1 "$DATA/$ID/project-key" 2>/dev/null | tr -d '[:space:]')
+    [ -z "$sidecar_key" ] || PROJ_KEY=$sidecar_key
+  fi
+fi
+
 real_path_or_raw() {  # <path>
   local path=$1 real
   if real=$(cd "$path" 2>/dev/null && pwd -P); then
@@ -715,7 +776,7 @@ case "$BACKEND" in
     # home, whose data/projects.md the Fleet-name lookup reads for a worker's
     # project - correct whether the primary or a secondmate is spawning, since
     # each spawns from its own process's own FM_HOME.
-    HERDR_CONTAINER_RAW=$(fm_backend_herdr_container_ensure "$KIND" "$PROJ_ABS") || exit 1
+    HERDR_CONTAINER_RAW=$(fm_backend_herdr_container_ensure "$KIND" "$PROJ_ABS" "${PROJ_KEY:-}") || exit 1
     # fm_backend_herdr_container_ensure echoes "<session>:<workspace_id>\t<seeded_default_tab_id>"
     # (the second field empty when this call ADOPTED a pre-existing workspace
     # rather than creating a fresh one). Split on the guaranteed single tab
@@ -968,16 +1029,18 @@ fi
 # Per-project delivery mode + yolo flag (bin/fm-project-mode.sh; the project-management skill and AGENTS.md task lifecycle).
 # Recorded in meta so fm-teardown's safety check and the validate/merge stages can
 # branch on them. Mode governs ship tasks; a scout's deliverable is a report, not a
-# merge, so scout teardown ignores mode.
+# merge, so scout teardown ignores mode. The lookup uses the canonical PROJ_KEY
+# resolved above (explicit --project-key, else the repository basename), NOT a
+# fresh basename, so a registry key that differs from the clone directory name
+# resolves the intended mode instead of falling through to no-mistakes.
 SECONDMATE_PROJECTS=
 if [ "$KIND" = secondmate ]; then
   MODE=secondmate
   YOLO=off
   SECONDMATE_PROJECTS=$(secondmate_registry_value "$ID" projects || true)
 else
-  PROJ_NAME=$(basename "$PROJ_ABS")
   read -r MODE YOLO <<EOF
-$("$FM_ROOT/bin/fm-project-mode.sh" "$PROJ_NAME")
+$("$FM_ROOT/bin/fm-project-mode.sh" "$PROJ_KEY")
 EOF
 fi
 
@@ -987,6 +1050,15 @@ META_WINDOW=$T
   echo "window=$META_WINDOW"
   echo "worktree=$WT"
   echo "project=$PROJ_ABS"
+  # project_key= records the canonical registry identity ONLY when it differs from
+  # the repository basename (mirroring backend='s only-when-non-tmux idiom), so
+  # every key==basename task's meta stays byte-identical while a key-mismatched
+  # task (e.g. the firstmate repo registered as Agent-Themis) durably carries the
+  # identity that produced its mode - no post-spawn hand-correction, and any future
+  # re-resolution reads it instead of re-deriving the wrong basename.
+  if [ "$KIND" != secondmate ] && [ "${PROJ_KEY:-}" != "${PROJ_BASENAME:-}" ]; then
+    echo "project_key=$PROJ_KEY"
+  fi
   echo "harness=$HARNESS"
   echo "kind=$KIND"
   echo "mode=$MODE"

@@ -202,6 +202,33 @@ test_herdr_lab_omission_is_loud_for_ship_and_scout() {
   pass "fm-brief.sh: ship and scout scaffolds make omitted Herdr intent fail-visible"
 }
 
+test_project_key_sidecar_persisted_for_ship_and_scout() {
+  local home id
+  home="$TMP_ROOT/project-key-sidecar-home"
+  mkdir -p "$home/data"
+
+  # A ship brief persists the canonical registry key (the repo-name arg) so
+  # fm-spawn resolves the same identity deterministically. The key here differs
+  # from any directory basename (the Agent-Themis/Firstmate shape).
+  id=pk-ship-a1
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" Agent-Themis >/dev/null 2>&1
+  assert_present "$home/data/$id/project-key" "a ship brief must persist data/<id>/project-key"
+  assert_grep "Agent-Themis" "$home/data/$id/project-key" "the persisted key must be the verbatim repo-name argument"
+
+  # A scout brief persists it too (its worktree resolves the same identity).
+  id=pk-scout-a2
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" Agent-Themis --scout >/dev/null 2>&1
+  assert_present "$home/data/$id/project-key" "a scout brief must persist data/<id>/project-key"
+  assert_grep "Agent-Themis" "$home/data/$id/project-key" "the scout's persisted key must be the verbatim repo-name argument"
+
+  # A secondmate charter has no repo-name, so it writes no project-key sidecar.
+  id=pk-sm-a3
+  FM_HOME="$home" FM_SECONDMATE_CHARTER='x' FM_SECONDMATE_SCOPE='x' \
+    "$ROOT/bin/fm-brief.sh" "$id" --secondmate --no-projects >/dev/null 2>&1
+  assert_absent "$home/data/$id/project-key" "a secondmate charter must NOT write a project-key sidecar (its identity is its home)"
+  pass "fm-brief.sh: ship/scout briefs persist data/<id>/project-key with the canonical registry key; a secondmate charter does not"
+}
+
 test_secondmate_no_projects_charter() {
   local home brief status
   home="$TMP_ROOT/no-projects-home"
@@ -349,6 +376,7 @@ test_herdr_lab_contract_is_explicit_and_complete
 test_herdr_lab_contract_quotes_foreign_firstmate_path
 test_herdr_lab_omission_is_loud_for_ship_and_scout
 test_herdr_lab_contract_applies_to_scouts_but_not_secondmates
+test_project_key_sidecar_persisted_for_ship_and_scout
 test_secondmate_no_projects_charter
 test_pause_verb_override_renders_all_brief_scaffolds
 test_scout_and_secondmate_load_decision_hold_policy

@@ -91,11 +91,16 @@ FM_BACKEND_HERDR_SECONDMATE_MARKER=".fm-secondmate-home"
 # never from FM_HOME, so two workers for the SAME project share one workspace no
 # matter which home spawned them, and two DIFFERENT projects never share one:
 #   - An ordinary worker (kind ship or scout) lands in its PROJECT's reusable
-#     "<Fleet display name>-Fleet" workspace. The Fleet display name is the
-#     configured fleet= alias for basename(<project-abs>) or, by default, that
-#     repository name itself - resolved by bin/fm-project-mode.sh --fleet, the
-#     single registry parser (data/projects.md), so delivery-mode and Fleet
-#     resolution can never disagree about which project a spawn is for.
+#     "<Fleet display name>-Fleet" workspace. The Fleet display name is resolved
+#     by bin/fm-project-mode.sh --fleet, the single registry parser
+#     (data/projects.md): the fleet= alias on the canonical project KEY's entry
+#     if present, else the repository basename DEFAULT. The optional third
+#     argument is that canonical key (the same identity fm-spawn.sh uses for the
+#     delivery-mode lookup), so mode and Fleet resolution agree even when the key
+#     differs from the repository basename; it defaults to the basename when the
+#     caller passes only <project-abs> (back-compat). The basename stays the
+#     display default, so a key that differs from it never renames the workspace
+#     unless the registry carries an explicit fleet= alias.
 #   - The persistent SECONDMATE agent (kind secondmate) lands in its own
 #     "Archon-<secondmate-id>" supervisor workspace, read from the
 #     .fm-secondmate-home marker at <project-abs> (the secondmate's home); an
@@ -108,8 +113,8 @@ FM_BACKEND_HERDR_SECONDMATE_MARKER=".fm-secondmate-home"
 # each re-deriving it. Superseded labels (never emitted now): the home-keyed
 # "Atlas"/"Themis"/"Themis-<id>" primary/secondmate labels from commit 989bea45
 # and the prior a5b0cfa customization.
-fm_backend_herdr_workspace_label() {  # <kind> <project-abs>
-  local kind=$1 project_abs=$2 marker id name fleet
+fm_backend_herdr_workspace_label() {  # <kind> <project-abs> [<project-key>]
+  local kind=$1 project_abs=$2 project_key=${3:-} marker id name key fleet
   if [ "$kind" = secondmate ]; then
     marker="$project_abs/$FM_BACKEND_HERDR_SECONDMATE_MARKER"
     if [ -f "$marker" ] && [ -r "$marker" ]; then
@@ -123,7 +128,8 @@ fm_backend_herdr_workspace_label() {  # <kind> <project-abs>
     return 0
   fi
   name=${project_abs##*/}
-  fleet=$(FM_HOME="$FM_HOME" "$FM_BACKEND_HERDR_ROOT/bin/fm-project-mode.sh" --fleet "$name" 2>/dev/null) || fleet=$name
+  key=${project_key:-$name}
+  fleet=$(FM_HOME="$FM_HOME" "$FM_BACKEND_HERDR_ROOT/bin/fm-project-mode.sh" --fleet "$key" "$name" 2>/dev/null) || fleet=$name
   [ -n "$fleet" ] || fleet=$name
   printf '%s-Fleet' "$fleet"
 }
@@ -347,7 +353,8 @@ fm_backend_herdr_workspace_ensure() {  # <session> <cwd> <label>
 }
 
 # fm_backend_herdr_container_ensure: the full spawn-time container-ensure
-# sequence (version gate, server, workspace). Takes <kind> and <project-abs> and
+# sequence (version gate, server, workspace). Takes <kind>, <project-abs>, and
+# the optional canonical <project-key> (defaulting to the basename), and
 # resolves the workspace label ONCE (fm_backend_herdr_workspace_label) so an
 # ordinary worker lands in its project's "<Fleet display name>-Fleet" workspace
 # and the secondmate agent in its "Archon-<id>" one; the project directory is
@@ -358,12 +365,12 @@ fm_backend_herdr_workspace_ensure() {  # <session> <cwd> <label>
 # CONTAINER=${RAW%%$'\t'*}; SEEDED_TAB_ID=${RAW#*$'\t'}. The seeded tab id
 # must be threaded through to fm_backend_herdr_create_task, which is the only
 # function allowed to prune it (fm_backend_herdr_workspace_prune_seeded_default_tab).
-fm_backend_herdr_container_ensure() {  # <kind> <project-abs>
-  local kind=$1 cwd=$2 session label
+fm_backend_herdr_container_ensure() {  # <kind> <project-abs> [<project-key>]
+  local kind=$1 cwd=$2 project_key=${3:-} session label
   fm_backend_herdr_version_check || return 1
   session=$(fm_backend_herdr_session)
   fm_backend_herdr_server_ensure "$session" || return 1
-  label=$(fm_backend_herdr_workspace_label "$kind" "$cwd")
+  label=$(fm_backend_herdr_workspace_label "$kind" "$cwd" "$project_key")
   fm_backend_herdr_workspace_ensure "$session" "$cwd" "$label" >/dev/null || { echo "error: failed to ensure herdr workspace '$label' in session '$session'" >&2; return 1; }
   if [ -z "$FM_BACKEND_HERDR_WS_ID" ]; then
     echo "error: failed to ensure herdr workspace '$label' in session '$session'" >&2
