@@ -336,6 +336,61 @@ handle_paused_stale() {  # <window> <task> <hash>
   triage_log "absorbed stale (paused, awaiting external, age ${age}s): $win"
 }
 
+# 0 if <window>'s worker has CONFIDENTLY exited (the backend agent probe reports
+# dead). An ambiguous or live reading returns 1, so a still-live worker is never
+# routed onto the bounded terminal cadence. Only reached for non-secondmate
+# windows (the stale loop handles secondmates separately before this point).
+terminal_agent_dead() {  # <window>
+  local win=$1 alive
+  alive=$(fm_backend_agent_alive "$(window_backend "$win")" "$win" 2>/dev/null) || alive=unknown
+  [ "$alive" = dead ]
+}
+
+# Bounded re-surface for a stale pane whose worker has confidently exited while its
+# last status is TERMINAL (captain-relevant: done/failed/needs-decision/blocked).
+# No further worker action is expected, so a retained pane - a preserved checkpoint
+# branch, a completed local-only task awaiting merge approval - must not re-notify
+# on every hash change of its idle pane. Unlike handle_paused_stale this surfaces
+# ONCE on first bounded sight (the .term-resurfaced-<key> throttle marker is absent)
+# so a genuine failure, decision, or blocker is never silently swallowed even if the
+# signal-path surface was missed, then throttles to one recheck per
+# PAUSE_RESURFACE_SECS. Churn-immune: the throttle is a persistent marker, never the
+# pane hash, so a redrawing idle pane cannot reset the cadence. NEVER re-reads crew
+# state. Sets the .term-<key> flag so a perfectly stable hash still rechecks on the
+# same long cadence via the same-hash path.
+handle_terminal_stale() {  # <window> <task> <hash>
+  local win=$1 task=$2 h=$3 key statusf mtime age rf rf_age reason
+  key=$(printf '%s' "$win" | tr ':/.' '___')
+  printf '%s' "$h" > "$STATE/.stale-$key"
+  : > "$STATE/.term-$key"
+  rm -f "$STATE/.stale-since-$key" "$STATE/.wedge-escalations-$key"
+  statusf="$STATE/$task.status"
+  mtime=$(stat_mtime "$statusf")
+  case "$mtime" in ''|*[!0-9]*) mtime=$(date +%s) ;; esac
+  age=$(( $(date +%s) - mtime ))
+  rf="$STATE/.term-resurfaced-$key"
+  rf_age=$(age_of "$rf")   # 999999 when no prior re-surface -> first bounded sight surfaces once
+  if [ "$rf_age" -ge "$PAUSE_RESURFACE_SECS" ]; then
+    reason="stale: $win (terminal ${age}s, worker exited - completed or awaiting cleanup, rechecked on a long cadence not a wedge; confirm or tear down)"
+    fm_wake_append stale "$win" "$reason" || exit 1
+    date +%s > "$rf"
+    # Mark the captain-relevant status surfaced, exactly as the plain terminal
+    # surface does, so the heartbeat backstop does not independently re-fire the
+    # same status right after this bounded recheck.
+    mark_surfaced "$statusf"
+    wake "$reason"
+  fi
+  triage_log "absorbed stale (terminal, worker exited, age ${age}s): $win"
+}
+
+clear_terminal_bounding() {  # <window>
+  local win=$1 key
+  key=${win//:/_}
+  key=${key//\//_}
+  key=${key//./_}
+  rm -f "$STATE/.term-$key" "$STATE/.term-resurfaced-$key"
+}
+
 clear_pause_state() {  # <window>
   local win=$1 key
   key=${win//:/_}
@@ -881,6 +936,13 @@ EOF
     if ! status_is_paused_or_captain_held "$last" && [ -e "$STATE/.paused-$key" ]; then
       clear_pause_tracking "$w"
     fi
+    # Terminal bounding is gated on the status still being terminal, NOT on the
+    # paused/captain-held predicate: a done: task is neither paused nor captain-held,
+    # so gating on that would clear the throttle every cycle and reintroduce the
+    # churn. Once the status leaves terminal (a resume/promotion), drop the markers.
+    if [ -e "$STATE/.term-$key" ] && ! stale_is_terminal "$w" "$STATE"; then
+      clear_terminal_bounding "$w"
+    fi
     if [ "$kind" = secondmate ] && ! status_is_paused "$last"; then
       continue
     fi
@@ -933,9 +995,19 @@ EOF
           # over the log) a chance to override before trusting the log.
           if [ "$(cat "$sf" 2>/dev/null || true)" != "$h" ]; then
             if crew_is_provably_working "$(window_to_task "$w" "$STATE")"; then
+              clear_terminal_bounding "$w"
               printf '%s' "$h" > "$sf"
               date +%s > "$ssf"
               triage_log "absorbed stale (provably working, overriding a stale captain-relevant status): $w"
+            elif terminal_agent_dead "$w"; then
+              # The worker has confidently exited on a terminal status, so no
+              # further worker action is expected. This is the retained-pane case:
+              # a preserved checkpoint branch or a completed local-only task whose
+              # pane stays open awaiting merge approval, whose idle pane keeps
+              # churning a new hash every few minutes. Bound the backstop to the
+              # churn-immune recheck cadence (surface once, then a recheck per
+              # window) instead of re-notifying on every hash change.
+              handle_terminal_stale "$w" "$(window_to_task "$w" "$STATE")" "$h"
             else
               fm_wake_append stale "$w" "stale: $w" || exit 1
               printf '%s' "$h" > "$sf"
@@ -943,6 +1015,12 @@ EOF
               mark_surfaced "$STATE/$(window_to_task "$w" "$STATE").status"
               wake "stale: $w"
             fi
+          elif [ -e "$STATE/.term-$key" ]; then
+            # Same hash, worker already confirmed exited on a terminal status:
+            # keep the bounded recheck cadence so even a perfectly stable retained
+            # pane still gets its periodic reconciliation, without re-reading crew
+            # state every poll.
+            handle_terminal_stale "$w" "$(window_to_task "$w" "$STATE")" "$h"
           elif [ -e "$ssf" ]; then
             # This exact hash was already overridden as provably-working (a
             # wedge timer is running for it) - keep treating it that way

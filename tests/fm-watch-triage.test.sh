@@ -1236,6 +1236,253 @@ test_afk_paused_changed_pane_hands_off_plain_stale() {
   pass "AFK changed paused panes hand off plain stale identities for daemon-owned pause triage"
 }
 
+# --- terminal status, worker EXITED: bounded, not re-notified every hash change --
+# The 2026-07 retained-checkpoint case: a completed local-only task whose branch is
+# intentionally preserved keeps its pane open with the worker exited. Its idle pane
+# redraws a new hash every few minutes; a `done:` status is captain-relevant so it
+# takes the terminal branch, which - before this fix - re-surfaced `stale: <window>`
+# on every distinct hash because it keyed purely off the per-hash suppressor with no
+# death-gated bounded cadence (ab8cea6 bounded only paused/captain-held, which never
+# reach the terminal branch). With the worker confidently dead, the terminal stale
+# must surface once, then recheck on the long cadence, immune to pane-hash churn.
+# This is the ESSENTIAL guard: a changing hash each round is what distinguishes the
+# fix from the old code (a stable hash surfaced once on the old code too).
+test_terminal_done_dead_agent_bounded_changing_hash() {
+  local dir state fakebin out capture_file statusf window key pane_hash round wakes bare sig pid
+  dir=$(make_case terminal-done-dead-churn); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"; statusf="$state/checkpoint.status"
+  window="default:w1E:pB"
+  printf 'window=%s\nkind=ship\nharness=claude\nbackend=tmux\nmode=local-only\n' "$window" > "$state/checkpoint.meta"
+  printf 'done: incomplete plan preserved exactly in branch fm/checkpoint at 4a0f3b2\n' > "$statusf"
+  sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-checkpoint_status"
+  key=$(printf '%s' "$window" | tr ':/.' '___')
+
+  round=1
+  while [ "$round" -le 6 ]; do
+    # A DIFFERENT capture each round: the retained pane's idle redraw churns the
+    # hash. Prime .hash/.count so the first poll of this round's watcher reaches
+    # stale triage immediately at the new hash.
+    printf 'retained checkpoint pane, idle redraw %s\n' "$round" > "$capture_file"
+    pane_hash=$(hash_text "retained checkpoint pane, idle redraw $round")
+    printf '%s' "$pane_hash" > "$state/.hash-$key"
+    printf '1\n' > "$state/.count-$key"
+    PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+      FM_FAKE_TMUX_CURRENT_COMMAND=zsh FM_FAKE_CREW_STATE='state: done · source: status-log · done: preserved' \
+      FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" FM_PAUSE_RESURFACE_SECS=240 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+      FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" >> "$out" &
+    pid=$!
+    if wait_live "$pid" 15; then reap "$pid"; else wait "$pid" || fail "terminal-dead watcher round $round failed"; fi
+    round=$((round + 1))
+  done
+
+  wakes=$(awk -F '\t' -v w="$window" '$3 == "stale" && $4 == w { n++ } END { print n + 0 }' "$state/.wake-queue")
+  bare=$(awk -F '\t' -v w="$window" '$3 == "stale" && $4 == w && $5 == "stale: " w { n++ } END { print n + 0 }' "$state/.wake-queue")
+  [ "$wakes" -le 1 ] || fail "a done + exited-worker retained pane flooded $wakes stale wakes across six churning polls"
+  [ "$bare" -eq 0 ] || fail "a done + exited-worker retained pane surfaced $bare bare stale wakes instead of the bounded recheck"
+  grep -F "worker exited" "$state/.wake-queue" >/dev/null \
+    || fail "the terminal dead-agent stale did not use the bounded worker-exited recheck reason"
+  [ -e "$state/.term-$key" ] || fail "the terminal bounding flag was not recorded"
+  pass "a done task whose worker exited is bounded to one recheck across a churning retained pane, never re-notified per hash"
+}
+
+# The weaker unchanged-hash guard (req 7 asks for both): a perfectly stable retained
+# pane still surfaces exactly once, then re-surfaces once on the long cadence via the
+# same-hash bounded path - never per poll - so periodic reconciliation is preserved.
+test_terminal_done_dead_agent_bounded_stable_hash() {
+  local dir state fakebin out capture_file statusf window key pane_hash pid back wakes sig
+  dir=$(make_case terminal-done-dead-stable); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"; statusf="$state/checkpoint.status"
+  window="test:fm-checkpoint"
+  printf 'idle retained checkpoint pane\n' > "$capture_file"
+  printf 'window=%s\nkind=ship\nharness=claude\nbackend=tmux\nmode=local-only\n' "$window" > "$state/checkpoint.meta"
+  printf 'done: ready in branch fm/checkpoint\n' > "$statusf"
+  sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-checkpoint_status"
+  key=$(printf '%s' "$window" | tr ':/.' '___')
+  pane_hash=$(hash_text "idle retained checkpoint pane")
+  printf '%s' "$pane_hash" > "$state/.hash-$key"
+  printf '1\n' > "$state/.count-$key"
+
+  # First sight: surfaces once (the bounded throttle marker is absent) and records
+  # the flag + throttle marker.
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=zsh FM_FAKE_CREW_STATE='state: done · source: status-log · done' \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" FM_PAUSE_RESURFACE_SECS=240 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_for_exit "$pid" 40 || fail "a stable done + exited-worker pane did not surface its first bounded recheck"
+  grep -F "worker exited" "$out" >/dev/null || fail "first bounded terminal surface omitted the worker-exited reason"
+  [ -e "$state/.term-resurfaced-$key" ] || fail "the terminal recheck throttle marker was not recorded"
+
+  # Re-arm with the SAME hash but the throttle backdated past the window (its
+  # mtime, which age_of reads): the same-hash bounded path must recheck once,
+  # never a per-poll flood or a wedge.
+  back=$(( $(date +%s) - 500 ))
+  if [ "$(uname)" = Darwin ]; then touch -mt "$(date -r "$back" '+%Y%m%d%H%M.%S')" "$state/.term-resurfaced-$key"
+  else touch -m -d "@$back" "$state/.term-resurfaced-$key"; fi
+  : > "$out"
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=zsh FM_FAKE_CREW_STATE='state: done · source: status-log · done' \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" FM_PAUSE_RESURFACE_SECS=240 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_for_exit "$pid" 40 || fail "a stable done + exited-worker pane did not re-surface on the long cadence"
+  grep -F "worker exited" "$out" >/dev/null || fail "the long-cadence recheck omitted the worker-exited reason"
+  grep -F "possible wedge" "$out" >/dev/null && fail "a terminal dead-agent recheck was mislabeled a wedge"
+  wakes=$(awk -F '\t' -v w="$window" '$3 == "stale" && $4 == w { n++ } END { print n + 0 }' "$state/.wake-queue")
+  [ "$wakes" -eq 2 ] || fail "the stable terminal recheck should surface exactly twice (first sight + one cadence recheck), got $wakes"
+  pass "a stable done + exited-worker pane surfaces once, then rechecks on the long cadence, never per poll"
+}
+
+# The disconfirming case: a terminal-looking status whose worker is STILL LIVE must
+# surface, never be bounded. A crew parked at an active decision gate (a live agent,
+# not provably working) is the exact case req 4 protects: never suppress a decision
+# behind the completed-work cadence.
+test_terminal_live_agent_surfaces() {
+  local dir state fakebin out capture_file statusf window key pane_hash pid sig
+  dir=$(make_case terminal-live-gate); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"; statusf="$state/gate.status"
+  window="test:fm-gate"
+  printf 'idle at an unresolved decision\n' > "$capture_file"
+  printf 'window=%s\nkind=ship\nharness=claude\nbackend=tmux\n' "$window" > "$state/gate.meta"
+  printf 'needs-decision: pick option A or B\n' > "$statusf"
+  sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-gate_status"
+  key=$(printf '%s' "$window" | tr ':/.' '___')
+  pane_hash=$(hash_text "idle at an unresolved decision")
+  printf '%s' "$pane_hash" > "$state/.hash-$key"
+  printf '1\n' > "$state/.count-$key"
+  # A live harness process in the pane: NOT confidently dead.
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=claude FM_FAKE_CREW_STATE='state: unknown · source: none · idle at gate' \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" FM_PAUSE_RESURFACE_SECS=240 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_for_exit "$pid" 40 || fail "a terminal status with a LIVE worker did not surface (a live decision must not be bounded)"
+  grep -Fx "stale: $window" "$out" >/dev/null || fail "a live-worker terminal stale did not surface the plain window identity"
+  [ ! -e "$state/.term-$key" ] || fail "a live-worker terminal stale was wrongly routed onto the bounded cadence"
+  pass "a terminal status with a live worker surfaces normally and is never bounded"
+}
+
+# Transition out of terminal: once a bounded, exited task resumes work (a promotion
+# or restart makes the status non-terminal and the crew provably working again), the
+# terminal bounding markers must clear so the crew is supervised normally.
+test_terminal_transition_out_clears_bounding() {
+  local dir state fakebin out capture_file statusf window key pane_hash pid sig
+  dir=$(make_case terminal-transition-out); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"; statusf="$state/task.status"
+  window="test:fm-resumed"
+  printf 'idle done pane\n' > "$capture_file"
+  printf 'window=%s\nkind=ship\nharness=claude\nbackend=tmux\nmode=local-only\n' "$window" > "$state/task.meta"
+  printf 'done: ready in branch fm/x\n' > "$statusf"
+  sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-task_status"
+  key=$(printf '%s' "$window" | tr ':/.' '___')
+  pane_hash=$(hash_text "idle done pane")
+  printf '%s' "$pane_hash" > "$state/.hash-$key"
+  printf '1\n' > "$state/.count-$key"
+
+  # Phase A: establish the bounded terminal state (done + dead).
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=zsh FM_FAKE_CREW_STATE='state: done · source: status-log · done' \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" FM_PAUSE_RESURFACE_SECS=240 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_for_exit "$pid" 40 || fail "phase A did not establish the bounded terminal state"
+  [ -e "$state/.term-$key" ] || fail "phase A did not record the terminal bounding flag"
+
+  # Phase B: the task resumes - a non-terminal working: status, a busy pane, and a
+  # provably-working crew. The top-of-loop guard must clear the terminal markers.
+  printf 'working: resumed and compiling\n' > "$statusf"
+  sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-task_status"
+  printf 'resumed, compiling output\n' > "$capture_file"
+  pane_hash=$(hash_text "resumed, compiling output")
+  printf '%s' "$pane_hash" > "$state/.hash-$key"
+  printf '1\n' > "$state/.count-$key"
+  : > "$out"
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=claude FM_FAKE_CREW_STATE='state: working · source: run-step · compiling (running)' \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" FM_STALE_ESCALATE_SECS=999 FM_PAUSE_RESURFACE_SECS=240 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  if ! wait_live "$pid" 30; then
+    reap "$pid"; fail "a resumed, provably-working crew should be absorbed, not surfaced: $(cat "$out")"
+  fi
+  [ ! -e "$state/.term-$key" ] || fail "the terminal bounding flag survived a transition out of terminal state"
+  [ ! -e "$state/.term-resurfaced-$key" ] || fail "the terminal recheck throttle survived a transition out of terminal state"
+  reap "$pid"
+  pass "resuming work out of a bounded terminal state clears the terminal bounding markers"
+}
+
+# A completed branch awaiting merge approval (a done PR whose checks are green) with
+# an exited worker is the same retained-pane class as the checkpoint: bounded, not
+# re-notified. Explicit coverage for the awaiting-merge variant of req 7.
+test_terminal_done_pr_awaiting_merge_dead_agent_bounded() {
+  local dir state fakebin out capture_file statusf window key pane_hash pid sig
+  dir=$(make_case terminal-done-pr-merge); state="$dir/state"; fakebin="$dir/fakebin"
+  out="$dir/watch.out"; capture_file="$dir/pane.txt"; statusf="$state/pr.status"
+  window="test:fm-pr"
+  printf 'idle, PR opened, checks green\n' > "$capture_file"
+  printf 'window=%s\nkind=ship\nharness=claude\nbackend=tmux\n' "$window" > "$state/pr.meta"
+  printf 'done: PR https://example.test/pr/7 checks green\n' > "$statusf"
+  sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-pr_status"
+  key=$(printf '%s' "$window" | tr ':/.' '___')
+  pane_hash=$(hash_text "idle, PR opened, checks green")
+  printf '%s' "$pane_hash" > "$state/.hash-$key"
+  printf '1\n' > "$state/.count-$key"
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+    FM_FAKE_TMUX_CURRENT_COMMAND=zsh FM_FAKE_CREW_STATE='state: done · source: status-log · checks green' \
+    FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" FM_PAUSE_RESURFACE_SECS=240 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+    FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" > "$out" &
+  pid=$!
+  wait_for_exit "$pid" 40 || fail "a done PR awaiting merge with an exited worker did not surface its first bounded recheck"
+  grep -F "worker exited" "$out" >/dev/null || fail "a done PR awaiting merge did not use the bounded worker-exited reason"
+  grep -Fx "stale: $window" "$out" >/dev/null && fail "a done PR awaiting merge surfaced a bare per-hash stale instead of the bounded recheck"
+  pass "a completed branch awaiting merge approval with an exited worker is bounded like the retained checkpoint"
+}
+
+# req 4 "never suppress a genuine failure, decision, or blocker": the bounded
+# terminal cadence covers every captain-relevant terminal verb uniformly, so a
+# failed/blocked/needs-decision task whose worker exited must still surface EXACTLY
+# once (not zero) before it is throttled - proving the bounding kills the churn
+# without ever swallowing the finding. A changing hash each round is what would
+# flood on the old code; asserting == 1 pins both directions (surfaced, not flooded).
+test_terminal_failure_blocker_decision_dead_agent_surfaces_once() {
+  local verb dir state fakebin out capture_file statusf window key pane_hash round wakes sig pid line
+  for verb in failed blocked needs-decision; do
+    case "$verb" in
+      failed)         line='failed: build broke, worker exited before retry' ;;
+      blocked)        line='blocked: missing credential to finish' ;;
+      needs-decision) line='needs-decision: pick option A or B' ;;
+    esac
+    dir=$(make_case "terminal-$verb-dead"); state="$dir/state"; fakebin="$dir/fakebin"
+    out="$dir/watch.out"; capture_file="$dir/pane.txt"; statusf="$state/t.status"
+    window="test:fm-$verb"
+    printf 'window=%s\nkind=ship\nharness=claude\nbackend=tmux\n' "$window" > "$state/t.meta"
+    printf '%s\n' "$line" > "$statusf"
+    sig=$(seen_sig "$statusf"); printf '%s' "$sig" > "$state/.seen-t_status"
+    key=$(printf '%s' "$window" | tr ':/.' '___')
+    round=1
+    while [ "$round" -le 4 ]; do
+      # A different capture each round: the exited worker's pane churns. On the old
+      # code this surfaced a bare stale every round; the fix surfaces once then bounds.
+      printf 'exited worker idle pane, redraw %s\n' "$round" > "$capture_file"
+      pane_hash=$(hash_text "exited worker idle pane, redraw $round")
+      printf '%s' "$pane_hash" > "$state/.hash-$key"
+      printf '1\n' > "$state/.count-$key"
+      PATH="$fakebin:$PATH" FM_FAKE_TMUX_WINDOW="$window" FM_FAKE_TMUX_CAPTURE="$capture_file" \
+        FM_FAKE_TMUX_CURRENT_COMMAND=zsh FM_FAKE_CREW_STATE="state: unknown · source: none · $verb, worker gone" \
+        FM_STATE_OVERRIDE="$state" FM_CREW_STATE_BIN="$fakebin/fm-crew-state.sh" FM_PAUSE_RESURFACE_SECS=240 FM_POLL=1 FM_SIGNAL_GRACE=1 \
+        FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 "$WATCH" >> "$out" &
+      pid=$!
+      if wait_live "$pid" 15; then reap "$pid"; else wait "$pid" || fail "$verb dead-agent watcher round $round failed"; fi
+      round=$((round + 1))
+    done
+    wakes=$(awk -F '\t' -v w="$window" '$3 == "stale" && $4 == w { n++ } END { print n + 0 }' "$state/.wake-queue")
+    [ "$wakes" -eq 1 ] || fail "a $verb task whose worker exited surfaced $wakes stale wakes across four churning polls (want exactly one: not suppressed, not flooded)"
+    grep -F "worker exited" "$state/.wake-queue" >/dev/null \
+      || fail "the $verb dead-agent surface did not carry the bounded worker-exited reason"
+  done
+  pass "a failed / blocked / needs-decision task whose worker exited surfaces exactly once, then bounds - never suppressed, never flooded"
+}
+
 test_signal_reason_is_actionable_classifier
 test_stale_is_terminal_classifier
 test_scan_captain_relevant_statuses_classifier
@@ -1257,6 +1504,12 @@ test_wedge_escalation_resets_when_pane_becomes_active
 test_nonterminal_stale_not_working_surfaced
 test_nonterminal_stale_paused_absorbed_then_resurfaced
 test_exited_declared_pause_is_bounded_but_live_gate_surfaces
+test_terminal_done_dead_agent_bounded_changing_hash
+test_terminal_done_dead_agent_bounded_stable_hash
+test_terminal_live_agent_surfaces
+test_terminal_transition_out_clears_bounding
+test_terminal_done_pr_awaiting_merge_dead_agent_bounded
+test_terminal_failure_blocker_decision_dead_agent_surfaces_once
 test_secondmate_paused_resurfaces_in_normal_mode
 test_secondmate_nonpaused_stale_remains_suppressed
 test_secondmate_unpause_clears_pause_tracking
