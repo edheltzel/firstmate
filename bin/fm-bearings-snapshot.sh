@@ -45,6 +45,7 @@
 #   --all-queued     include superseded queued items (default: dropped)
 #   --all-recorded-prs include every locally recorded PR
 #   --all-unhealthy  include every unhealthy endpoint
+#   --all-projects   include every project reporting record
 #   --all-pr-repos   query every discovered repository under --include-prs
 #   -h,--help        usage
 #
@@ -64,6 +65,7 @@ FM_BEARINGS_GATES=${FM_BEARINGS_GATES:-20}
 FM_BEARINGS_REPORTS=${FM_BEARINGS_REPORTS:-20}
 FM_BEARINGS_RECORDED_PRS=${FM_BEARINGS_RECORDED_PRS:-20}
 FM_BEARINGS_UNHEALTHY=${FM_BEARINGS_UNHEALTHY:-20}
+FM_BEARINGS_PROJECTS=${FM_BEARINGS_PROJECTS:-40}
 FM_BEARINGS_PR_REPOS=${FM_BEARINGS_PR_REPOS:-10}
 FM_BEARINGS_PR_LIMIT=${FM_BEARINGS_PR_LIMIT:-20}
 FM_BEARINGS_PR_TIMEOUT=${FM_BEARINGS_PR_TIMEOUT:-20}
@@ -80,6 +82,7 @@ validate_bound FM_BEARINGS_GATES "$FM_BEARINGS_GATES"
 validate_bound FM_BEARINGS_REPORTS "$FM_BEARINGS_REPORTS"
 validate_bound FM_BEARINGS_RECORDED_PRS "$FM_BEARINGS_RECORDED_PRS"
 validate_bound FM_BEARINGS_UNHEALTHY "$FM_BEARINGS_UNHEALTHY"
+validate_bound FM_BEARINGS_PROJECTS "$FM_BEARINGS_PROJECTS"
 validate_bound FM_BEARINGS_PR_REPOS "$FM_BEARINGS_PR_REPOS"
 validate_bound FM_BEARINGS_PR_LIMIT "$FM_BEARINGS_PR_LIMIT"
 
@@ -90,7 +93,7 @@ usage: fm-bearings-snapshot.sh [--json] [--include-prs] [--fields <list>]
                                [--all-secondmates] [--all-landed]
                                [--all-reports] [--all-queued]
                                [--all-recorded-prs] [--all-unhealthy]
-                               [--all-pr-repos]
+                               [--all-projects] [--all-pr-repos]
 
 Compact bearings projection over fm-fleet-snapshot.sh. TOON by default.
 Default is LOCAL-ONLY (no network); --include-prs is the only path that fetches.
@@ -99,6 +102,7 @@ Default fields: schema, home, generated, prs, in_flight{id,kind,state,doing},
   secondmates{id,state,doing,provenance,freshness,age_seconds,contradiction,reason},
   decisions_open{id,key,verb,summary,owner}, landed{id,what,artifact,owner},
   gates{id,title,blocked_by,reason,owner}, reports{id,path}, recorded_prs{id,url},
+  projects{id,name,priority,branch,tasks_axi,current_actions,recent_completed,decisions_open,homes},
   unhealthy_endpoints{...} (only when non-empty), omitted{surface,reveal}.
 landed merges this home's Done with registered secondmate homes' Done, bounded by
   a per-home cap (FM_BEARINGS_LANDED_PER_HOME) and an overall cap (FM_BEARINGS_LANDED),
@@ -110,7 +114,7 @@ For every registered secondmate, validated structured state from its own home is
   contradiction evidence and never become current work.
 Opt-in surfaces: --fields bodies|paths|actions|endpoints, --all-in-flight,
   --all-decisions, --all-secondmates, --all-landed, --all-reports, --all-queued, --all-recorded-prs,
-  --all-unhealthy, --all-pr-repos, --include-prs (adds candidate_prs).
+  --all-unhealthy, --all-projects, --all-pr-repos, --include-prs (adds candidate_prs).
 Raise FM_BEARINGS_PR_LIMIT to expand per-repository open-PR results.
 EOF
 }
@@ -125,6 +129,7 @@ ALL_SECONDMATES=0
 ALL_LANDED=0
 ALL_RECORDED_PRS=0
 ALL_UNHEALTHY=0
+ALL_PROJECTS=0
 ALL_PR_REPOS=0
 FIELDS=""
 while [ $# -gt 0 ]; do
@@ -139,6 +144,7 @@ while [ $# -gt 0 ]; do
     --all-landed) ALL_LANDED=1 ;;
     --all-recorded-prs) ALL_RECORDED_PRS=1 ;;
     --all-unhealthy) ALL_UNHEALTHY=1 ;;
+    --all-projects) ALL_PROJECTS=1 ;;
     --all-pr-repos) ALL_PR_REPOS=1 ;;
     --fields) shift; FIELDS=${1:-} ;;
     --fields=*) FIELDS=${1#--fields=} ;;
@@ -289,6 +295,8 @@ MODEL=$(printf '%s' "$SNAP" | jq \
   --argjson all_queued "$ALL_QUEUED" \
   --argjson all_recorded_prs "$ALL_RECORDED_PRS" \
   --argjson all_unhealthy "$ALL_UNHEALTHY" \
+  --argjson projects_n "$FM_BEARINGS_PROJECTS" \
+  --argjson all_projects "$ALL_PROJECTS" \
   --argjson pr_repos_total "$PR_REPOS_TOTAL" \
   --argjson pr_repos_shown "$PR_REPOS_SHOWN" \
   --argjson pr_rows_capped "$PR_ROWS_CAPPED" \
@@ -397,6 +405,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
        | select(($all_reports == 1) or (($rel_ids | index($r.id)) != null))
        | {id, path} ]) as $reports_all
   | ([ .tasks[] | select(.kind != "secondmate" and .pr.url != null and .pr.source == "meta") | {id, url:.pr.url} ]) as $recorded_prs_all
+  | ([ .projects[]? ]) as $projects_all
   | . as $snap
   | {
       schema: "fm-bearings.v1",
@@ -410,7 +419,8 @@ MODEL=$(printf '%s' "$SNAP" | jq \
                             artifact:(.pr_url // .report_path // .local_note // "-"),owner:.home_id})),
       gates: (if $all_queued == 1 then $gates_all else $gates_all[:$gates_n] end),
       reports: (if $all_reports == 1 then $reports_all else $reports_all[:$reports_n] end),
-      recorded_prs: (if $all_recorded_prs == 1 then $recorded_prs_all else $recorded_prs_all[:$recorded_prs_n] end)
+      recorded_prs: (if $all_recorded_prs == 1 then $recorded_prs_all else $recorded_prs_all[:$recorded_prs_n] end),
+      projects: (if $all_projects == 1 then $projects_all else $projects_all[:$projects_n] end)
     }
   | . + (if ($unhealthy_all | length) > 0 then
            {unhealthy_endpoints:(if $all_unhealthy == 1 then $unhealthy_all else $unhealthy_all[:$unhealthy_n] end)}
@@ -443,6 +453,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
         (if $all_queued == 0 and ($gates_all | length) > $gates_n then {surface:("gates showing \($gates_n) of \($gates_all | length)"), reveal:"--all-queued"} else empty end),
         (if $all_reports == 0 and ($reports_all | length) > $reports_n then {surface:("reports showing \($reports_n) of \($reports_all | length)"), reveal:"--all-reports"} else empty end),
         (if $all_recorded_prs == 0 and ($recorded_prs_all | length) > $recorded_prs_n then {surface:("recorded_prs showing \($recorded_prs_n) of \($recorded_prs_all | length)"), reveal:"--all-recorded-prs"} else empty end),
+        (if $all_projects == 0 and ($projects_all | length) > $projects_n then {surface:("projects showing \($projects_n) of \($projects_all | length)"), reveal:"--all-projects"} else empty end),
         (if $all_unhealthy == 0 and ($unhealthy_all | length) > $unhealthy_n then {surface:("unhealthy_endpoints showing \($unhealthy_n) of \($unhealthy_all | length)"), reveal:"--all-unhealthy"} else empty end),
         (if $include_prs == 1 and $pr_repos_total > $pr_repos_shown then {surface:("PR repositories showing \($pr_repos_shown) of \($pr_repos_total)"), reveal:"--all-pr-repos"} else empty end),
         (if $include_prs == 1 and $pr_rows_capped > 0 then {surface:("candidate_prs showing \($candidate_prs | length) of at least \($pr_rows_min_total); capped in \($pr_rows_capped) repo(s)"), reveal:"raise FM_BEARINGS_PR_LIMIT"} else empty end),

@@ -1,7 +1,7 @@
 # OMP Harness Integration - Tasks Axi Roadmap
 
 This roadmap is the human-readable presentation of the OMP harness integration work.
-The executable task records live in `.agent/tasks/backlog.md` and are owned by Tasks Axi, not by this document.
+The executable task records live in `.agents/tasks/backlog.md` and are owned by Tasks Axi, not by this document.
 The revised plan at `.agents/plans/omp-harness-integration-plan.md` is the authority for every full contract detail; this roadmap only maps and points into it.
 
 ## Purpose
@@ -12,15 +12,15 @@ The backlog encodes the plan's unit dependency graph as `blocked-by` edges so th
 
 ## Canonical commands
 
-Every backlog mutation and query must pass the backlog file explicitly with `--file .agent/tasks/backlog.md`.
+Every backlog mutation and query must pass the backlog file explicitly with `--file .agents/tasks/backlog.md`.
 
-- List every task: `tasks-axi list --file .agent/tasks/backlog.md`.
-- Show one task in full: `tasks-axi show omp-u5-primary-extensions --full --file .agent/tasks/backlog.md`.
-- Show what is unblocked and may start now: `tasks-axi ready --file .agent/tasks/backlog.md`.
-- Normalize and re-render the backlog: `tasks-axi render --file .agent/tasks/backlog.md`.
-- Start a unit when its blockers have cleared: `tasks-axi start omp-u0-early-detection-correctness --file .agent/tasks/backlog.md`.
-- Close a shipped unit with its PR: `tasks-axi done omp-u2-identity-config --pr <url> --file .agent/tasks/backlog.md`.
-- Close the U1 scout with its report: `tasks-axi done omp-u1-verification-ledger --report <path> --file .agent/tasks/backlog.md`.
+- List every task: `tasks-axi list --file .agents/tasks/backlog.md`.
+- Show one task in full: `tasks-axi show omp-u5-primary-extensions --full --file .agents/tasks/backlog.md`.
+- Show what is unblocked and may start now: `tasks-axi ready --file .agents/tasks/backlog.md`.
+- Normalize and re-render the backlog: `tasks-axi render --file .agents/tasks/backlog.md`.
+- Start a unit when its blockers have cleared: `tasks-axi start omp-u0-early-detection-correctness --file .agents/tasks/backlog.md`.
+- Close a shipped unit with its PR: `tasks-axi done omp-u2-identity-config --pr <url> --file .agents/tasks/backlog.md`.
+- Close the U1 scout with its report: `tasks-axi done omp-u1-verification-ledger --report <path> --file .agents/tasks/backlog.md`.
 
 ## Phase order and dependency graph
 
@@ -162,4 +162,4 @@ Documentation may call OMP verified only when both CI and the pre-merge live led
 ## Authority
 
 The revised plan at `.agents/plans/omp-harness-integration-plan.md` is the single authority for full requirement text, acceptance examples, the complete live matrix, component design, and the Definition of Done.
-This roadmap and the `.agent/tasks/backlog.md` records are a navigation and dispatch surface over that plan, not a second source of truth.
+This roadmap and the `.agents/tasks/backlog.md` records are a navigation and dispatch surface over that plan, not a second source of truth.

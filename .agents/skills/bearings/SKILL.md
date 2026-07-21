@@ -1,6 +1,6 @@
 ---
 name: bearings
-description: Generate a "pick up where I left off" status report from firstmate's live fleet state. Use when the captain invokes /bearings or asks for a bearings report, morning brief, status report, catch-up, "where did I leave off", or "what's in the works". Reads bounded local fleet state cheaply, optionally checks open PRs when requested, composes a scannable dated report to data/status-report-<YYYY-MM-DD>.md, and surfaces a concise version in chat; it is read-mostly and must not tear down, merge, or mutate task state as a side effect of producing the brief.
+description: Generate a "pick up where I left off" status report from firstmate's live fleet state. Use when the captain invokes /bearings, asks for a bearings report or morning brief, requests a catch-up, asks "where did I leave off", or asks "what's in the works". Reads bounded local fleet state cheaply, optionally checks open PRs when requested, composes a scannable dated report to data/status-report-<YYYY-MM-DD>.md, and returns only that file path in chat; it is read-mostly and must not tear down, merge, or mutate task state as a side effect of producing the brief.
 user-invocable: true
 metadata:
   internal: true
@@ -9,7 +9,7 @@ metadata:
 # bearings
 
 Generate a complete standalone snapshot from the fleet's current state, so the captain can resume in one read after a break, a night, or a context reset.
-The deliverable is a dated markdown file plus a concise chat summary that each stand on the current snapshot rather than an earlier report.
+The deliverable is one dated markdown file and the only chat response is its path.
 This skill is read-mostly.
 It reads fleet state and writes exactly one report file.
 It never tears down a task, merges a PR, dispatches new work, or mutates any task state as a side effect of producing the brief - those belong to the captain's explicit word and the normal task lifecycle.
@@ -27,46 +27,37 @@ It never tears down a task, merges a PR, dispatches new work, or mutates any tas
    Structured captain-held decisions come from `decision-hold-lifecycle` and appear under `decisions_open`; do not scrape reports or visual-review artifacts to supplement them.
    A queued item under `gates` only becomes "next work" when its blocker is gone and its time/date gate has arrived; until then it stays queued with the reason.
 
-2. **Compose the detailed report file around the four-section spine, adding the richer detail the chat leaves out.**
+2. **Compose the detailed report file around the project-centered Capt’s Debrief structure.**
    The gather step is deterministic; your judgment is scoped to the last mile only - ranking the command's facts by what matters right now and writing the scannable prose.
    Never read an earlier `data/status-report-*.md` to decide what to omit, include, describe as changed, or call current.
-   The report uses the same four complete sections as the chat (see the chat-response contract below), in the same order, each always present, and adds the detail the chat omits:
-   - **Title** - `# Bearings - <day> <YYYY-MM-DD>` (use "Morning status" only when the captain specifically asks for a morning brief), followed by two or three sentences framing where things stand.
-   - **Captain's Call** - every open decision summarized with its options from the structured decision record, plus each PR ready to merge and each needed credential or login, every PR with the full `https://...` URL, never a bare `#number`.
-   - **Recently Landed** - the bounded current recent-completions baseline from structured state across the main fleet and every registered secondmate home, rendered in full on every run.
-   - **Underway** - each live direct report making progress, with its current state, and the plans / main pickup pointers worth reopening (`data/<id>/report.md` files, `.lavish/*.html` boards).
-   - **Charted Next** - queued or gated next work, with each item's blocker or date reason.
+   The report uses the complete current project-centered structure defined in the detailed file contract below.
+   - **Title** - `# Capt’s Debrief` followed by the snapshot date, source, and freshness note.
+   - **Projects** - each project is a GitHub Projects-compatible group with identity, Tasks Axi state counts, progress evidence, priority, active or default branch, current action items, and recent completions.
+   - **Captain decisions** - every open decision, review, approval, credential, or login with `needs:human`, explicit response options, and its project.
+   - **Recent completions** - the bounded current recent-completions baseline from structured state across the main fleet and every registered secondmate home, rendered in full on every run.
+   - **Underway** - each live direct report making progress, with its current Tasks Axi state and the plans or main pickup pointers worth reopening, including `data/<id>/report.md` files and `.lavish/*.html` boards.
+   - **Queued/gated work** - queued, blocked, and held work with each blocker, date reason, or `needs:human` response.
+   - **Reports** - current scout or investigation report pointers.
+   - **Pull requests** - locally recorded PRs by default, with live PR discovery and checks only when explicitly requested by the captain.
+   - **Secondmate state** - each registered secondmate's structured state, provenance, freshness, active child work, and return-channel condition.
+   - **Blockers** - blocked work, unhealthy endpoints, unavailable structured homes, and captain-owned blockers with `needs:human` options.
+   - **Omitted surface** - every bounded or opt-in surface omitted from the snapshot, with its reveal flag or reason.
+   - **Freshness and provenance** - snapshot generation time, local-only or live source, structured-home provenance, and any stale, fallback, contradiction, or unavailable evidence.
 
-3. **Write the dated report file so it persists, then surface the mandatory four-section digest in chat.**
+3. **Write the dated report file so it persists, then return only its path in chat.**
    - Write the full report to `data/status-report-<YYYY-MM-DD>.md` using today's date.
      This is the required artifact; it lives in gitignored `data/`.
      If today's file already exists, delete it first, then create a new file from scratch.
-   - The chat response is the concise four-section digest defined by the contract below: materially shorter than the report file, complete as a current snapshot, internally consistent with the file, and linked to that file for the full picture.
-   - For a richer review surface, optionally offer a Lavish board with `lavish-axi` when the report has enough structure to deserve one, but the markdown file is the required artifact and the four-section chat digest is the required minimum.
+   - The chat response is exactly `data/status-report-<YYYY-MM-DD>.md` and contains no inline digest, summary, link wrapper, or additional section.
+   - Do not open a Lavish board or create any second artifact as part of `/bearings`.
 
-## Chat-response contract
+## Detailed file contract
 
-This skill is the one owner of the `/bearings` chat-response format; the snapshot and classifier own the data that feeds it, and no other file restates this contract.
-Every `/bearings` chat response renders EXACTLY these four sections, in THIS order, and nothing else structural (there is no At Anchor section):
-
-1. **Captain's Call** - ONLY items that need the captain's own action now: a decision to make, a PR to approve or merge, a credential or login to provide, or a blocker only the captain can clear.
-   Empty-state: "Nothing needs your action right now."
-2. **Recently Landed** - the bounded current recent-completions baseline: merged PRs, completed scouts, and finished local-only merges across the main fleet and every registered secondmate home.
-   Empty-state: "No recent completions are in the current baseline."
-3. **Underway** - live work progressing on its own, one line of current state per direct report.
-   Empty-state: "Nothing is underway."
-4. **Charted Next** - queued or gated work waiting on the fleet or a date, never on the captain.
-   Empty-state: "Nothing is queued."
-
-Rules that keep the contract unambiguous:
-
-- Every section ALWAYS renders, even when empty, with its short empty-state sentence; never omit a section.
-- Every report and chat digest is a complete current snapshot, never a delta against a prior report.
-- Recently Landed always renders the bounded current baseline, even when the same completions appeared in an earlier report.
-- The four buckets are mutually exclusive, so every item is forced into exactly one: needs-your-action is Captain's Call, done is Recently Landed, self-progressing is Underway, not-yet-started is Charted Next.
-- The strict boundary keeps action-free items OUT of Captain's Call: a working or validating task, a queued item blocked on another task or a date, landed work, a completed scout's report pointer, a declared `paused:` external wait, and a bare recorded PR with no merge-ready signal each belong to one of the other three sections, never Captain's Call.
-- A secondmate appears Underway only for `active_child_work`; `externally_held` belongs in Charted Next, and `unknown` belongs there as an unavailable-state gate unless its reason requires the captain's action.
-- The chat follows `AGENTS.md` section 9 and carries one scannable line per item, each PR as the full `https://...` URL; detailed decisions, plans, full gate reasons, and evidence live only in the report file, which the chat links to, so the chat stays materially shorter than that file.
+This skill is the one owner of the `/bearings` detailed Markdown file format.
+The inline `/status-report` format is owned by [`status-report`](../status-report/SKILL.md), and this file preserves that project's identity, state, priority, branch, progress, and action-item spine in richer detail.
+Every detailed report is a complete current snapshot, never a delta against an earlier report.
+Every current action item uses Tasks Axi state names, and every captain-owned item is marked `needs:human` with explicit response options.
+Projects with only recent completions may appear in this file because the detailed report preserves the complete current Bearings baseline.
 
 ## Tone and content rules
 
@@ -78,4 +69,4 @@ Rules that keep the contract unambiguous:
 
 This skill is read-mostly and changes no fleet state.
 Do not tear down a task, merge a PR, dispatch queued work, or mutate any `state/` or `data/` file other than the single report file as a side effect of generating the brief.
-If the state you read suggests an action - a PR ready to merge, a queued item whose gate has arrived, a needs-decision finding - name it in its section (a captain action under "Captain's Call", queued or gated work under "Charted Next") and let the captain decide, rather than taking the action from inside this skill.
+If the state you read suggests an action - a PR ready to merge, a queued item whose gate has arrived, a needs-decision finding, or an unhealthy endpoint - name it in the relevant detailed section and let the captain decide, rather than taking the action from inside this skill.

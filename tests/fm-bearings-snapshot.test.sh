@@ -1368,33 +1368,76 @@ test_captains_call_anti_leak() {
   pass "action-free items (working/done/queued/landed) do not leak into Captain's Call"
 }
 
-# The /bearings skill is the one owner of the four-section chat-response contract.
-# Assert it states exactly the four fixed sections in order, each with its explicit
-# empty-state sentence, documents the At Anchor exclusion, and mandates a chat that is
-# materially shorter than and links to the report file.
-test_chat_contract_four_sections() {
-  local skill body headings report_headings expected
+# The /bearings skill owns the detailed file contract, while chat returns only the
+# dated file path. Keep this check focused on ownership and preserved categories.
+test_detailed_file_contract_and_file_only_response() {
+  local skill body
   skill="$ROOT/.agents/skills/bearings/SKILL.md"
   [ -f "$skill" ] || fail "bearings SKILL.md missing at $skill"
-  body=$(awk '/^## Chat-response contract$/{capture=1; next} capture && /^## /{exit} capture' "$skill")
-  headings=$(printf '%s\n' "$body" | sed -nE "s/^[0-9]+\. \*\*([^*]+)\*\*.*/\1/p")
-  expected=$(printf '%s\n' "Captain's Call" "Recently Landed" "Underway" "Charted Next")
-  [ "$headings" = "$expected" ] || fail "chat contract must contain exactly four numbered sections in fixed order, got: $headings"
-  assert_contains "$body" "Nothing needs your action right now" "Captain's Call empty-state sentence"
-  assert_contains "$body" "No recent completions are in the current baseline" "Recently Landed empty-state sentence"
-  assert_contains "$body" "Nothing is underway" "Underway empty-state sentence"
-  assert_contains "$body" "Nothing is queued" "Charted Next empty-state sentence"
-  report_headings=$(sed -nE 's/^   - \*\*(Captain.s Call|Recently Landed|Underway|Charted Next)\*\*.*/\1/p' "$skill")
-  [ "$report_headings" = "$expected" ] || fail "detailed report contract must contain the same four complete sections, got: $report_headings"
-  grep -Eq 'since the (prior|last) report|Nothing has landed since|unchanged delta' "$skill" \
-    && fail "bearings contract still contains prior-report delta wording"
-  # shellcheck disable=SC2016 # Backticks are literal Markdown in the expected text.
-  assert_contains "$(cat "$skill")" 'Never read an earlier `data/status-report-*.md`' "prior reports must not influence current output"
-  assert_contains "$(cat "$skill")" "bounded current recent-completions baseline" "Recently Landed must be a current baseline"
-  assert_contains "$body" "no At Anchor section" "the At Anchor exclusion must be documented"
-  assert_contains "$body" "materially shorter" "the chat must be materially shorter than the report file"
-  assert_contains "$body" "links to" "the chat must link to the report file"
-  pass "the /bearings skill states the four-section chat contract in order, with empty-states and the At Anchor exclusion"
+  body=$(sed -n '1,220p' "$skill")
+  assert_contains "$body" "The chat response is exactly \`data/status-report-<YYYY-MM-DD>.md\`" "bearings chat must return only the file path"
+  assert_contains "$body" "# Capt’s Debrief" "detailed report title"
+  for category in "Captain decisions" "Recent completions" "Underway" "Queued/gated work" "Reports" "Pull requests" "Secondmate state" "Blockers" "Omitted surface" "Freshness and provenance"; do
+    assert_contains "$body" "$category" "detailed report preserves $category"
+  done
+  assert_contains "$body" "Projects" "detailed report is project-centered"
+  assert_contains "$body" "needs:human" "captain-owned detailed items are marked"
+  assert_contains "$body" "explicit response options" "captain-owned detailed items have options"
+  if grep -q "Chat-response contract\|four complete sections\|materially shorter" "$skill"; then
+    fail "bearings must not retain the former inline chat contract"
+  fi
+  pass "bearings owns the rich Capt’s Debrief file and returns only its path in chat"
+}
+
+test_project_reporting_model() {
+  local home fakebin json repo
+  home=$(make_home project-model)
+  mkdir -p "$home/projects/alpha-wt"
+  cat > "$home/data/backlog.md" <<'EOF'
+## In flight
+- [ ] build - Build feature (repo: alpha) (kind: ship) (priority: 2) (since 2026-07-21)
+
+## Queued
+- [ ] review - Review release (repo: alpha) (kind: captain) (priority: 1) (hold: choose release path) (hold-kind: captain)
+- [ ] gate - Gated follow-up blocked-by: build - wait for build (repo: alpha) (kind: ship) (priority: 3)
+
+## Done
+- [x] alpha-done - Alpha baseline (repo: alpha) (kind: ship) (done 2026-07-20)
+- [x] beta-done - Beta baseline (repo: beta) (kind: ship) (done 2026-07-20)
+EOF
+  repo="$home/projects/alpha-wt"
+  fm_git_init_commit "$repo"
+  git -C "$repo" branch -M main
+  git -C "$repo" checkout -qb feature/reporting
+  fm_write_meta "$home/state/build.meta" \
+    "window=firstmate:fm-build" "worktree=$repo" "project=alpha" \
+    "harness=codex" "kind=ship" "mode=local-only"
+  printf 'working: build in progress\n' > "$home/state/build.status"
+  fakebin=$(make_fakebin "$home")
+  json=$(run "$home" "$fakebin" --json)
+  printf '%s' "$json" | jq -e '
+    (.projects | map(.id)) == ["alpha", "beta"]
+      and (.projects[] | select(.id == "alpha")
+        | .branch.active == ["feature/reporting"]
+        and .branch.default == ["main"]
+        and .branch.selected == ["feature/reporting"]
+        and .tasks_axi.counts.total == 4
+        and .tasks_axi.counts.current == 3
+        and .tasks_axi.counts.completed == 1
+        and .tasks_axi.counts.in_flight == 1
+        and .tasks_axi.counts.queued == 1
+        and .tasks_axi.counts.held == 1
+        and .tasks_axi.counts.blocked == 1
+        and .tasks_axi.progress.percent == 25
+        and .tasks_axi.progress.source == "tasks_axi_records"
+        and (.current_actions | length) == 3
+        and (.decisions_open | any(.[]; .verb == "captain-hold"))
+      )
+      and (.projects[] | select(.id == "beta")
+        | .tasks_axi.progress.percent == 100
+        and (.current_actions | length) == 0)
+  ' >/dev/null || fail "project reporting model did not expose state, counts, progress, branches, or decisions: $json"
+  pass "project reporting exposes action counts, progress evidence, branch selection, and decision data"
 }
 
 test_domain_alpha_stale_parent_event_does_not_become_current_work
@@ -1421,7 +1464,8 @@ test_all_landed_keeps_complete_global_order
 test_landed_bounded_and_disclosed
 test_live_blocker_is_not_charted_queue_work
 test_captains_call_anti_leak
-test_chat_contract_four_sections
+test_detailed_file_contract_and_file_only_response
+test_project_reporting_model
 test_completed_scout_report_not_pending
 test_open_decision_surfaces_end_to_end
 test_report_pointers_surface
