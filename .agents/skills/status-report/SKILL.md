@@ -32,39 +32,29 @@ Report `unknown` instead of inventing a percentage when no defensible denominato
 ## Inline report contract
 
 Render this project-centered GitHub Projects-compatible layout and keep it concise.
+Use one flat ordered project list with no group headings or per-project headings.
 
 ```text
 Capt’s Debrief
 As of: <snapshot time> | Source: local snapshot [or live GitHub status]
 
-## Actively progressing
-### <project>
-Status: <Tasks Axi state name>
-Priority: <number or unknown>
-Branch: <active branch name(s), or repository default branch when no active branch exists>
-Progress: <percentage or unknown> (<completed>/<scoped> complete)
-Actions: <current Tasks Axi record count>
-- [<Tasks Axi state>] <current action>
-
-## Blocked or held
-### <project>
-Status: <Tasks Axi state name>
-...
-
-## Captain-awaited
-### <project>
-Status: <Tasks Axi state name>
-...
+- <Project> - <percentage or unknown> complete
+  Branch: <active branch name(s), or repository default branch when no active branch exists>
+  <one concise self-contained summary>
+  <Tasks Axi state>: <N> action item(s) [needs:human]
+  - <current action> - <percentage or unknown> complete [needs:human]
+    - Options: <explicit options when needs:human>
 ```
 
-Use `in_flight`, `queued`, `held`, and `done` as the Tasks Axi state vocabulary.
+Use `in_flight`, `queued`, `held`, and `done` as the Tasks Axi state vocabulary, while the snapshot classification orders self-progressing, blocked-or-held, and captain-awaited projects.
+Keep the project identity folded to the registered project key from the snapshot's persisted `project_key` when a clone basename or legacy task value is an alias.
 Represent a blocker as blocker evidence on the record or project while retaining its Tasks Axi state.
 Use `needs:human` on every captain-owned review, approval, choice, response, credential request, or blocker-clearing action.
 Every `needs:human` line must include concise explicit response options such as `Options: approve / request changes` or the actual alternatives from the decision record.
 Count each Tasks Axi record as exactly one action item, never each sentence, subtask, status event, or child process.
 List only current action items inline.
 Represent completed records only through progress percentages and completed/scoped counts.
-Use each active branch name from the snapshot.
+Use each active Treehouse branch name from the snapshot.
 When a project has no active branch, display its repository default branch.
 Order projects with self-progressing `in_flight` work first, blocked or held work second, and projects whose only current work is `needs:human` last.
 Within each group, sort by numeric priority ascending with unknown priorities last, then by project name.

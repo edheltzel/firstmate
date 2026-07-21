@@ -1428,16 +1428,111 @@ EOF
         and .tasks_axi.counts.queued == 1
         and .tasks_axi.counts.held == 1
         and .tasks_axi.counts.blocked == 1
-        and .tasks_axi.progress.percent == 25
-        and .tasks_axi.progress.source == "tasks_axi_records"
+        and .tasks_axi.progress.percent == null
+        and .tasks_axi.progress.source == "unknown"
+        and .tasks_axi.progress.evidence.scoped_records == null
         and (.current_actions | length) == 3
         and (.decisions_open | any(.[]; .verb == "captain-hold"))
       )
       and (.projects[] | select(.id == "beta")
-        | .tasks_axi.progress.percent == 100
+        | .tasks_axi.progress.percent == null
         and (.current_actions | length) == 0)
   ' >/dev/null || fail "project reporting model did not expose state, counts, progress, branches, or decisions: $json"
   pass "project reporting exposes action counts, progress evidence, branch selection, and decision data"
+}
+
+test_reporting_reconciles_done_local_branch_and_aliases() {
+  local home fakebin json repo
+  home=$(make_home reporting-reconciled)
+  repo="$home/projects/ready-wt"
+  mkdir -p "$repo"
+  fm_git_init_commit "$repo"
+  git -C "$repo" branch -M main
+  git -C "$repo" checkout -qb fm/ready-task
+  cat > "$home/data/backlog.md" <<'EOF'
+## In flight
+- [ ] ready-task - Ready local implementation (repo: Agent-Themis) (kind: ship) (priority: 1)
+
+## Queued
+
+## Done
+- [x] old-firstmate - Older Firstmate completion (repo: Firstmate) (kind: ship) (done 2026-07-20)
+EOF
+  fm_write_meta "$home/state/ready-task.meta" \
+    "window=firstmate:fm-ready-task" "worktree=$repo" \
+    "project=/Users/ed/Developer/Firstmate" "project_key=Agent-Themis" \
+    "harness=codex" "kind=ship" "mode=local-only"
+  printf 'done: ready in branch fm/ready-task\n' > "$home/state/ready-task.status"
+  fakebin=$(make_fakebin "$home")
+  json=$(run "$home" "$fakebin" --json)
+  printf '%s' "$json" | jq -e '
+    (.projects | map(.id)) == ["Agent-Themis"]
+      and (.projects[0].reporting_group == 2)
+      and (.projects[0].branch.active == ["fm/ready-task"])
+      and (.projects[0].branch.default == ["main"])
+      and (.projects[0].tasks_axi.counts.blocked == 0)
+      and (.projects[0].tasks_axi.progress.percent == null)
+      and (.projects[0].current_actions | length) == 1
+      and (.projects[0].current_actions[0].state == "in_flight")
+      and (.projects[0].current_actions[0].current_state == "done")
+      and (.projects[0].current_actions[0].classification == "captain_awaited")
+      and (.projects[0].current_actions[0].needs_human == true)
+      and ((.projects[0].current_actions[0].options | index("approve local merge")) != null)
+      and ((.projects[0].current_actions[0].options | index("hold for changes")) != null)
+      and (.projects[0].recent_completed | length) == 1
+  ' >/dev/null || fail "reconciled local-ready work was not captain-awaited or aliases were not folded: $json"
+  pass "reporting reconciles authoritative done state, local merge readiness, and project-key aliases"
+}
+
+test_reporting_uses_default_branch_for_held_project_without_task_meta() {
+  local home fakebin json repo
+  home=$(make_home reporting-default-branch)
+  repo="$home/projects/LifeOS"
+  mkdir -p "$repo"
+  fm_git_init_commit "$repo"
+  git -C "$repo" branch -M main
+  cat > "$home/data/projects.md" <<'EOF'
+- LifeOS [no-mistakes] - fixture project (added 2026-07-21)
+EOF
+  cat > "$home/data/backlog.md" <<'EOF'
+## In flight
+
+## Queued
+- [ ] life-decision - Choose release path (repo: LifeOS) (kind: captain) (hold: choose path) (hold-kind: captain)
+
+## Done
+EOF
+  fakebin=$(make_fakebin "$home")
+  json=$(run "$home" "$fakebin" --json)
+  printf '%s' "$json" | jq -e '
+    (.projects | map(.id)) == ["LifeOS"]
+      and .projects[0].branch.active == []
+      and .projects[0].branch.default == ["main"]
+      and .projects[0].branch.selected == ["main"]
+      and .projects[0].current_actions[0].needs_human == true
+      and ((.projects[0].current_actions[0].options | length) > 0)
+  ' >/dev/null || fail "held project without task metadata did not use its registered clone default branch: $json"
+  pass "held projects without active task metadata use the registered clone default branch"
+}
+
+test_reporting_project_order_uses_classification_then_priority() {
+  local home fakebin json
+  home=$(make_home reporting-order)
+  cat > "$home/data/backlog.md" <<'EOF'
+## In flight
+- [ ] active - Active work (repo: Active) (kind: ship) (priority: 9)
+
+## Queued
+- [ ] blocked - Blocked work blocked-by: missing - wait (repo: Blocked) (kind: ship) (priority: 1)
+- [ ] awaited - Captain choice (repo: Awaited) (kind: captain) (priority: 1) (hold: choose) (hold-kind: captain)
+
+## Done
+EOF
+  fakebin=$(make_fakebin "$home")
+  json=$(run "$home" "$fakebin" --json)
+  [ "$(printf '%s' "$json" | jq -r '.projects | map(.id) | join(",")')" = "Active,Blocked,Awaited" ] \
+    || fail "project order did not put active, blocked, and captain-awaited groups in order: $json"
+  pass "project ordering follows self-progressing, blocked, then captain-awaited groups"
 }
 
 test_domain_alpha_stale_parent_event_does_not_become_current_work
@@ -1466,6 +1561,9 @@ test_live_blocker_is_not_charted_queue_work
 test_captains_call_anti_leak
 test_detailed_file_contract_and_file_only_response
 test_project_reporting_model
+test_reporting_reconciles_done_local_branch_and_aliases
+test_reporting_uses_default_branch_for_held_project_without_task_meta
+test_reporting_project_order_uses_classification_then_priority
 test_completed_scout_report_not_pending
 test_open_decision_surfaces_end_to_end
 test_report_pointers_surface

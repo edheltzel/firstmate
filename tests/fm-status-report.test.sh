@@ -16,6 +16,12 @@ test_trigger_semantics() {
   assert_contains "$BODY" "Do not trigger for a report about a named subject" "named subject requests stay with their subject"
   assert_contains "$BODY" "Return only the inline report" "status-report is inline-only"
   assert_contains "$BODY" "Capt’s Debrief" "status-report title"
+  assert_contains "$BODY" "one flat ordered project list" "flat project list"
+  assert_contains "$BODY" "no group headings or per-project headings" "no category headings"
+  assert_contains "$BODY" "<Project> - <percentage or unknown> complete" "exact project spine"
+  assert_not_contains "$BODY" "## Actively progressing" "flat report must not add an active section heading"
+  assert_not_contains "$BODY" "## Blocked or held" "flat report must not add a blocked section heading"
+  assert_not_contains "$BODY" "## Captain-awaited" "flat report must not add a captain section heading"
   pass "status-report trigger semantics and inline title are explicit"
 }
 
@@ -25,6 +31,7 @@ test_active_filter_order_and_counts() {
   assert_contains "$BODY" "Order projects with self-progressing \`in_flight\` work first" "project ordering"
   assert_contains "$BODY" "numeric priority ascending" "priority ordering"
   assert_contains "$BODY" "Count each Tasks Axi record as exactly one action item" "action-item counting"
+  assert_contains "$BODY" "folded to the registered project key" "canonical project identity"
   assert_contains "$BODY" "List only current action items inline" "completed action omission"
   pass "status-report filters active projects, orders them, and counts records"
 }
