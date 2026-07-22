@@ -49,6 +49,8 @@
 # it carries the AGENTS.md authoring bar (widely useful knowledge only, pointers
 # over copied detail) and has the crewmate add the fm-ensure-agents-md.sh
 # self-governance section when a touched project AGENTS.md lacks it.
+# Every ship and scout brief includes one shared commit-discipline section so
+# completed work is committed incrementally and the worktree is clean at done.
 # Refuses to overwrite an existing brief.
 set -eu
 
@@ -237,6 +239,16 @@ EOF
 )
 fi
 
+COMMIT_DISCIPLINE_SECTION=$(cat <<'EOF'
+# Commit discipline
+Commit each completed feature or fix as its own coherent commit as soon as it is finished.
+For a large task, build a sequence of focused commits instead of one end-of-task batch; commit more often, not less.
+Give every hotfix or small correction its own small commit rather than folding it into unrelated work.
+Write commit messages that communicate the value delivered so the history reads cleanly and can be squashed or rebased safely at PR time.
+Never report `done` with a dirty working tree: uncommitted work is not landed work, and firstmate cleanup will refuse it.
+EOF
+)
+
 if [ "$KIND" = scout ]; then
 cat > "$BRIEF" <<EOF
 You are a crewmate: an autonomous worker agent managed by firstmate. Work on your own; do not wait for a human.
@@ -273,6 +285,8 @@ The report is the only thing that survives, so anything worth keeping must be in
 7. Never stop, restart, or update the shared \`no-mistakes\` daemon - it is one instance serving
    every lane/home, so restarting it kills other lanes' in-flight pipeline runs. On ANY no-mistakes
    daemon error, append \`blocked: {the daemon error}\` and stop; only firstmate manages the daemon.
+
+$COMMIT_DISCIPLINE_SECTION
 
 # Definition of done
 Write your findings to \`$DATA/$ID/report.md\`.
@@ -383,6 +397,8 @@ $RULE1
 7. Never stop, restart, or update the shared \`no-mistakes\` daemon - it is one instance serving
    every lane/home, so restarting it kills other lanes' in-flight pipeline runs. On ANY no-mistakes
    daemon error, append \`blocked: {the daemon error}\` and stop; only firstmate manages the daemon.
+
+$COMMIT_DISCIPLINE_SECTION
 
 # Project memory
 If \`AGENTS.md\` or \`CLAUDE.md\` already exists, or if this task produced durable project-intrinsic knowledge, run \`$FM_ROOT/bin/fm-ensure-agents-md.sh .\` in the worktree.
