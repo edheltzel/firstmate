@@ -13,6 +13,19 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fail() { printf 'not ok - %s\n' "$1" >&2; cleanup_all; exit 1; }
 pass() { printf 'ok - %s\n' "$1"; }
 
+wait_for_capture_text() {  # <target> <text> [samples]
+  local target=$1 text=$2 samples=${3:-100} out i=0
+  while [ "$i" -lt "$samples" ]; do
+    out=$(fm_backend_tmux_capture "$target" 200 2>/dev/null || true)
+    case "$out" in
+      *"$text"*) return 0 ;;
+    esac
+    sleep 0.1
+    i=$((i + 1))
+  done
+  return 1
+}
+
 command -v tmux >/dev/null 2>&1 || { echo "skip: tmux not found"; exit 0; }
 REAL_TMUX=$(command -v tmux)
 SOCKET="fm-backend-smoke-$$"
@@ -48,6 +61,11 @@ TARGET="$SESSION:$WINDOW"
 
 tmux new-session -d -s "$SESSION" -x 200 -y 50 \
   || fail "real tmux: new-session failed"
+# The host's interactive shell may be fish or another non-POSIX shell, while
+# this smoke fixture deliberately sends portable sh syntax through the pane.
+# Pin only the isolated test server's future windows to the system Bash.
+tmux set-option -t "$SESSION" default-shell /bin/bash \
+  || fail "real tmux: could not pin the isolated smoke server to Bash"
 fm_backend_tmux_create_task "$SESSION" "$WINDOW" "$HOME" \
   || fail "fm_backend_tmux_create_task failed to create the task window"
 tmux list-windows -t "$SESSION" -F '#{window_name}' | grep -qx "$WINDOW" \
@@ -62,14 +80,29 @@ pass "real tmux: fm_backend_tmux_create_task creates a window and refuses a dupl
 
 # --- send text + Enter -------------------------------------------------------
 
-tmux send-keys -t "$TARGET" "cd /tmp && PS1='smoke\$ '" Enter
-sleep 0.3
-tmux send-keys -t "$TARGET" -l "clear" ; tmux send-keys -t "$TARGET" Enter
-sleep 0.3
+# A newly-created interactive shell can exist before its startup files and line
+# editor are ready to accept Enter. Prove command execution with an output token
+# that does not appear contiguously in the command, retrying the harmless probe
+# until the shell acknowledges it.
+SHELL_READY=false
+for _ in $(seq 1 100); do
+  tmux send-keys -t "$TARGET" C-c
+  tmux send-keys -t "$TARGET" -l "printf 'shell-%s\\n' ready"
+  tmux send-keys -t "$TARGET" Enter
+  if wait_for_capture_text "$TARGET" "shell-ready" 10; then
+    SHELL_READY=true
+    break
+  fi
+done
+[ "$SHELL_READY" = true ] || fail "the tmux task shell did not become ready"
 
-fm_backend_tmux_send_text_line "$TARGET" "echo captain-on-deck-line" \
+tmux send-keys -t "$TARGET" "cd /tmp && PS1='smoke\$ ' && clear && printf 'setup-%s\\n' ready" Enter
+wait_for_capture_text "$TARGET" "setup-ready" || fail "the tmux task shell did not complete setup"
+
+fm_backend_tmux_send_text_line "$TARGET" "printf 'captain-on-deck-%s\\n' line" \
   || fail "fm_backend_tmux_send_text_line failed"
-sleep 0.5
+wait_for_capture_text "$TARGET" "captain-on-deck-line" \
+  || fail "fm_backend_tmux_send_text_line did not execute"
 out=$(fm_backend_tmux_capture "$TARGET" 20) || fail "fm_backend_tmux_capture failed after send_text_line"
 case "$out" in
   *captain-on-deck-line*) : ;;
@@ -80,11 +113,11 @@ pass "real tmux: fm_backend_tmux_send_text_line sends literal text and submits w
 # --- send_literal + send_key(Enter), the two-step form fm-spawn.sh uses for the
 # harness launch command (literal send, settle, then a separate Enter) --------
 
-fm_backend_tmux_send_literal "$TARGET" 'echo literal-then-key-captain' \
+fm_backend_tmux_send_literal "$TARGET" "printf 'literal-then-key-%s\\n' captain" \
   || fail "fm_backend_tmux_send_literal failed"
-sleep 0.2
 fm_backend_tmux_send_key "$TARGET" Enter || fail "fm_backend_tmux_send_key Enter failed"
-sleep 0.5
+wait_for_capture_text "$TARGET" "literal-then-key-captain" \
+  || fail "fm_backend_tmux_send_literal + fm_backend_tmux_send_key Enter did not execute"
 out=$(fm_backend_tmux_capture "$TARGET" 20) || fail "fm_backend_tmux_capture failed after send_literal+send_key"
 case "$out" in
   *literal-then-key-captain*) : ;;
@@ -99,7 +132,8 @@ pass "real tmux: fm_backend_tmux_send_literal + fm_backend_tmux_send_key Enter s
 # far enough to still see the earliest line - the same -S -N bounding fm-peek.sh
 # and fm-watch.sh rely on for a bounded, cheap pane read.
 fm_backend_tmux_send_text_line "$TARGET" "for i in \$(seq 1 80); do echo tag-line-\$i; done"
-sleep 0.6
+wait_for_capture_text "$TARGET" "tag-line-80" \
+  || fail "the numbered output did not complete before capture"
 small=$(fm_backend_tmux_capture "$TARGET" 3) || fail "fm_backend_tmux_capture (small window) failed"
 case "$small" in
   *tag-line-1$'\n'*) fail "a 3-line capture should not still see the very first numbered line"$'\n'"$small" ;;
