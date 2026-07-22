@@ -692,6 +692,101 @@ test_create_task_creates_and_parses_ids() {
   pass "fm_backend_herdr_create_task: creates a tab and parses tab_id/pane_id from the JSON response, prunes nothing when no seeded tab id is given"
 }
 
+test_create_task_reports_pane_and_workspace_metadata_after_creation() {
+  local dir log resp fb out calls create_line schema_line pane_line workspace_line
+  dir="$TMP_ROOT/create-task-metadata"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  printf '{"result":{"tabs":[]}}\n' > "$resp/1.out"
+  printf '{"result":{"tab":{"tab_id":"w1:t2"},"root_pane":{"pane_id":"w1:p2"}}}\n' > "$resp/2.out"
+  printf '{"protocol":17,"schemas":{"request":{"oneOf":[{"properties":{"method":{"const":"pane.report_metadata"}}},{"properties":{"method":{"const":"workspace.report_metadata"}}}]}}}\n' > "$resp/3.out"
+  fb=$(make_herdr_fakebin "$dir")
+  out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_create_task fmtest:w1 fm-herdr-metadata-m5 /tmp/proj "" herdr-metadata-m5 Agent-Themis codex Firstmate-Fleet' "$ROOT" ) \
+    || fail "create_task should succeed when pane and workspace metadata are reported"
+  [ "$out" = "w1:t2 w1:p2" ] || fail "metadata reporting must not change create_task output, got '$out'"
+  calls=$(cat "$log")
+  assert_contains "$calls" $'\x1f''api'$'\x1f''schema'$'\x1f''--json' \
+    "create_task did not capability-check the installed metadata surface"
+  assert_contains "$calls" $'\x1f''pane'$'\x1f''report-metadata'$'\x1f''w1:p2'$'\x1f''--source'$'\x1f''firstmate'$'\x1f''--title'$'\x1f''herdr metadata m5 (codex)'$'\x1f''--token'$'\x1f''fm_task=herdr-metadata-m5'$'\x1f''--token'$'\x1f''fm_project=Agent-Themis'$'\x1f''--token'$'\x1f''fm_harness=codex' \
+    "create_task did not report the deterministic pane title and namespaced Firstmate tokens"
+  assert_contains "$calls" $'\x1f''workspace'$'\x1f''report-metadata'$'\x1f''w1'$'\x1f''--source'$'\x1f''firstmate'$'\x1f''--token'$'\x1f''fleet=Firstmate-Fleet'$'\x1f''--token'$'\x1f''what=herdr metadata m5 (codex)' \
+    "create_task did not report the captain-facing workspace Fleet and task description"
+  create_line=$(grep -n $'\x1f''tab'$'\x1f''create' "$log" | head -1 | cut -d: -f1)
+  schema_line=$(grep -n $'\x1f''api'$'\x1f''schema' "$log" | head -1 | cut -d: -f1)
+  pane_line=$(grep -n $'\x1f''pane'$'\x1f''report-metadata' "$log" | head -1 | cut -d: -f1)
+  workspace_line=$(grep -n $'\x1f''workspace'$'\x1f''report-metadata' "$log" | head -1 | cut -d: -f1)
+  [ "$create_line" -lt "$schema_line" ] && [ "$schema_line" -lt "$pane_line" ] && [ "$pane_line" -lt "$workspace_line" ] \
+    || fail "metadata capability check and reports must happen only after tab creation"
+  pass "fm_backend_herdr_create_task: reports deterministic pane and workspace display metadata after task creation"
+}
+
+test_create_task_metadata_failure_does_not_fail_spawn() {
+  local dir log resp fb out calls
+  dir="$TMP_ROOT/create-task-metadata-failure"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  printf '{"result":{"tabs":[]}}\n' > "$resp/1.out"
+  printf '{"result":{"tab":{"tab_id":"w1:t2"},"root_pane":{"pane_id":"w1:p2"}}}\n' > "$resp/2.out"
+  printf '{"protocol":17,"schemas":{"request":{"oneOf":[{"properties":{"method":{"const":"pane.report_metadata"}}},{"properties":{"method":{"const":"workspace.report_metadata"}}}]}}}\n' > "$resp/3.out"
+  printf '1\n' > "$resp/4.exit"
+  fb=$(make_herdr_fakebin "$dir")
+  out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_create_task fmtest:w1 fm-task-fail /tmp/proj "" task-fail Demo pi Demo-Fleet' "$ROOT" ) \
+    || fail "create_task must not fail when pane.report_metadata fails"
+  [ "$out" = "w1:t2 w1:p2" ] || fail "metadata failure must not change create_task output, got '$out'"
+  calls=$(cat "$log")
+  assert_contains "$calls" $'\x1f''pane'$'\x1f''report-metadata' \
+    "create_task did not attempt the best-effort pane metadata report"
+  assert_contains "$calls" $'\x1f''workspace'$'\x1f''report-metadata' \
+    "a pane metadata failure must not suppress the independent workspace report"
+  pass "fm_backend_herdr_create_task: metadata failure is swallowed and task creation still succeeds"
+}
+
+test_create_task_skips_metadata_when_surfaces_are_absent() {
+  local dir log resp fb out calls
+  dir="$TMP_ROOT/create-task-metadata-absent"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  printf '{"result":{"tabs":[]}}\n' > "$resp/1.out"
+  printf '{"result":{"tab":{"tab_id":"w1:t2"},"root_pane":{"pane_id":"w1:p2"}}}\n' > "$resp/2.out"
+  printf '{"protocol":17,"schemas":{"request":{"oneOf":[]}}}\n' > "$resp/3.out"
+  fb=$(make_herdr_fakebin "$dir")
+  out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_create_task fmtest:w1 fm-task-absent /tmp/proj "" task-absent Demo grok Demo-Fleet' "$ROOT" ) \
+    || fail "create_task should succeed when both metadata surfaces are absent"
+  [ "$out" = "w1:t2 w1:p2" ] || fail "absent metadata surfaces must not change create_task output, got '$out'"
+  calls=$(cat "$log")
+  assert_contains "$calls" $'\x1f''api'$'\x1f''schema'$'\x1f''--json' \
+    "create_task did not capability-check before skipping metadata"
+  assert_not_contains "$calls" $'\x1f''pane'$'\x1f''report-metadata' \
+    "create_task must skip pane metadata when pane.report_metadata is absent"
+  assert_not_contains "$calls" $'\x1f''workspace'$'\x1f''report-metadata' \
+    "create_task must skip workspace metadata when workspace.report_metadata is absent"
+  pass "fm_backend_herdr_create_task: absent metadata capabilities skip cleanly without affecting task creation"
+}
+
+test_create_task_metadata_preserves_existing_agent_identity() {
+  local dir log resp fb out calls
+  dir="$TMP_ROOT/create-task-metadata-identity"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  printf '{"result":{"tabs":[]}}\n' > "$resp/1.out"
+  printf '{"result":{"tab":{"tab_id":"w1:t2"},"root_pane":{"pane_id":"w1:p2","agent":"claude","agent_name":"named-worker"}}}\n' > "$resp/2.out"
+  printf '{"protocol":17,"schemas":{"request":{"oneOf":[{"properties":{"method":{"const":"pane.report_metadata"}}},{"properties":{"method":{"const":"workspace.report_metadata"}}}]}}}\n' > "$resp/3.out"
+  fb=$(make_herdr_fakebin "$dir")
+  out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_create_task fmtest:w1 fm-identity /tmp/proj "" identity Demo claude Demo-Fleet' "$ROOT" ) \
+    || fail "create_task should report display metadata without altering an existing agent identity"
+  [ "$out" = "w1:t2 w1:p2" ] || fail "identity-preserving metadata must not change create_task output, got '$out'"
+  calls=$(cat "$log")
+  assert_contains "$calls" $'\x1f''pane'$'\x1f''report-metadata'$'\x1f''w1:p2' \
+    "identity test did not exercise pane display metadata"
+  assert_not_contains "$calls" $'\x1f''--agent'$'\x1f' \
+    "display metadata must not claim or overwrite the authoritative agent label"
+  assert_not_contains "$calls" $'\x1f''--display-agent'$'\x1f' \
+    "display metadata must not overwrite the visible agent name"
+  assert_not_contains "$calls" "--clear-" \
+    "display metadata must never clear an existing identity or presentation field"
+  assert_not_contains "$calls" $'\x1f''pane'$'\x1f''clear-agent-authority' \
+    "display metadata must never clear Herdr agent authority"
+  assert_not_contains "$calls" $'\x1f''pane'$'\x1f''release-agent' \
+    "display metadata must never release an existing named agent"
+  pass "fm_backend_herdr_create_task: display metadata is additive and preserves an existing Herdr agent identity"
+}
+
 # --- container_ensure / create_task: --no-focus and per-home label ----------
 
 test_container_ensure_creates_with_no_focus_flag() {
@@ -810,6 +905,42 @@ test_projection_create_uses_exact_response_ids_and_leaves_one_task_pane() {
   assert_not_contains "$(cat "$log")" $'workspace\x1fclose' \
     "projection create must never call workspace close"
   pass "herdr presentation create: exact response IDs yield one normal task pane with no workspace-close authority"
+}
+
+test_projection_create_reports_metadata_for_the_exact_new_workspace() {
+  local dir log resp fb out calls create_line pane_line workspace_line
+  dir="$TMP_ROOT/projection-create-metadata"; mkdir -p "$dir/responses"
+  log="$dir/log"; resp="$dir/responses"; : > "$log"
+  printf '{"result":{"workspace":{"workspace_id":"w9"},"tab":{"tab_id":"w9:t1"},"root_pane":{"pane_id":"w9:p1"}}}\n' > "$resp/1.out"
+  printf '{"result":{"tab":{"tab_id":"w9:t2"},"root_pane":{"pane_id":"w9:p2"}}}\n' > "$resp/2.out"
+  printf '{"protocol":17,"schemas":{"request":{"oneOf":[{"properties":{"method":{"const":"pane.report_metadata"}}},{"properties":{"method":{"const":"workspace.report_metadata"}}}]}}}\n' > "$resp/3.out"
+  printf '{"result":{"tabs":[{"tab_id":"w9:t1","label":"1","workspace_id":"w9"},{"tab_id":"w9:t2","label":"fm-task-p2","workspace_id":"w9"}]}}\n' > "$resp/6.out"
+  printf '{"result":{"panes":[{"pane_id":"w9:p1","tab_id":"w9:t1"},{"pane_id":"w9:p2","tab_id":"w9:t2"}]}}\n' > "$resp/7.out"
+  printf '{"error":{"code":"agent_not_found"}}\n' > "$resp/8.out"
+  printf '{"result":{"pane":{"pane_id":"w9:p1","tab_id":"w9:t1","workspace_id":"w9"}}}\n' > "$resp/9.out"
+  printf '{"result":{"tabs":[{"tab_id":"w9:t2","label":"fm-task-p2","workspace_id":"w9"}]}}\n' > "$resp/11.out"
+  printf '{"result":{"panes":[{"pane_id":"w9:p2","tab_id":"w9:t2"}]}}\n' > "$resp/12.out"
+  fb=$(make_herdr_fakebin "$dir")
+  out=$(PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" HERDR_SESSION=fmtest \
+    bash -c '
+      . "$0/bin/backends/herdr.sh"
+      fm_backend_herdr_projection_focus_snapshot() { printf "captain-ws\tcaptain-tab"; }
+      fm_backend_herdr_projection_focus_restore() { return 0; }
+      fm_backend_herdr_projection_create_task /tmp/proj projection-label fm-task-p2 task-p2 Agent-Themis codex Firstmate-Fleet || exit 1
+      printf "%s %s" "$FM_BACKEND_HERDR_PROJECTION_WORKSPACE_ID" "$FM_BACKEND_HERDR_PROJECTION_PANE_ID"
+    ' "$ROOT") || fail "projection create should keep succeeding when it reports metadata"
+  [ "$out" = "w9 w9:p2" ] || fail "projection metadata changed the exact response-derived IDs: $out"
+  calls=$(cat "$log")
+  assert_contains "$calls" $'\x1f''pane'$'\x1f''report-metadata'$'\x1f''w9:p2'$'\x1f''--source'$'\x1f''firstmate' \
+    "projection create did not report metadata on the exact new task pane"
+  assert_contains "$calls" $'\x1f''workspace'$'\x1f''report-metadata'$'\x1f''w9'$'\x1f''--source'$'\x1f''firstmate'$'\x1f''--token'$'\x1f''fleet=Firstmate-Fleet'$'\x1f''--token'$'\x1f''what=task p2 (codex)' \
+    "projection create did not label the exact new workspace with deterministic Fleet and task text"
+  create_line=$(grep -n $'\x1f''tab'$'\x1f''create' "$log" | head -1 | cut -d: -f1)
+  pane_line=$(grep -n $'\x1f''pane'$'\x1f''report-metadata' "$log" | head -1 | cut -d: -f1)
+  workspace_line=$(grep -n $'\x1f''workspace'$'\x1f''report-metadata' "$log" | head -1 | cut -d: -f1)
+  [ "$create_line" -lt "$pane_line" ] && [ "$pane_line" -lt "$workspace_line" ] \
+    || fail "projection metadata must be reported only after the task tab exists"
+  pass "herdr presentation create: the exact new task pane and workspace receive display metadata after creation"
 }
 
 test_projection_create_never_closes_a_concurrent_same_label_tab() {
@@ -2905,11 +3036,16 @@ test_create_task_refuses_when_preexisting_husk_tab_remains
 test_create_task_refuses_when_agent_state_ambiguous
 test_create_task_husk_replacement_creates_before_closing
 test_create_task_creates_and_parses_ids
+test_create_task_reports_pane_and_workspace_metadata_after_creation
+test_create_task_metadata_failure_does_not_fail_spawn
+test_create_task_skips_metadata_when_surfaces_are_absent
+test_create_task_metadata_preserves_existing_agent_identity
 test_create_task_creates_with_no_focus_flag
 test_workspace_find_matches_the_injected_label
 test_list_live_scoped_to_the_given_projects_workspace
 test_projection_journal_is_atomic_and_uses_128_bit_token
 test_projection_create_uses_exact_response_ids_and_leaves_one_task_pane
+test_projection_create_reports_metadata_for_the_exact_new_workspace
 test_projection_create_never_closes_a_concurrent_same_label_tab
 test_projection_focus_snapshot_requires_exact_workspace_and_tab
 test_projection_close_restores_exact_prior_focus

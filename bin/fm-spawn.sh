@@ -923,6 +923,7 @@ case "$BACKEND" in
     # "Archon-<id>" supervisor workspace from its marker. The current FM_HOME
     # remains the spawning home's registry for a worker's Fleet alias.
     HERDR_LABEL_HOME=$FM_HOME
+    HERDR_FLEET_LABEL=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_workspace_label "$KIND" "$PROJ_ABS" "${PROJ_KEY:-}")
     HERDR_PRESENTATION_JOURNAL=$(fm_backend_herdr_projection_journal_path "$STATE" "$ID")
     HERDR_PROJECTED=0
     if [ "$KIND" != secondmate ] && [ -f "$CONFIG/herdr-presentation-spaces" ]; then
@@ -935,7 +936,7 @@ case "$BACKEND" in
           "$HERDR_RECOVERY_SESSION" "$HERDR_PRESENTATION_JOURNAL" "$ID" || exit 1
       elif [ ! -e "$STATE/$ID.meta" ] && [ ! -L "$STATE/$ID.meta" ]; then
         HERDR_SES=$(fm_backend_herdr_session)
-        HERDR_PARENT_LABEL=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_workspace_label "$KIND" "$PROJ_ABS" "${PROJ_KEY:-}")
+        HERDR_PARENT_LABEL=$HERDR_FLEET_LABEL
         # Session lock path resolution needs a live named-session socket.
         # Ensure the server before journal publication so lock failure degrades
         # to flat without ever creating an unlocked projection.
@@ -945,7 +946,8 @@ case "$BACKEND" in
           HERDR_PROJECTION_ID=$(fm_backend_herdr_projection_journal_create "$STATE" "$ID") || exit 1
           HERDR_PROJECTION_LABEL=$(fm_backend_herdr_projection_workspace_label "$ID" "$HERDR_PROJECTION_ID")
           if ! FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_projection_create_task \
-            "$PROJ_ABS" "$HERDR_PROJECTION_LABEL" "$W"; then
+            "$PROJ_ABS" "$HERDR_PROJECTION_LABEL" "$W" \
+            "$ID" "${PROJ_KEY:-}" "$HARNESS" "$HERDR_FLEET_LABEL"; then
             if [ "${FM_BACKEND_HERDR_PROJECTION_CLEANUP_SAFE:-0}" = 1 ]; then
               HERDR_PROJECTION_ABORT_CLEANUP=1
               HERDR_PROJECTION_ABORT_SESSION=$FM_BACKEND_HERDR_PROJECTION_SESSION
@@ -983,7 +985,9 @@ case "$BACKEND" in
       HERDR_SEEDED_DEFAULT_TAB_ID=${HERDR_CONTAINER_RAW#*$'\t'}
       HERDR_SES=${CONTAINER%%:*}
       HERDR_WORKSPACE_ID=${CONTAINER#*:}
-      HERDR_TASK_IDS=$(fm_backend_herdr_create_task "$CONTAINER" "$W" "$PROJ_ABS" "$HERDR_SEEDED_DEFAULT_TAB_ID") || exit 1
+      HERDR_TASK_IDS=$(fm_backend_herdr_create_task \
+        "$CONTAINER" "$W" "$PROJ_ABS" "$HERDR_SEEDED_DEFAULT_TAB_ID" \
+        "$ID" "${PROJ_KEY:-}" "$HARNESS" "$HERDR_FLEET_LABEL") || exit 1
       read -r HERDR_TAB_ID HERDR_PANE_ID <<EOF
 $HERDR_TASK_IDS
 EOF

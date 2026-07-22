@@ -4,7 +4,7 @@ This document records the empirical verification behind `bin/backends/herdr.sh`,
 It is the herdr equivalent of the tmux facts recorded in the `harness-adapters` skill and `docs/architecture.md`'s "Runtime session backends" section.
 
 Herdr is [an agent-native terminal multiplexer](https://herdr.dev) with a socket API, CLI wrappers, and native per-pane agent-state detection.
-Originally verified against herdr 0.7.1, protocol 14, on macOS aarch64; the latest dated evidence below uses herdr 0.7.4, protocol 16.
+Originally verified against herdr 0.7.1, protocol 14, on macOS aarch64, and the latest dated evidence below uses `0.7.5-preview.2026-07-21-0f10e1453a7f`, protocol 17.
 Current real-herdr verification uses isolated named sessions plus the guarded `bin/fm-herdr-lab.sh` lifecycle helper, either directly or through the compatibility wrappers in `tests/herdr-test-safety.sh`.
 A 2026-07-02 cleanup bug proved that `HERDR_SESSION` alone is not a safe way to target destructive session cleanup; see "Session targeting: the `--session` flag, not `HERDR_SESSION` alone" below.
 All real-herdr verification in this document uses isolated sessions and guarded cleanup; the captain's default herdr session and live tmux fleet were never intended targets.
@@ -18,7 +18,7 @@ Firstmate only drives the `herdr` CLI as a separate process, which carries no AG
 
 Prerequisites:
 
-- `herdr` itself, protocol 14 or newer (0.7.1, 0.7.3, and 0.7.4 verified) - see [herdr.dev](https://herdr.dev) for install instructions.
+- `herdr` itself, protocol 14 or newer (0.7.1, 0.7.3, 0.7.4, and `0.7.5-preview.2026-07-21-0f10e1453a7f` verified) - see [herdr.dev](https://herdr.dev) for install instructions.
 - `jq`, required to parse herdr's JSON output: `brew install jq` (or your platform's package manager).
 - The universal firstmate prerequisites - a verified crew harness plus the required toolchain, owned by [`docs/configuration.md`](configuration.md) ("Harness support", "Toolchain"); treehouse still provides the worktree, herdr only provides the session.
 
@@ -39,7 +39,65 @@ Every newly projected child created by a primary or secondmate home is inserted 
 Unavailable or failed ordering warns and leaves the successfully created worker running in Herdr's current order.
 See "Optional disposable single-task presentation spaces" below before enabling it.
 
-Verify it works by spawning a trivial task with `--backend herdr` and confirming the task's meta records `backend=herdr` plus `herdr_session=`, `herdr_workspace_id=`, `herdr_tab_id=`, and `herdr_pane_id=`; the selected Herdr workspace should show the new `fm-<id>` tab.
+Verify it works by spawning a trivial task with `--backend herdr` and confirming the task's meta records `backend=herdr` plus `herdr_session=`, `herdr_workspace_id=`, `herdr_tab_id=`, and `herdr_pane_id=`.
+The selected Herdr workspace should show the new `fm-<id>` tab, and a metadata-capable installation should expose the Firstmate display fields described below.
+
+## Automatic display metadata
+
+Immediately after Herdr returns the new task pane and workspace ids, `fm_backend_herdr_report_metadata` reads `herdr api schema --json` once and capability-gates `pane.report_metadata` and `workspace.report_metadata` independently.
+Every schema read, parse, and metadata write is best-effort, and every failure is swallowed so the task creation result remains authoritative.
+An unavailable or changed surface therefore degrades to the previous unlabeled behavior without failing the spawn.
+
+The pane report uses source `firstmate`, sets a title derived deterministically from the task id plus harness, and sets only the `fm_task`, `fm_project`, and `fm_harness` tokens whose values Firstmate already knows.
+The task description replaces hyphens and underscores in the task id with spaces and appends the harness in parentheses.
+The reporter never reads the brief, prompt text, model output, or any other private task content.
+
+The workspace report uses source `firstmate` and the captain-facing `fleet` and `what` tokens that were previously entered by hand after each spawn.
+The `fleet` value is Firstmate's existing Fleet or Archon workspace label, and the `what` value is the same deterministic task description used for the pane title.
+A projected one-task workspace therefore identifies its owning Fleet and task without supervisor keystrokes.
+For the default reusable project workspace, `fleet` remains stable and `what` names the most recently created task, while each task pane retains its own title and tokens.
+
+The reporter never passes `--agent`, `--display-agent`, `--clear-display-agent`, another clear flag, or an agent-authority command.
+It does not clear, claim, or overwrite an existing Herdr agent name, and it does not author semantic `idle`, `working`, `blocked`, or `done` state.
+Agent lifecycle, waits, notifications, rollups, and native session identity remain owned by Herdr's integration surfaces.
+The metadata is not restored across a server restart, and normal task replacement reports it again after creating the replacement pane.
+
+## Installed 0.7.5 preview metadata evidence (2026-07-22)
+
+The installed binary was `herdr 0.7.5-preview.2026-07-21-0f10e1453a7f`, and both the client and active server reported protocol 17.
+The installed schema still exposed both display-only metadata methods, with pane presentation and token fields kept distinct from workspace tokens.
+The installed source tree contained separate pane and workspace report handlers, and its changelog recorded Herdr 0.7.5 on 2026-07-21.
+Firstmate deliberately continues using the low-level `pane run`, `pane send-text`, and `pane send-keys` control path rather than Herdr's newer agent lifecycle facade.
+The adapter's compatibility floors remain unchanged at protocol 14 for core primitives and protocol 16 for the native event stream.
+
+The exact read-only commands run on 2026-07-22 were:
+
+```sh
+herdr --version
+herdr status --json | jq -c '{client:.client.protocol,server:.server.protocol}'
+herdr api schema --json | jq -c '{protocol, pane_metadata:any(.. | objects; .const? == "pane.report_metadata"), workspace_metadata:any(.. | objects; .const? == "workspace.report_metadata")}'
+herdr api schema --json | jq -c '.schemas.request["$defs"] | {pane:{required:.PaneReportMetadataParams.required,fields:(.PaneReportMetadataParams.properties|keys)},workspace:{required:.WorkspaceReportMetadataParams.required,fields:(.WorkspaceReportMetadataParams.properties|keys)}}'
+(cd "$HOME/.claude/skills/herdr" && rg -n '^fn (pane|workspace)_report_metadata' src/cli/pane.rs src/cli/workspace.rs)
+sed -n '11,17p' "$HOME/.claude/skills/herdr/docs/next/CHANGELOG.md"
+```
+
+They produced this exact output:
+
+```text
+herdr 0.7.5-preview.2026-07-21-0f10e1453a7f
+{"client":17,"server":17}
+{"protocol":17,"pane_metadata":true,"workspace_metadata":true}
+{"pane":{"required":["pane_id","source"],"fields":["agent","applies_to_source","clear_display_agent","clear_state_labels","clear_title","display_agent","pane_id","seq","source","state_labels","title","tokens","ttl_ms"]},"workspace":{"required":["workspace_id","source","tokens"],"fields":["seq","source","tokens","ttl_ms","workspace_id"]}}
+src/cli/workspace.rs:142:fn workspace_report_metadata(args: &[String]) -> std::io::Result<i32> {
+src/cli/pane.rs:1294:fn pane_report_metadata(args: &[String]) -> std::io::Result<i32> {
+## [0.7.5] - 2026-07-21
+
+### Breaking Changes
+- Installed and linked plugins, including their enabled state, are now global to the current user instead of isolated by Herdr session. Plugins installed only in a named session on Herdr 0.7.3 must be installed or linked again. (#1174)
+
+### Added
+- Added a live-agent CLI facade with named `start`, atomic `prompt`, logical `send-keys`, and server-owned `wait` workflows. Agent startup targets an existing pane without changing topology, validates the requested interactive agent kind and strict agent name, and accepts native arguments after `--`.
+```
 
 Limitations: herdr is experimental and still carries the open gaps documented below.
 Resolved backend evidence, including the 2026-07-06 symlinked-project-prefix isolation fix, is kept in the same follow-up log for auditability.

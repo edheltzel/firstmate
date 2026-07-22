@@ -4,7 +4,8 @@
 # Design: data/fm-backend-design-d7/herdr-addendum.md ("Interface mapping",
 # decisions D1-D6) and the empirical verification recorded in
 # data/fm-backend-design-d7/herdr-verification-p2.md (real herdr v0.7.1,
-# protocol 14, macOS aarch64), refined by docs/herdr-backend.md's
+# protocol 14, macOS aarch64), with current protocol-17 metadata evidence in
+# docs/herdr-backend.md, and refined by that document's
 # project-keyed Fleet workspace pass (AGENTS.md task herdr-sm-spaces-k4). Herdr is a
 # session provider ONLY (D3): the worktree provider stays treehouse, exactly
 # like tmux. Sourced only through bin/fm-backend.sh's fm_backend_source in
@@ -184,8 +185,10 @@ fm_backend_herdr_tool_check() {
 }
 
 # fm_backend_herdr_version_check: refuse loudly on a missing/incompatible
-# herdr client. Verified locally: v0.7.1, protocol 14 (herdr status --json's
-# .client.protocol; client info is session-independent, unlike .server).
+# herdr client. Originally verified on v0.7.1/protocol 14 and most recently
+# verified on 0.7.5-preview.2026-07-21-0f10e1453a7f/protocol 17
+# (docs/herdr-backend.md). herdr status --json's .client.protocol is
+# session-independent, unlike .server.
 fm_backend_herdr_version_check() {
   fm_backend_herdr_tool_check || return 1
   local status protocol version
@@ -201,6 +204,66 @@ fm_backend_herdr_version_check() {
   if [ "$protocol" -lt "$FM_BACKEND_HERDR_MIN_PROTOCOL" ]; then
     echo "error: herdr protocol $protocol (version ${version:-unknown}) is older than the verified minimum $FM_BACKEND_HERDR_MIN_PROTOCOL; update herdr (herdr update) before using backend=herdr" >&2
     return 1
+  fi
+  return 0
+}
+
+# fm_backend_herdr_metadata_capable: return success only when <schema-json>
+# exposes <method>. Metadata is display-only, and callers treat every parse or
+# capability failure as an unavailable surface.
+fm_backend_herdr_metadata_capable() {  # <schema-json> <method>
+  local schema=$1 method=$2
+  printf '%s' "$schema" | jq -e --arg method "$method" \
+    'any(.. | objects; .const? == $method)' >/dev/null 2>&1
+}
+
+# fm_backend_herdr_task_description: deterministic human-readable task text
+# derived only from Firstmate's task id and harness. It never reads a brief,
+# prompt, model response, or other private task content.
+fm_backend_herdr_task_description() {  # <task-id> [<harness>]
+  local task_id=$1 harness=${2:-} description
+  description=${task_id//[-_]/ }
+  while [ "$description" != "${description//  / }" ]; do
+    description=${description//  / }
+  done
+  description=${description# }
+  description=${description% }
+  [ -z "$harness" ] || description="$description ($harness)"
+  printf '%.80s' "$description"
+}
+
+# fm_backend_herdr_report_metadata: best-effort, display-only Firstmate
+# labeling for a newly created task pane and workspace. It reads the API schema
+# once, capability-gates pane and workspace reports independently, and swallows
+# every probe or report failure so task creation remains authoritative. Pane
+# metadata sets only a title and the fm_task/fm_project/fm_harness tokens.
+# Workspace metadata sets the existing captain-facing fleet/what tokens. It
+# never passes --agent, --display-agent, a clear flag, or an agent-authority
+# command, so an existing Herdr agent name and lifecycle owner remain untouched.
+fm_backend_herdr_report_metadata() {  # <session> <workspace> <pane> <task-id> <project-key> <harness> <fleet-label>
+  local session=${1:-} workspace_id=${2:-} pane_id=${3:-} task_id=${4:-}
+  local project_key=${5:-} harness=${6:-} fleet_label=${7:-} schema description
+  local pane_args workspace_args
+  [ -n "$session" ] && [ -n "$workspace_id" ] && [ -n "$pane_id" ] && [ -n "$task_id" ] || return 0
+  fm_backend_herdr_tool_check >/dev/null 2>&1 || return 0
+  schema=$(fm_backend_herdr_cli "$session" api schema --json 2>/dev/null) || return 0
+  description=$(fm_backend_herdr_task_description "$task_id" "$harness")
+
+  if fm_backend_herdr_metadata_capable "$schema" pane.report_metadata; then
+    pane_args=(pane report-metadata "$pane_id" --source firstmate --title "$description")
+    pane_args+=(--token "fm_task=$task_id")
+    [ -z "$project_key" ] || pane_args+=(--token "fm_project=$project_key")
+    [ -z "$harness" ] || pane_args+=(--token "fm_harness=$harness")
+    fm_backend_herdr_cli "$session" "${pane_args[@]}" >/dev/null 2>&1 || true
+  fi
+
+  if fm_backend_herdr_metadata_capable "$schema" workspace.report_metadata; then
+    workspace_args=(workspace report-metadata "$workspace_id" --source firstmate)
+    [ -z "$fleet_label" ] || workspace_args+=(--token "fleet=$fleet_label")
+    [ -z "$description" ] || workspace_args+=(--token "what=$description")
+    if [ "${#workspace_args[@]}" -gt 5 ]; then
+      fm_backend_herdr_cli "$session" "${workspace_args[@]}" >/dev/null 2>&1 || true
+    fi
   fi
   return 0
 }
@@ -1027,8 +1090,10 @@ fm_backend_herdr_agent_alive() {  # <target>
 # the safety argument). An ADOPTED workspace's caller always passes an empty
 # 4th arg, so this function never even queries for a prune candidate in that
 # case. Echoes "<tab_id> <pane_id>" on success.
-fm_backend_herdr_create_task() {  # <container> <label> <cwd> <seeded_default_tab_id>
-  local container=$1 label=$2 cwd=$3 seeded_tab_id=${4:-} session wsid list dup_tabs dup dup_pane dup_tab_ids out tab_id pane_id remaining_dup_tabs
+fm_backend_herdr_create_task() {  # <container> <label> <cwd> <seeded_default_tab_id> [<task-id> <project-key> <harness> <fleet-label>]
+  local container=$1 label=$2 cwd=$3 seeded_tab_id=${4:-}
+  local task_id=${5:-} project_key=${6:-} harness=${7:-} fleet_label=${8:-}
+  local session wsid list dup_tabs dup dup_pane dup_tab_ids out tab_id pane_id remaining_dup_tabs
   session=${container%%:*}
   wsid=${container#*:}
   list=$(fm_backend_herdr_cli "$session" tab list --workspace "$wsid" 2>/dev/null) || return 1
@@ -1057,6 +1122,8 @@ EOF
     echo "error: could not parse tab/pane id from herdr tab create output" >&2
     return 1
   fi
+  fm_backend_herdr_report_metadata \
+    "$session" "$wsid" "$pane_id" "$task_id" "$project_key" "$harness" "$fleet_label"
   [ -z "$seeded_tab_id" ] || fm_backend_herdr_workspace_prune_seeded_default_tab "$session" "$wsid" "$seeded_tab_id"
   if [ -n "$dup_tab_ids" ]; then
     while IFS= read -r dup; do
@@ -1099,8 +1166,10 @@ EOF
 # CLEANUP_SAFE becomes 1 only after both creates returned complete exact IDs.
 # A missing, failed, or malformed create response stays ambiguous and grants no
 # cleanup authority.
-fm_backend_herdr_projection_create_task() {  # <cwd> <workspace-label> <task-label>
-  local cwd=$1 workspace_label=$2 task_label=$3 session out tabs panes tab_count pane_count focus_before
+fm_backend_herdr_projection_create_task() {  # <cwd> <workspace-label> <task-label> [<task-id> <project-key> <harness> <fleet-label>]
+  local cwd=$1 workspace_label=$2 task_label=$3
+  local task_id=${4:-} project_key=${5:-} harness=${6:-} fleet_label=${7:-}
+  local session out tabs panes tab_count pane_count focus_before
   FM_BACKEND_HERDR_PROJECTION_SESSION=""
   FM_BACKEND_HERDR_PROJECTION_WORKSPACE_ID=""
   FM_BACKEND_HERDR_PROJECTION_SEEDED_TAB_ID=""
@@ -1164,6 +1233,9 @@ fm_backend_herdr_projection_create_task() {  # <cwd> <workspace-label> <task-lab
   fi
   # shellcheck disable=SC2034  # caller consumes the same-process cleanup gate
   FM_BACKEND_HERDR_PROJECTION_CLEANUP_SAFE=1
+  fm_backend_herdr_report_metadata \
+    "$session" "$FM_BACKEND_HERDR_PROJECTION_WORKSPACE_ID" \
+    "$FM_BACKEND_HERDR_PROJECTION_PANE_ID" "$task_id" "$project_key" "$harness" "$fleet_label"
   focus_before=$(fm_backend_herdr_projection_focus_snapshot "$session") || {
     echo "error: herdr presentation seeded-tab prune could not capture exact active workspace and tab; refusing a focus-unsafe prune" >&2
     return 1
