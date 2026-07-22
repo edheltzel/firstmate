@@ -73,6 +73,44 @@ test_ship_modes_generate_clean_briefs() {
   pass "fm-brief.sh: no-mistakes/direct-PR/local-only briefs generate cleanly"
 }
 
+test_commit_discipline_applies_to_every_crewmate_brief() {
+  local home spec id proj_kind proj kind brief section_count
+  home="$TMP_ROOT/commit-discipline-home"
+  write_registry "$home"
+
+  for spec in \
+    "brief-commits-nomistakes:no-registry-proj:ship" \
+    "brief-commits-direct:direct-proj:ship" \
+    "brief-commits-local:local-proj:ship" \
+    "brief-commits-scout:scout-proj:scout"; do
+    id=${spec%%:*}
+    proj_kind=${spec#*:}
+    proj=${proj_kind%%:*}
+    kind=${spec##*:}
+    if [ "$kind" = scout ]; then
+      FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" "$proj" --scout >/dev/null 2>&1
+    else
+      FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" "$proj" >/dev/null 2>&1
+    fi
+    brief="$home/data/$id/brief.md"
+    assert_grep "Commit each completed feature or fix as its own coherent commit as soon as it is finished." "$brief" \
+      "$id: brief missing per-feature and per-fix commit cadence"
+    assert_grep "sequence of focused commits instead of one end-of-task batch; commit more often, not less" "$brief" \
+      "$id: brief missing large-task commit granularity"
+    assert_grep "every hotfix or small correction its own small commit" "$brief" \
+      "$id: brief missing small-fix commit isolation"
+    assert_grep "commit messages that communicate the value delivered" "$brief" \
+      "$id: brief missing value-focused commit message guidance"
+    assert_grep "Never report \`done\` with a dirty working tree" "$brief" \
+      "$id: brief missing clean-tree done gate"
+    assert_grep "uncommitted work is not landed work, and firstmate cleanup will refuse it" "$brief" \
+      "$id: brief missing the explicit dirty-tree cleanup refusal"
+    section_count=$(grep -cFx '# Commit discipline' "$brief")
+    [ "$section_count" -eq 1 ] || fail "$id: commit-discipline section rendered $section_count times instead of once"
+  done
+  pass "fm-brief.sh: every ship mode and scout carries one shared commit-discipline contract"
+}
+
 test_faster_paths_use_configured_authority_without_stacked_review() {
   local home id brief
   home="$TMP_ROOT/configured-authority-home"
@@ -371,6 +409,7 @@ test_scout_and_secondmate_scaffold() {
 test_script_parses
 test_help_includes_entire_header
 test_ship_modes_generate_clean_briefs
+test_commit_discipline_applies_to_every_crewmate_brief
 test_faster_paths_use_configured_authority_without_stacked_review
 test_no_mistakes_dod_wording
 test_ship_project_memory_wording
