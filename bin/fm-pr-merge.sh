@@ -81,4 +81,15 @@ if ! caller_has_merge_method "$@"; then
   merge_args=(--squash)
 fi
 
-gh-axi pr merge "$PR_NUMBER" --repo "$PR_OWNER/$PR_REPO" "${merge_args[@]+"${merge_args[@]}"}" "$@"
+PR_IDENTITY=$(grep '^pr_identity=' "$META" | tail -1 | cut -d= -f2- || true)
+if [ "$PR_IDENTITY" = atlas-pat ]; then
+  FM_ROOT_OVERRIDE="$FM_ROOT" FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+    "$FM_ROOT/bin/fm-pr-identity.sh" merge-assert "$ID" "$URL" || exit 1
+  env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GH_HOST \
+    gh-axi pr merge "$PR_NUMBER" --repo "$PR_OWNER/$PR_REPO" "${merge_args[@]+"${merge_args[@]}"}" "$@"
+elif [ -n "$PR_IDENTITY" ]; then
+  echo "error: unknown task PR identity profile" >&2
+  exit 1
+else
+  gh-axi pr merge "$PR_NUMBER" --repo "$PR_OWNER/$PR_REPO" "${merge_args[@]+"${merge_args[@]}"}" "$@"
+fi

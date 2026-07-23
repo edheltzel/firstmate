@@ -42,7 +42,7 @@ git -C "$PROJECT" remote add origin git@github.com:edheltzel/fixture.git
 run_broker() {
   FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$HOME_DIR" FM_DATA_OVERRIDE="$HOME_DIR/data" \
     FM_STATE_OVERRIDE="$HOME_DIR/state" FM_ATLAS_ENV_FILE="$ENV_FILE" \
-    FM_PR_IDENTITY_GH_AXI="$FAKEBIN/gh-axi" PATH="$FAKEBIN:$PATH" "$BROKER" "$@"
+    FM_PR_IDENTITY_TEST_MODE=1 FM_PR_IDENTITY_GH_AXI="$FAKEBIN/gh-axi" PATH="$FAKEBIN:$PATH" "$BROKER" "$@"
 }
 
 out=$(run_broker preflight task-a Atlas "$PROJECT") || fail "synthetic preflight unexpectedly failed"
@@ -113,6 +113,79 @@ set -e
 assert_contains "$bad_url" 'pr-mismatch' "wrong repository must use the PR mismatch category"
 assert_not_contains "$bad_url" 'synthetic-token' "read failures must not expose credentials"
 pass "broker rejects a PR URL outside the recorded repository without ambient fallback"
+
+cat > "$FAKEBIN/git" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *'remote get-url origin'*) printf 'git@github.com:edheltzel/fixture.git\n' ;;
+  *'rev-parse --show-toplevel'*) printf '%s\n' "$FM_TEST_PROJECT" ;;
+  *'symbolic-ref'* ) printf 'refs/remotes/origin/main\n' ;;
+  *'rev-parse --verify refs/remotes/origin/main'*) printf '1111111111111111111111111111111111111111\n' ;;
+  *'rev-parse --verify HEAD'*) printf '2222222222222222222222222222222222222222\n' ;;
+  *'status --porcelain'*) ;;
+  *'rev-list'*) printf '2222222222222222222222222222222222222222\n' ;;
+  *'log --format=%H '* ) printf '2222222222222222222222222222222222222222\n' ;;
+  *'log --format='*) printf '2222222222222222222222222222222222222222\tAtlas\tatlas@rainyday.media\tAtlas\tatlas@rainyday.media\n' ;;
+  *'cat-file commit'*) ;;
+  *'branch --show-current'*) printf 'fm/task-a\n' ;;
+  *'ls-remote'*) printf '2222222222222222222222222222222222222222\trefs/heads/fm/task-a\n' ;;
+  *'push origin fm/task-a:fm/task-a'*)
+    [ "${GIT_TERMINAL_PROMPT:-}" = 0 ] || exit 1
+    [ "${GIT_ASKPASS:-}" = '' ] || exit 1
+    printf 'transport-ok\n' > "$FM_TEST_TRANSPORT_LOG"
+    ;;
+  *) exit 1 ;;
+esac
+SH
+chmod +x "$FAKEBIN/git"
+FM_TEST_PROJECT=$(cd "$PROJECT" && pwd -P)
+FM_TEST_TRANSPORT_LOG="$CASE_ROOT/transport.log"
+export FM_TEST_PROJECT FM_TEST_TRANSPORT_LOG
+push_out=$(run_broker push task-a) || fail "synthetic broker push unexpectedly failed"
+assert_contains "$push_out" 'pushed: repo=edheltzel/fixture branch=fm/task-a' "push should report only safe binding data"
+assert_present "$HOME_DIR/state/task-a.pr-publication" "push should publish a partial-publication record"
+assert_grep 'remote_state=pushed' "$HOME_DIR/state/task-a.pr-publication" "push record should preserve remote state"
+assert_not_contains "$(cat "$HOME_DIR/state/task-a.pr-publication")" 'synthetic-token' "publication records must never contain credentials"
+assert_present "$FM_TEST_TRANSPORT_LOG" "push should use the host transport helper"
+pass "broker push checks exact branch and commit attribution while disabling prompting"
+
+cat > "$FAKEBIN/gh-axi" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *'/pulls/1/commits'*) printf 'sha: 2222222222222222222222222222222222222222\n' ;;
+  *'/pulls/1'*) printf 'state: MERGED\nuser:\n  login: Atlas-Key\nhead:\n  ref: fm/task-a\n  sha: 2222222222222222222222222222222222222222\nbase:\n  ref: main\n' ;;
+  *'api /user'*)
+    [ -z "${GH_TOKEN:-}" ] || exit 1
+    printf 'login: edheltzel\n'
+    ;;
+  *) exit 1 ;;
+esac
+SH
+chmod +x "$FAKEBIN/gh-axi"
+read_out=$(run_broker read task-a 'https://github.com/edheltzel/fixture/pull/1') || fail "synthetic PR read unexpectedly failed"
+assert_contains "$read_out" 'author=Atlas-Key' "read verification should assert the PR author"
+assert_contains "$read_out" 'head_sha=2222222222222222222222222222222222222222' "read verification should return the exact head"
+verify_out=$(run_broker verify task-a 'https://github.com/edheltzel/fixture/pull/1') || fail "synthetic PR verification unexpectedly failed"
+assert_contains "$verify_out" 'verified=1' "verify should complete only after the commit-set check"
+merge_out=$(run_broker merge-assert task-a 'https://github.com/edheltzel/fixture/pull/1') || fail "synthetic merge assertion unexpectedly failed"
+assert_contains "$merge_out" 'merge-authority=edheltzel' "merge assertion should require Ed authentication"
+pass "broker read and verify paths use host auth, exact PR fields, and explicit Ed merge authority"
+
+printf 'pr_head=2222222222222222222222222222222222222222\n' >> "$HOME_DIR/state/task-a.meta"
+cp "$ROOT/bin/fm-pr-poll.sh" "$HOME_DIR/state/task-a.check.sh"
+chmod 0700 "$HOME_DIR/state/task-a.check.sh"
+printf 'github\nhttps://github.com/edheltzel/fixture/pull/1\ngithub.com\nedheltzel/fixture\n1\n' > "$HOME_DIR/state/task-a.pr-poll"
+chmod 0600 "$HOME_DIR/state/task-a.pr-poll"
+poll_out=$(PATH="$FAKEBIN:$PATH" "$HOME_DIR/state/task-a.check.sh")
+[ "$poll_out" = merged ] || fail "opted-in merged poll should emit exactly merged, got '$poll_out'"
+cat > "$FAKEBIN/gh-axi" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+chmod +x "$FAKEBIN/gh-axi"
+poll_error=$(PATH="$FAKEBIN:$PATH" "$HOME_DIR/state/task-a.check.sh")
+assert_contains "$poll_error" 'read-error:' "opted-in poll auth failures must be visible"
+pass "opted-in polling uses host read auth and does not silently swallow outages"
 
 set +e
 help_out=$("$BROKER" --help)

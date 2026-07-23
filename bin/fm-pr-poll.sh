@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Static watcher program for a validated PR/MR poll sidecar.
-# It emits exactly one merged line for a merged PR or MR and stays silent
-# otherwise, including on every error, so a failed lookup can never be read as
-# a merge. The provider-tagged identity is data in the sidecar and is never
-# interpolated into this source: these bytes are identical for every task.
+# It emits exactly one merged line for a merged PR or MR and stays silent on
+# non-opted-in errors, so a failed lookup can never be read as a merge. An
+# opted-in identity read emits a safe read-error line so auth failure is visible.
+# The provider-tagged identity is data in the sidecar and is never interpolated
+# into this source, so these bytes are identical for every task.
 # Each provider is read through its own standard CLI, gh for GitHub and glab
 # for GitLab, so an upstream checkout needs no extra tooling to follow either.
 set -u
 LC_ALL=C
 export LC_ALL
+data=
 
 if [ "$#" -eq 6 ] && [ "$1" = --validated ]; then
   provider=$2
@@ -62,6 +64,44 @@ case "$provider" in
       .|..|*[!A-Za-z0-9._-]*) exit 0 ;;
     esac
     [ "$url" = "https://github.com/$owner/$repo/pull/$number" ] || exit 0
+    if [ -n "$data" ] && [ -f "${data%.pr-poll}.meta" ] && [ ! -L "${data%.pr-poll}.meta" ] \
+      && grep -qxF 'pr_identity=atlas-pat' "${data%.pr-poll}.meta" 2>/dev/null; then
+      meta=${data%.pr-poll}.meta
+      expected_branch=$(sed -n 's/^pr_branch=//p' "$meta" | head -1)
+      expected_base=$(sed -n 's/^pr_base=//p' "$meta" | head -1)
+      expected_head=$(sed -n 's/^pr_head=//p' "$meta" | head -1)
+      raw=$(env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GH_HOST gh-axi api "/repos/$owner/$repo/pulls/$number" 2>/dev/null) || {
+        printf '%s\n' 'read-error: Atlas PR read authentication failed'
+        exit 0
+      }
+      login=$(printf '%s\n' "$raw" | awk -F':[[:space:]]*' '{ gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); if ($1 == "login") { print $2; exit } }')
+      state=$(printf '%s\n' "$raw" | awk -F':[[:space:]]*' '{ gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); if ($1 == "state") { print $2; exit } }')
+      head_ref=$(printf '%s\n' "$raw" | awk -F':[[:space:]]*' '
+        { indent=$0; sub(/[^[:space:]].*$/, "", indent); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1) }
+        $1 == "head" { in_head=1; next }
+        in_head && indent == "" { in_head=0 }
+        in_head && $1 == "ref" { print $2; exit }
+      ')
+      head_sha=$(printf '%s\n' "$raw" | awk -F':[[:space:]]*' '
+        { indent=$0; sub(/[^[:space:]].*$/, "", indent); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1) }
+        $1 == "head" { in_head=1; next }
+        in_head && indent == "" { in_head=0 }
+        in_head && $1 == "sha" { print $2; exit }
+      ')
+      base_ref=$(printf '%s\n' "$raw" | awk -F':[[:space:]]*' '
+        { indent=$0; sub(/[^[:space:]].*$/, "", indent); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1) }
+        $1 == "base" { in_base=1; next }
+        in_base && indent == "" { in_base=0 }
+        in_base && $1 == "ref" { print $2; exit }
+      ')
+      [ "$login" = Atlas-Key ] && [ "$head_ref" = "$expected_branch" ] \
+        && [ "$base_ref" = "$expected_base" ] && [ "$head_sha" = "$expected_head" ] || {
+          printf '%s\n' 'read-error: Atlas PR identity or head verification failed'
+          exit 0
+        }
+      [ "$state" = MERGED ] && printf '%s\n' merged
+      exit 0
+    fi
     state=$(gh pr view "$url" --json state -q .state 2>/dev/null) || exit 0
     [ "$state" = MERGED ] && printf '%s\n' merged
     ;;

@@ -305,6 +305,14 @@ read -r MODE _ <<EOF
 $("$FM_ROOT/bin/fm-project-mode.sh" "$REPO")
 EOF
 
+PR_IDENTITY=$("$FM_ROOT/bin/fm-project-mode.sh" --pr-identity "$REPO" 2>/dev/null || true)
+BROKER_NOTE=
+PUBLISH_INSTRUCTION="When it is implemented and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}\` to the status file and stop."
+if [ "$PR_IDENTITY" = atlas-pat ]; then
+  BROKER_NOTE="For this opted-in project, publish only through \`$FM_ROOT/bin/fm-pr-identity.sh\` using its task-bound \`push\`, \`create\`, and \`verify\` operations; never call raw GitHub or Git publication commands."
+  PUBLISH_INSTRUCTION="When it is implemented and committed, use the task-bound broker push, create, and verify operations, then append \`done: PR {url}\` to the status file and stop."
+fi
+
 case "$MODE" in
   direct-PR)
     SETUP2=""
@@ -313,7 +321,8 @@ case "$MODE" in
 # Definition of done
 This project ships **direct-PR**: you raise the PR yourself, without the no-mistakes pipeline.
 The task is complete only when committed on your branch.
-When it is implemented and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}\` to the status file and stop.
+$BROKER_NOTE
+$PUBLISH_INSTRUCTION
 Do NOT run /no-mistakes. The configured merge authority decides whether to merge the PR; firstmate relays the outcome.
 EOF
 )
@@ -338,6 +347,7 @@ EOF
     DOD=$(cat <<EOF
 # Definition of done
 The task is complete only when committed on your branch.
+$BROKER_NOTE
 When you believe it is complete, append \`done: {summary}\` to the status file and stop.
 Firstmate will then instruct you to run /no-mistakes to validate and ship a PR.
 

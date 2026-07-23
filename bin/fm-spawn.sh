@@ -308,6 +308,13 @@ spawn_abort_cleanup() {
             if [ "$KIND" != secondmate ] && [ "${PROJ_KEY:-}" != "${PROJ_BASENAME:-}" ]; then
               echo "project_key=$PROJ_KEY"
             fi
+            if [ "${PR_IDENTITY:-none}" != none ]; then
+              echo "pr_identity=$PR_IDENTITY"
+              echo "pr_project_key=$PROJ_KEY"
+              echo "pr_repo=$PR_REPO"
+              echo "pr_branch=$PR_BRANCH"
+              echo "pr_base=$PR_BASE"
+            fi
             echo "harness=$HARNESS"
             echo "kind=$KIND"
             echo "mode=${MODE:-no-mistakes}"
@@ -483,6 +490,7 @@ launch_template() {
 
 case "$ARG3" in
   *' '*)  # raw launch command (unverified-adapter escape hatch)
+    RAW_LAUNCH=1
     LAUNCH=$ARG3
     HARNESS=""
     for word in $LAUNCH; do
@@ -490,6 +498,7 @@ case "$ARG3" in
     done
     ;;
   '')
+    RAW_LAUNCH=0
     # No explicit harness: resolve from config. A secondmate AGENT launches on the
     # secondmate harness (config/secondmate-harness -> config/crew-harness -> own);
     # every other kind uses the crew harness only when no dispatch profile file is
@@ -512,6 +521,7 @@ case "$ARG3" in
     LAUNCH=$(launch_template "$HARNESS" "$KIND") || { echo "error: no launch template for harness '$HARNESS' (from $harness_src or detection); pass a raw launch command to use an unverified adapter" >&2; exit 1; }
     ;;
   *)
+    RAW_LAUNCH=0
     HARNESS=$ARG3
     LAUNCH=$(launch_template "$HARNESS" "$KIND") || { echo "error: unknown harness '$HARNESS'; pass a raw launch command to use an unverified adapter" >&2; exit 1; }
     ;;
@@ -821,6 +831,41 @@ if [ "$KIND" != secondmate ]; then
     # the basename default.
     sidecar_key=$(head -n1 "$DATA/$ID/project-key" 2>/dev/null | tr -d '[:space:]')
     [ -z "$sidecar_key" ] || PROJ_KEY=$sidecar_key
+  fi
+fi
+
+# Opted-in PR identity is a host-owned preflight, before any backend or
+# worktree mutation. The broker returns only safe binding fields; no credential
+# is exported to the harness or copied into a brief, command, or metadata value.
+PR_IDENTITY=none
+PR_REPO=
+PR_BRANCH=
+PR_BASE=
+if [ "$KIND" != secondmate ]; then
+  read -r MODE YOLO <<EOF
+$([ -n "${PROJ_KEY:-}" ] && "$FM_ROOT/bin/fm-project-mode.sh" "$PROJ_KEY")
+EOF
+  PR_IDENTITY=$("$FM_ROOT/bin/fm-project-mode.sh" --pr-identity "$PROJ_KEY" 2>/dev/null) || {
+    echo "error: project PR identity profile is invalid; refusing to create a worker" >&2
+    exit 1
+  }
+  if [ "$PR_IDENTITY" != none ]; then
+    [ "${RAW_LAUNCH:-0}" -eq 0 ] || {
+      echo "error: raw launch commands are not allowed for an opted-in PR identity" >&2
+      exit 1
+    }
+    PREFLIGHT=$("$FM_ROOT/bin/fm-pr-identity.sh" preflight "$ID" "$PROJ_KEY" "$PROJ_ABS") || {
+      echo "error: Atlas PR identity preflight failed; no worker/backend was created" >&2
+      exit 1
+    }
+    PR_REPO=$(printf '%s\n' "$PREFLIGHT" | awk -F= '$1 == "repo" { print $2; exit }')
+    PR_BRANCH=$(printf '%s\n' "$PREFLIGHT" | awk -F= '$1 == "branch" { print $2; exit }')
+    PR_BASE=$(printf '%s\n' "$PREFLIGHT" | awk -F= '$1 == "base" { print $2; exit }')
+    [ "$PR_IDENTITY" = atlas-pat ] && [ "$PR_REPO" != "" ] \
+      && [ "$PR_BRANCH" = "fm/$ID" ] && [ "$PR_BASE" != "" ] || {
+        echo "error: Atlas PR identity preflight returned an unsafe binding" >&2
+        exit 1
+      }
   fi
 fi
 
@@ -1316,6 +1361,13 @@ META_WINDOW=$T
   if [ "$KIND" = secondmate ]; then
     echo "home=$PROJ_ABS"
     echo "projects=$SECONDMATE_PROJECTS"
+  fi
+  if [ "$KIND" != secondmate ] && [ "$PR_IDENTITY" != none ]; then
+    echo "pr_identity=$PR_IDENTITY"
+    echo "pr_project_key=$PROJ_KEY"
+    echo "pr_repo=$PR_REPO"
+    echo "pr_branch=$PR_BRANCH"
+    echo "pr_base=$PR_BASE"
   fi
 } > "$STATE/$ID.meta" || {
   echo "error: could not publish task metadata at $STATE/$ID.meta" >&2

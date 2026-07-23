@@ -130,6 +130,7 @@ if [ "$BACKEND" = orca ]; then
 fi
 HOME_PATH=$(grep '^home=' "$META" | cut -d= -f2- || true)
 PR_URL=$(grep '^pr=' "$META" | tail -1 | cut -d= -f2- || true)
+PR_IDENTITY=$(grep '^pr_identity=' "$META" | tail -1 | cut -d= -f2- || true)
 # tasktmp is recorded by fm-spawn for tasks that set up a per-task temp root
 # (/tmp/fm-<id>/); absent for tasks spawned before that change, so tolerate empty.
 TASK_TMP=$(grep '^tasktmp=' "$META" | cut -d= -f2- || true)
@@ -209,7 +210,8 @@ validate_pr_poll_cleanup() {
     return 1
   fi
   for artifact in "$state_dir/$id.check.sh" "$state_dir/$id.pr-poll" \
-    "$state_dir/$id.pr-poll-registration" "$state_dir/$id.check-trust"; do
+    "$state_dir/$id.pr-poll-registration" "$state_dir/$id.check-trust" \
+    "$state_dir/$id.pr-publication"; do
     [ -e "$artifact" ] || [ -L "$artifact" ] || continue
     has_artifact=1
   done
@@ -220,7 +222,8 @@ validate_pr_poll_cleanup() {
   [ -d "$state_dir" ] && [ ! -L "$state_dir" ] || return 1
   state_device=$(fm_pr_file_device "$state_dir") || return 1
   for artifact in "$state_dir/$id.check.sh" "$state_dir/$id.pr-poll" \
-    "$state_dir/$id.pr-poll-registration" "$state_dir/$id.check-trust"; do
+    "$state_dir/$id.pr-poll-registration" "$state_dir/$id.check-trust" \
+    "$state_dir/$id.pr-publication"; do
     [ -e "$artifact" ] || [ -L "$artifact" ] || continue
     if [ ! -f "$artifact" ] || [ -L "$artifact" ] \
       || [ "$(fm_pr_file_device "$artifact")" != "$state_device" ] \
@@ -253,7 +256,8 @@ remove_pr_poll_artifacts() {
   local state_dir=$1 id=$2 quarantine artifact
   validate_pr_poll_cleanup "$state_dir" "$id" || return 1
   rm -f "$state_dir/$id.check.sh" "$state_dir/$id.pr-poll" \
-    "$state_dir/$id.pr-poll-registration" "$state_dir/$id.check-trust" || return 1
+    "$state_dir/$id.pr-poll-registration" "$state_dir/$id.check-trust" \
+    "$state_dir/$id.pr-publication" || return 1
   if fm_task_id_path_safe "$id"; then
     quarantine="$state_dir/.pr-check-quarantine"
     if [ -d "$quarantine" ] && [ ! -L "$quarantine" ]; then
@@ -343,6 +347,25 @@ EOF
 # occurs - the caller then falls back to the content check.
 pr_is_merged() {
   local branch=$1 target view state head current
+  if [ "$PR_IDENTITY" = atlas-pat ]; then
+    [ -n "$PR_URL" ] || {
+      echo "REFUSED: opted-in Atlas task has no recorded PR; remote state is unknown." >&2
+      return 1
+    }
+    view=$(FM_ROOT_OVERRIDE="$FM_ROOT" FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+      "$FM_ROOT/bin/fm-pr-identity.sh" read "$ID" "$PR_URL") || {
+      echo "REFUSED: Atlas host read verification failed; remote state is unknown and content fallback is disabled." >&2
+      return 1
+    }
+    state=$(printf '%s\n' "$view" | sed -n 's/^state=//p' | head -1)
+    head=$(printf '%s\n' "$view" | sed -n 's/^head_sha=//p' | head -1)
+    case "$state" in MERGED|merged) ;; *) return 1 ;; esac
+    [ -n "$head" ] || return 1
+    current=$(git -C "$WT" rev-parse --verify HEAD 2>/dev/null) || return 1
+    git -C "$WT" merge-base --is-ancestor "$current" "$head" 2>/dev/null && return 0
+    unpushed_patches_are_in_pr_head "$head"
+    return $?
+  fi
   if [ -n "$PR_URL" ]; then
     target=$PR_URL
   else
@@ -396,6 +419,10 @@ content_in_default() {
 # only for genuinely unlanded work.
 work_is_landed() {
   local branch=$1
+  if [ "$PR_IDENTITY" = atlas-pat ]; then
+    pr_is_merged "$branch"
+    return $?
+  fi
   pr_is_merged "$branch" && return 0
   content_in_default
 }
