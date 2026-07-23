@@ -72,7 +72,7 @@ make_case() {
   local name=$1 case_dir fakebin
   case_dir="$TMP_ROOT/$name"
   fakebin="$case_dir/fakebin"
-  mkdir -p "$case_dir/state" "$case_dir/config" "$fakebin"
+  mkdir -p "$case_dir/state" "$case_dir/config" "$case_dir/data" "$fakebin"
 
   # Mocks for the post-check teardown steps. Refuse logic exits before these
   # run; the ALLOW cases need them so the script can complete cleanly.
@@ -160,6 +160,99 @@ write_meta() {
     "project=$case_dir/project" \
     "kind=$kind" \
     "mode=$mode"
+}
+
+write_atlas_meta_and_binding() {
+  local case_dir=$1 head project_real
+  head=$(git -C "$case_dir/wt" rev-parse HEAD)
+  project_real=$(cd "$case_dir/project" && pwd -P)
+  printf '%s\n' \
+    '- Atlas [direct-PR pr-identity=atlas-pat] - synthetic broker teardown project (added 2026-07-23)' \
+    > "$case_dir/data/projects.md"
+  git -C "$case_dir/project" remote set-url origin https://github.com/example/repo.git
+  sed -i.bak "s|^project=.*|project=$project_real|" "$case_dir/state/task-x1.meta"
+  rm -f "$case_dir/state/task-x1.meta.bak"
+  printf '%s\n' \
+    'pr=https://github.com/example/repo/pull/7' \
+    "pr_head=$head" \
+    'pr_identity=atlas-pat' \
+    'pr_project_key=Atlas' \
+    'pr_repo=example/repo' \
+    'pr_branch=fm/task-x1' \
+    'pr_base=main' >> "$case_dir/state/task-x1.meta"
+  umask 077
+  printf '%s\n' \
+    'version=1' \
+    'task=task-x1' \
+    'profile=atlas-pat' \
+    'project_key=Atlas' \
+    'repo=example/repo' \
+    'branch=fm/task-x1' \
+    'base=main' \
+    "project=$project_real" > "$case_dir/state/task-x1.pr-binding"
+  chmod 0600 "$case_dir/state/task-x1.pr-binding"
+}
+
+wt_commit_atlas_file() {
+  local case_dir file content msg=${4:-atlas change}
+  case_dir=$1
+  file=$2
+  content=$3
+  printf '%s\n' "$content" > "$case_dir/wt/$file"
+  git -C "$case_dir/wt" add -- "$file"
+  GIT_AUTHOR_NAME=Atlas GIT_AUTHOR_EMAIL=atlas@rainyday.media \
+  GIT_COMMITTER_NAME=Atlas GIT_COMMITTER_EMAIL=atlas@rainyday.media \
+    git -C "$case_dir/wt" -c user.email=atlas@rainyday.media -c user.name=Atlas \
+      -c commit.gpgsign=false commit -q -m "$msg"
+}
+
+add_atlas_broker_merged_for_head_with_one_transient_failure() {
+  local case_dir head
+  case_dir=$1
+  head=$(git -C "$case_dir/wt" rev-parse HEAD)
+  cat > "$case_dir/atlas-pr.toon" <<EOF
+base:
+  ref: main
+head:
+  ref: fm/task-x1
+  sha: "$head"
+merged: true
+merged_at: "2026-07-23T00:00:00Z"
+state: merged
+user: Atlas-Key
+EOF
+  cat > "$case_dir/atlas-commits.toon" <<EOF
+[1]:
+  - sha: "$head"
+    author:
+      login: Atlas-Key
+    committer:
+      login: Atlas-Key
+EOF
+  : > "$case_dir/atlas-pr-read-count"
+  cat > "$case_dir/fakebin/gh-axi" <<'SH'
+#!/usr/bin/env bash
+set -u
+case "$*" in
+  --version) printf '%s\n' '0.1.27' ;;
+  *'api /repos/example/repo/pulls/7/commits?per_page=100&page=2'*) printf '[0]:\n' ;;
+  *'api /repos/example/repo/pulls/7/commits?per_page=100&page=1'*) cat "$FM_ATLAS_COMMITS" ;;
+  *'api /repos/example/repo/pulls/7/commits'*) cat "$FM_ATLAS_COMMITS" ;;
+  *'api /repos/example/repo/pulls/7'*)
+    read_count=0
+    [ ! -s "$FM_ATLAS_READ_COUNT" ] || read_count=$(cat "$FM_ATLAS_READ_COUNT")
+    read_count=$((read_count + 1))
+    printf '%s\n' "$read_count" > "$FM_ATLAS_READ_COUNT"
+    if [ "$read_count" -eq 1 ]; then
+      printf 'HTTP 503\n' >&2
+      exit 1
+    fi
+    cat "$FM_ATLAS_PR"
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$case_dir/fakebin/gh-axi"
 }
 
 # Commit something on the worktree's task branch. Args: case_dir [message]
@@ -490,8 +583,11 @@ SH
 # Run teardown with PATH mocking. Args: case_dir [extra args...]
 run_teardown() {
   local case_dir=$1; shift
+  mkdir -p "$case_dir/data"
   FM_ROOT_OVERRIDE="$ROOT" \
+  FM_HOME="$case_dir" \
   FM_STATE_OVERRIDE="$case_dir/state" \
+  FM_DATA_OVERRIDE="$case_dir/data" \
   FM_CONFIG_OVERRIDE="$case_dir/config" \
   PATH="$case_dir/fakebin:$PATH" \
     "$TEARDOWN" task-x1 "$@"
@@ -884,6 +980,32 @@ test_gh_error_and_content_absent_refuses() {
   expect_code 1 "$rc" "gh-error: teardown should refuse when the PR lookup errors and content is not landed"
   grep -q REFUSED "$case_dir/stderr" || fail "gh-error: no REFUSED line in stderr"
   pass "gh lookup error with content not in default refuses (fail-safe)"
+}
+
+test_atlas_teardown_retries_broker_read_and_proves_merged_head() {
+  local case_dir rc read_count
+  case_dir=$(make_case atlas-broker-retry)
+  write_meta "$case_dir" no-mistakes ship
+  wt_commit_atlas_file "$case_dir" feature.txt atlas "Atlas broker change"
+  write_atlas_meta_and_binding "$case_dir"
+  add_atlas_broker_merged_for_head_with_one_transient_failure "$case_dir"
+
+  export FM_PR_IDENTITY_TEST_MODE=1
+  export FM_PR_IDENTITY_GH_AXI="$case_dir/fakebin/gh-axi"
+  export FM_ATLAS_PR="$case_dir/atlas-pr.toon"
+  export FM_ATLAS_COMMITS="$case_dir/atlas-commits.toon"
+  export FM_ATLAS_READ_COUNT="$case_dir/atlas-pr-read-count"
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  unset FM_PR_IDENTITY_TEST_MODE FM_PR_IDENTITY_GH_AXI FM_ATLAS_PR FM_ATLAS_COMMITS FM_ATLAS_READ_COUNT
+
+  expect_code 0 "$rc" "atlas-broker-retry: teardown should succeed after a transient broker read failure"
+  read_count=$(cat "$case_dir/atlas-pr-read-count")
+  [ "$read_count" = 2 ] || fail "atlas-broker-retry: teardown did not perform one bounded broker retry"
+  ! grep -q REFUSED "$case_dir/stderr" || fail "atlas-broker-retry: teardown refused a verified merged PR"
+  pass "Atlas teardown uses a bounded broker retry and verifies the merged PR head before cleanup"
 }
 
 test_stale_index_lock_cleared_and_teardown_succeeds() {
@@ -1393,6 +1515,7 @@ test_content_in_default_fallback_allows
 test_content_fallback_refreshes_stale_origin_ref
 test_dirty_worktree_refuses
 test_gh_error_and_content_absent_refuses
+test_atlas_teardown_retries_broker_read_and_proves_merged_head
 test_stale_index_lock_cleared_and_teardown_succeeds
 test_live_index_lock_is_never_removed_and_teardown_refuses
 test_lsof_error_never_clears_index_lock

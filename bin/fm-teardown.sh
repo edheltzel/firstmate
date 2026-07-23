@@ -132,8 +132,8 @@ HOME_PATH=$(grep '^home=' "$META" | cut -d= -f2- || true)
 PR_URL=$(grep '^pr=' "$META" | tail -1 | cut -d= -f2- || true)
 META_PR_IDENTITY=$(grep '^pr_identity=' "$META" | tail -1 | cut -d= -f2- || true)
 BINDING="$STATE/$ID.pr-binding"
-if [ -f "$BINDING" ] && [ ! -L "$BINDING" ]; then
-  PR_IDENTITY=$(sed -n 's/^profile=//p' "$BINDING" | head -1)
+if [ -e "$BINDING" ] || [ -L "$BINDING" ]; then
+  PR_IDENTITY=$(fm_pr_binding_profile "$BINDING" || printf '%s\n' invalid-binding)
   [ "$PR_IDENTITY" = atlas-pat ] || PR_IDENTITY=invalid-binding
 elif [ -n "$META_PR_IDENTITY" ]; then
   PR_IDENTITY=invalid-binding
@@ -145,6 +145,8 @@ fi
 TASK_TMP=$(grep '^tasktmp=' "$META" | cut -d= -f2- || true)
 ORCA_WORKTREE_ID=$(fm_meta_get "$META" orca_worktree_id)
 ORCA_PATH_MATCH_VERIFIED=0
+ATLAS_VERIFY_OUTPUT=
+ATLAS_PR_READ_STATUS=unknown
 
 KIND=$(grep '^kind=' "$META" | cut -d= -f2- || true)
 [ -n "$KIND" ] || KIND=ship
@@ -349,6 +351,35 @@ $unpushed
 EOF
 }
 
+# Retry a broker read a bounded number of times. A failed read remains unknown;
+# callers may use only an independent content proof after this helper returns.
+atlas_broker_verify() {
+  local attempt=1 max=${FM_TEARDOWN_PR_READ_RETRIES:-3} delay=${FM_TEARDOWN_PR_READ_DELAY:-0}
+  case "$max" in ''|*[!0-9]*) max=3 ;; esac
+  [ "$max" -ge 1 ] || max=1
+  [ "$max" -le 5 ] || max=5
+  case "$delay" in ''|*[!0-9.]*) delay=0 ;; esac
+  while [ "$attempt" -le "$max" ]; do
+    if [ "${FM_PR_IDENTITY_TEST_MODE:-0}" = 1 ]; then
+      if ATLAS_VERIFY_OUTPUT=$(FM_ROOT_OVERRIDE="$FM_ROOT" FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+        "$FM_ROOT/bin/fm-pr-identity.sh" verify "$ID" "$PR_URL" 2>/dev/null); then
+        ATLAS_PR_READ_STATUS=verified
+        return 0
+      fi
+    else
+      if ATLAS_VERIFY_OUTPUT=$(env -u FM_ROOT_OVERRIDE -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE FM_HOME="$FM_HOME" \
+        "$FM_ROOT/bin/fm-pr-identity.sh" verify "$ID" "$PR_URL" 2>/dev/null); then
+        ATLAS_PR_READ_STATUS=verified
+        return 0
+      fi
+    fi
+    [ "$attempt" -ge "$max" ] || { [ "$delay" = 0 ] || sleep "$delay"; }
+    attempt=$((attempt + 1))
+  done
+  ATLAS_PR_READ_STATUS=unknown
+  return 1
+}
+
 # Is the worktree's PR merged for local work contained in that PR? Resolves the
 # PR from the recorded pr= URL first, then from the branch name, and asks GitHub
 # for both the PR state and head. Returns non-zero when the PR is not merged, the
@@ -357,31 +388,28 @@ EOF
 pr_is_merged() {
   local branch=$1 target view merged head current
   if [ "$PR_IDENTITY" = atlas-pat ]; then
+    ATLAS_PR_READ_STATUS=unknown
     [ -n "$PR_URL" ] || {
       echo "REFUSED: opted-in Atlas task has no recorded PR; remote state is unknown." >&2
       return 1
     }
-    if [ "${FM_PR_IDENTITY_TEST_MODE:-0}" = 1 ]; then
-      view=$(FM_ROOT_OVERRIDE="$FM_ROOT" FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
-        "$FM_ROOT/bin/fm-pr-identity.sh" verify "$ID" "$PR_URL") || {
-        echo "REFUSED: Atlas host verification failed; remote state is unknown and content fallback is disabled." >&2
-        return 1
-      }
-    else
-      view=$(env -u FM_ROOT_OVERRIDE -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE FM_HOME="$FM_HOME" \
-        "$FM_ROOT/bin/fm-pr-identity.sh" verify "$ID" "$PR_URL") || {
-        echo "REFUSED: Atlas host verification failed; remote state is unknown and content fallback is disabled." >&2
-        return 1
-      }
-    fi
+    atlas_broker_verify || return 1
+    view=$ATLAS_VERIFY_OUTPUT
     merged=$(printf '%s\n' "$view" | sed -n 's/^merged=//p' | head -1)
     head=$(printf '%s\n' "$view" | sed -n 's/^head_sha=//p' | head -1)
-    [ "$merged" = 1 ] || return 1
-    [ -n "$head" ] || return 1
+    [ "$merged" = 1 ] || { ATLAS_PR_READ_STATUS=not-merged; return 1; }
+    [ -n "$head" ] || { ATLAS_PR_READ_STATUS=unknown; return 1; }
     current=$(git -C "$WT" rev-parse --verify HEAD 2>/dev/null) || return 1
-    git -C "$WT" merge-base --is-ancestor "$current" "$head" 2>/dev/null && return 0
-    unpushed_patches_are_in_pr_head "$head"
-    return $?
+    if git -C "$WT" merge-base --is-ancestor "$current" "$head" 2>/dev/null; then
+      ATLAS_PR_READ_STATUS=merged
+      return 0
+    fi
+    if unpushed_patches_are_in_pr_head "$head"; then
+      ATLAS_PR_READ_STATUS=merged
+      return 0
+    fi
+    ATLAS_PR_READ_STATUS=not-merged
+    return 1
   fi
   if [ -n "$PR_URL" ]; then
     target=$PR_URL
@@ -437,8 +465,15 @@ content_in_default() {
 work_is_landed() {
   local branch=$1
   if [ "$PR_IDENTITY" = atlas-pat ]; then
-    pr_is_merged "$branch"
-    return $?
+    if pr_is_merged "$branch"; then
+      return 0
+    fi
+    if content_in_default; then
+      echo "LANDED: Atlas PR read was not sufficient; default-branch content independently proves landing." >&2
+      return 0
+    fi
+    echo "REFUSED: Atlas landing could not be proved by broker verification or independent default-branch content." >&2
+    return 1
   fi
   if [ -n "$PR_IDENTITY" ]; then
     echo "REFUSED: task identity binding is invalid; content fallback is disabled." >&2
