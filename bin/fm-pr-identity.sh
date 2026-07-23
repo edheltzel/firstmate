@@ -650,8 +650,15 @@ verify_task() {
 }
 
 publication_field() {
-  local id=$1 key=$2 fallback=$3 file="$STATE/$1.pr-publication" value
-  if [ -f "$file" ] && [ ! -L "$file" ]; then
+  local id=$1 key=$2 fallback=$3 file="$STATE/$1.pr-publication" value count
+  if [ -e "$file" ] || [ -L "$file" ]; then
+    [ -f "$file" ] && [ ! -L "$file" ] \
+      || fail publication-state unknown no "publication record is unsafe"
+    [ "$(fm_pr_file_link_count "$file")" = 1 ] \
+      || fail publication-state unknown no "publication record has unsafe links"
+    count=$(metadata_count "$file" "$key")
+    [ "$count" -le 1 ] \
+      || fail publication-state unknown no "publication record has duplicate fields"
     value=$(metadata_value "$file" "$key")
     [ -n "$value" ] && { printf '%s\n' "$value"; return 0; }
   fi

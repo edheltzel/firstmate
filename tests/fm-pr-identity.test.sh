@@ -403,6 +403,14 @@ duplicate_create_rc=$?
 set -e
 [ "$duplicate_create_rc" -ne 0 ] || fail "a known PR must not be created a second time"
 assert_contains "$duplicate_create" 'publication-duplicate' "known PR retries should require reconciliation instead of creating a duplicate"
+printf '%s\n' 'pr_url=https://github.com/edheltzel/fixture/pull/1' >> "$HOME_DIR/state/task-a.pr-publication"
+set +e
+duplicate_field_create=$(run_broker create task-a "$CASE_ROOT/title.md" "$CASE_ROOT/body.md" 2>&1)
+duplicate_field_create_rc=$?
+set -e
+[ "$duplicate_field_create_rc" -ne 0 ] || fail "duplicate publication fields must refuse create"
+assert_contains "$duplicate_field_create" 'publication-state' \
+  "duplicate publication fields should fail closed before a second PR request"
 rm -f -- "$HOME_DIR/state/task-a.pr-publication"
 reset_out=$(run_broker reset task-a --confirm-no-pr) || fail "explicit no-PR reset should restore a retry-safe state"
 assert_contains "$reset_out" 'retry_safe=yes' "reset should publish an explicit retry-safe reconciliation state"
