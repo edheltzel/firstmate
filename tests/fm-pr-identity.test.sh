@@ -114,6 +114,21 @@ assert_contains "$bad_url" 'pr-mismatch' "wrong repository must use the PR misma
 assert_not_contains "$bad_url" 'synthetic-token' "read failures must not expose credentials"
 pass "broker rejects a PR URL outside the recorded repository without ambient fallback"
 
+awk '{ if ($0 == "pr_identity=atlas-pat") print "pr_identity=none"; else print }' \
+  "$HOME_DIR/state/task-a.meta" > "$CASE_ROOT/tampered.meta"
+mv "$CASE_ROOT/tampered.meta" "$HOME_DIR/state/task-a.meta"
+set +e
+tampered=$(run_broker read task-a 'https://github.com/edheltzel/fixture/pull/1' 2>&1)
+tampered_rc=$?
+set -e
+[ "$tampered_rc" -ne 0 ] || fail "metadata identity downgrade must fail"
+assert_contains "$tampered" 'metadata disagrees with the host identity binding' \
+  "metadata identity downgrade should be rejected by the host binding"
+awk '{ if ($0 == "pr_identity=none") print "pr_identity=atlas-pat"; else print }' \
+  "$HOME_DIR/state/task-a.meta" > "$CASE_ROOT/restored.meta"
+mv "$CASE_ROOT/restored.meta" "$HOME_DIR/state/task-a.meta"
+pass "mutable task metadata cannot downgrade the host-bound Atlas identity"
+
 cat > "$FAKEBIN/git" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
@@ -152,9 +167,10 @@ pass "broker push checks exact branch and commit attribution while disabling pro
 cat > "$FAKEBIN/gh-axi" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
+  *'/pulls/1/commits?per_page=100&page=2'*) printf '[0]:\n' ;;
   *'/pulls/1/commits'*)
     if [ "${FM_TEST_BAD_COMMITS:-0}" = 1 ]; then
-      printf '[1]:\n  - sha: 3333333333333333333333333333333333333333\n    author:\n      login: Atlas-Key\n    committer:\n      login: Atlas-Key\n'
+      printf '[1]:\n  - sha: "3333333333333333333333333333333333333333"\n    author:\n      login: Atlas-Key\n    committer:\n      login: Atlas-Key\n'
     else
       cat "$FM_TEST_ROOT/tests/fixtures/gh-axi-pr-commits.toon"
     fi

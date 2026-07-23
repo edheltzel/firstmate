@@ -184,14 +184,9 @@ host_api() {
     "$GH_AXI" api "$1" 2>/dev/null
 }
 
-host_api_paginated() {
-  env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GH_HOST \
-    "$GH_AXI" api "$1" --paginate 2>/dev/null
-}
-
 api_scalar() {
   local raw=$1 key=$2
-  printf '%s\n' "$raw" | awk -F':[[:space:]]*' -v wanted="$key" '{ gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); if ($1 == wanted) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit } }'
+  printf '%s\n' "$raw" | awk -F':[[:space:]]*' -v wanted="$key" '{ gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); if ($1 == wanted) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); if ($2 ~ /^".*"$/) { sub(/^"/, "", $2); sub(/"$/, "", $2) } print $2; exit } }'
 }
 
 api_section_scalar() {
@@ -200,7 +195,7 @@ api_section_scalar() {
     { indent=$0; sub(/[^[:space:]].*$/, "", indent); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1) }
     indent == "" && $1 == wanted_section { inside=1; next }
     indent == "" && $1 != wanted_section { inside=0 }
-    inside && $1 == wanted { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit }
+    inside && $1 == wanted { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); if ($2 ~ /^".*"$/) { sub(/^"/, "", $2); sub(/"$/, "", $2) } print $2; exit }
   '
 }
 
@@ -502,31 +497,47 @@ toon_commit_rows() {
       emit_item(); in_item=0; tabular=1; next
     }
     /^[^[:space:]]/ { tabular=0 }
-    tabular && /^[[:space:]]+[0-9a-f]{40}[[:space:]]*$/ {
-      line=$0; gsub(/^[[:space:]]+|[[:space:]]+$/, "", line); print line "\t\t"; next
+    tabular && /^[[:space:]]+"?[0-9a-f]{40}"?[[:space:]]*$/ {
+      line=$0; gsub(/^[[:space:]]+|[[:space:]]+$/, "", line); gsub(/^"|"$/, "", line); print line "\t\t"; next
     }
     in_item && /^[[:space:]]+- sha:[[:space:]]*/ {
-      line=$0; sub(/^[[:space:]]+- sha:[[:space:]]*/, "", line); gsub(/[[:space:]]+$/, "", line); sha=line; next
+      line=$0; sub(/^[[:space:]]+- sha:[[:space:]]*/, "", line); gsub(/[[:space:]]+$/, "", line); gsub(/^"|"$/, "", line); sha=line; next
     }
     in_item && /^    author:/ {
       line=$0; sub(/^    author:[[:space:]]*/, "", line)
-      if (line != "") author=line; else section="author"
+      gsub(/^"|"$/, "", line); if (line != "") author=line; else section="author"
       next
     }
     in_item && /^    committer:/ {
       line=$0; sub(/^    committer:[[:space:]]*/, "", line)
-      if (line != "") committer=line; else section="committer"
+      gsub(/^"|"$/, "", line); if (line != "") committer=line; else section="committer"
       next
     }
     in_item && section == "author" && /^      login:/ {
-      line=$0; sub(/^      login:[[:space:]]*/, "", line); author=line; section=""; next
+      line=$0; sub(/^      login:[[:space:]]*/, "", line); gsub(/^"|"$/, "", line); author=line; section=""; next
     }
     in_item && section == "committer" && /^      login:/ {
-      line=$0; sub(/^      login:[[:space:]]*/, "", line); committer=line; section=""; next
+      line=$0; sub(/^      login:[[:space:]]*/, "", line); gsub(/^"|"$/, "", line); committer=line; section=""; next
     }
     in_item && /^    [A-Za-z0-9_]+:/ { section="" }
     END { emit_item() }
   '
+}
+
+host_commit_rows() {
+  local endpoint=$1 page raw rows
+  page=1
+  while [ "$page" -le 100 ]; do
+    raw=$(host_api "$endpoint?per_page=100&page=$page") || return 1
+    rows=$(toon_commit_rows <<EOF
+$raw
+EOF
+)
+    [ -n "$rows" ] || return 0
+    printf '%s\n' "$rows"
+    page=$((page + 1))
+  done
+  return 1
 }
 
 verification_error() {
@@ -535,7 +546,7 @@ verification_error() {
 }
 
 verify_task_commits() {
-  local id=$1 number=$2 raw base_ref local_file remote_file rows_file row sha author committer
+  local id=$1 number=$2 base_ref local_file remote_file rows_file sha author committer
   if ! base_ref=$(load_commit_binding); then
     verification_error commits unknown no "task commit binding could not be loaded"
     return 1
@@ -552,14 +563,11 @@ verify_task_commits() {
     verification_error commits unknown no "local commit set could not be read"
     return 1
   fi
-  if ! raw=$(host_api_paginated "/repos/$META_REPO/pulls/$number/commits"); then
+  if ! host_commit_rows "/repos/$META_REPO/pulls/$number/commits" > "$rows_file"; then
     rm -f -- "$local_file" "$remote_file" "$rows_file"; TMP_FILE=
     verification_error read-auth unknown no "PR commit-list read authentication failed"
     return 1
   fi
-  toon_commit_rows <<EOF > "$rows_file"
-$raw
-EOF
   cut -f1 "$rows_file" | sed '/^$/d' > "$remote_file"
   if [ ! -s "$remote_file" ]; then
     rm -f -- "$local_file" "$remote_file" "$rows_file"; TMP_FILE=
