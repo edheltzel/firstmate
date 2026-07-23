@@ -24,7 +24,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
-GH_AXI="${FM_PR_IDENTITY_GH_AXI:-gh-axi}"
+TEST_MODE=${FM_PR_IDENTITY_TEST_MODE:-0}
+if [ "$TEST_MODE" = 1 ]; then
+  GH_AXI="${FM_PR_IDENTITY_GH_AXI:-gh-axi}"
+  ATLAS_ENV_FILE="${FM_ATLAS_ENV_FILE:-${HOME:-}/.env}"
+else
+  GH_AXI=gh-axi
+  ATLAS_ENV_FILE="${HOME:-}/.env"
+fi
 EXPECTED_LOGIN=Atlas-Key
 EXPECTED_AUTHOR_NAME=Atlas
 EXPECTED_AUTHOR_EMAIL=atlas@rainyday.media
@@ -126,7 +133,7 @@ default_branch() {
 }
 
 load_pat() {
-  local env_file="${FM_ATLAS_ENV_FILE:-${HOME:-}/.env}" line candidate value count=0
+  local env_file="$ATLAS_ENV_FILE" line candidate value count=0
   PAT=
   [ -f "$env_file" ] && [ ! -L "$env_file" ] || fail credential-missing none no "Atlas credential file is unavailable"
   while IFS= read -r line || [ -n "$line" ]; do
@@ -349,14 +356,26 @@ pr_number_from_url() {
 }
 
 read_pr() {
-  local id=$1 url=$2 number raw login head_ref head_sha base_ref state expected_head
+  local id=$1 url=$2 number raw login head_ref head_sha base_ref state expected_head head_line base_line
   load_metadata "$id"
   number=$(pr_number_from_url "$url") || fail pr-mismatch unknown no "PR URL is not the recorded repository"
   raw=$(host_api "/repos/$META_REPO/pulls/$number") || fail read-auth unknown no "host PR read authentication failed"
   login=$(api_section_scalar "$raw" user login); [ -n "$login" ] || login=$(api_scalar "$raw" login)
+  [ -n "$login" ] || login=$(api_scalar "$raw" user)
   head_ref=$(api_section_scalar "$raw" head ref)
   head_sha=$(api_section_scalar "$raw" head sha)
   base_ref=$(api_section_scalar "$raw" base ref)
+  if [ -z "$head_ref" ] || [ -z "$head_sha" ]; then
+    head_line=$(api_scalar "$raw" head)
+    head_ref=${head_line#ref }
+    head_ref=${head_ref%%,*}
+    head_sha=${head_line#*sha }
+  fi
+  if [ -z "$base_ref" ]; then
+    base_line=$(api_scalar "$raw" base)
+    base_ref=${base_line#ref }
+    base_ref=${base_ref%%,*}
+  fi
   state=$(api_scalar "$raw" state)
   [ "$login" = "$EXPECTED_LOGIN" ] || fail pr-mismatch none no "PR author is not Atlas-Key"
   [ "$head_ref" = "$META_BRANCH" ] || fail pr-mismatch none no "PR head branch is not the task branch"
