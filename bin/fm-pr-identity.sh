@@ -333,7 +333,8 @@ load_metadata() {
     || fail metadata unknown no "task metadata project path is unavailable"
   [ "$value" = "$META_BINDING_PROJECT" ] \
     || fail metadata unknown no "task metadata disagrees with the host project binding"
-  current_profile=$(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="${FM_DATA_OVERRIDE:-$FM_HOME/data}" \
+  profile_data_override=${FM_DATA_OVERRIDE:-$FM_HOME/data}
+  current_profile=$(env FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$profile_data_override" \
     "$FM_ROOT/bin/fm-project-mode.sh" --pr-identity "$META_PROJECT_KEY" 2>/dev/null) \
     || fail profile unknown no "current project identity policy could not be verified"
   [ "$current_profile" = "$PROFILE" ] \
@@ -577,18 +578,27 @@ verify_task_commits() {
     verification_error pr-mismatch none no "PR commit list is empty"
     return 1
   fi
+  commit_error=
   while IFS=$(printf '\t') read -r sha author committer; do
     if ! fm_pr_head_valid "$sha"; then
-      rm -f -- "$local_file" "$remote_file" "$rows_file"; TMP_FILE=
-      verification_error pr-mismatch none no "PR commit list contains an invalid SHA"
-      return 1
+      commit_error=invalid-sha
+      break
     fi
     if [ "$author" != "$EXPECTED_LOGIN" ] || [ "$committer" != "$EXPECTED_LOGIN" ]; then
-      rm -f -- "$local_file" "$remote_file" "$rows_file"; TMP_FILE=
-      verification_error commit-attribution none no "a remote PR commit is not associated with Atlas-Key"
-      return 1
+      commit_error=attribution
+      break
     fi
   done < "$rows_file"
+  if [ "$commit_error" = invalid-sha ]; then
+    rm -f -- "$local_file" "$remote_file" "$rows_file"; TMP_FILE=
+    verification_error pr-mismatch none no "PR commit list contains an invalid SHA"
+    return 1
+  fi
+  if [ "$commit_error" = attribution ]; then
+    rm -f -- "$local_file" "$remote_file" "$rows_file"; TMP_FILE=
+    verification_error commit-attribution none no "a remote PR commit is not associated with Atlas-Key"
+    return 1
+  fi
   sort -u -o "$remote_file" "$remote_file"
   if ! cmp -s "$local_file" "$remote_file"; then
     rm -f -- "$local_file" "$remote_file" "$rows_file"; TMP_FILE=
