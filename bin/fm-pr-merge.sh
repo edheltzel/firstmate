@@ -50,7 +50,7 @@ caller_has_merge_method() {
 }
 
 atlas_rest_merge() {
-  local verified_head=$1 method=squash method_seen=0 body= body_set=0 subject= subject_set=0 delete_branch=0 arg value
+  local verified_head=$1 method=squash method_seen=0 body='' body_set=0 subject='' subject_set=0 delete_branch=0 arg value
   shift
   while [ "$#" -gt 0 ]; do
     arg=$1
