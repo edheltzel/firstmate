@@ -22,6 +22,11 @@ cat > "$SCRATCH/data/projects.md" <<'EOF'
 - FleetOnly [fleet=Custom] - only a fleet token, no mode (added 2026-07-20)
 - Agent-Themis [local-only] - registry key differs from its clone-dir basename (added 2026-07-20)
 - Aliased-Key [direct-PR fleet=Shown] - key differs from basename AND carries a fleet alias (added 2026-07-20)
+- Atlas [direct-PR fleet=Atlas pr-identity=atlas-pat] - brokered PR identity (added 2026-07-22)
+- LocalIdentity [local-only pr-identity=atlas-pat] - invalid identity combination (added 2026-07-22)
+- UnknownIdentity [direct-PR pr-identity=unknown-profile] - invalid identity profile (added 2026-07-22)
+- DuplicateIdentity [direct-PR pr-identity=atlas-pat pr-identity=atlas-pat] - invalid duplicate (added 2026-07-22)
+- ReorderedIdentity [pr-identity=atlas-pat direct-PR] - invalid order (added 2026-07-22)
 EOF
 
 run() { FM_HOME="$SCRATCH" FM_DATA_OVERRIDE="$SCRATCH/data" "$ROOT/bin/fm-project-mode.sh" "$@" 2>/dev/null; }
@@ -78,3 +83,19 @@ pass "fm-project-mode: the mode lookup keys on the registry key; a bare clone ba
 [ "$(run FleetOnly)" = "no-mistakes off" ] || fail "a fleet-only bracket must not be read as a mode: got '$(run FleetOnly)'"
 [ "$(run Unregistered)" = "no-mistakes off" ] || fail "an unregistered project must still default to 'no-mistakes off'"
 pass "fm-project-mode: the default '<mode> <yolo>' output stays byte-identical for existing callers, unaffected by fleet="
+
+# --- --pr-identity: strict opt-in query -------------------------------------
+[ "$(run --pr-identity Atlas)" = "atlas-pat" ] || fail "Atlas identity profile should resolve to atlas-pat"
+[ "$(run --pr-identity Echo)" = "none" ] || fail "projects without an opt-in should return none"
+[ "$(run --pr-identity Legacy)" = "none" ] || fail "legacy registry lines should return none"
+pass "fm-project-mode --pr-identity: absent opt-in is an explicit none"
+
+for invalid in LocalIdentity UnknownIdentity DuplicateIdentity ReorderedIdentity; do
+  set +e
+  identity_error=$(FM_HOME="$SCRATCH" FM_DATA_OVERRIDE="$SCRATCH/data" "$ROOT/bin/fm-project-mode.sh" --pr-identity "$invalid" 2>&1)
+  identity_rc=$?
+  set -e
+  [ "$identity_rc" -eq 2 ] || fail "$invalid identity profile should be rejected with exit 2"
+  case "$identity_error" in *"invalid pr-identity"*) ;; *) fail "$invalid identity profile did not report a strict parser error" ;; esac
+done
+pass "fm-project-mode --pr-identity: unknown, duplicate, reordered, and local-only profiles fail closed"
