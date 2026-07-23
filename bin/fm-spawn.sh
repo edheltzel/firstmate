@@ -252,6 +252,7 @@ HERDR_PRESENTATION_ORDER_LOCK=
 HERDR_PRESENTATION_ORDER_LOCK_HELD=0
 SPAWN_TASK_LOCK=
 SPAWN_TASK_LOCK_HELD=0
+PR_BINDING_CREATED=0
 CONFIG_INHERIT_LOCK=
 CONFIG_INHERIT_LOCK_HELD=0
 
@@ -337,6 +338,10 @@ spawn_abort_cleanup() {
   if [ "$CONFIG_INHERIT_LOCK_HELD" = 1 ]; then
     CONFIG_INHERIT_LOCK_HELD=0
     fm_lock_release "$CONFIG_INHERIT_LOCK" || true
+  fi
+  if [ "$PR_BINDING_CREATED" = 1 ] && [ ! -e "$STATE/$ID.meta" ] \
+    && [ -f "$STATE/$ID.pr-binding" ] && [ ! -L "$STATE/$ID.pr-binding" ]; then
+    rm -f -- "$STATE/$ID.pr-binding" || true
   fi
   return "$status"
 }
@@ -879,6 +884,7 @@ EOF
       echo "error: Atlas PR identity preflight failed; no worker/backend was created" >&2
       exit 1
     }
+    PR_BINDING_CREATED=1
     PR_REPO=$(printf '%s\n' "$PREFLIGHT" | awk -F= '$1 == "repo" { print $2; exit }')
     PR_BRANCH=$(printf '%s\n' "$PREFLIGHT" | awk -F= '$1 == "branch" { print $2; exit }')
     PR_BASE=$(printf '%s\n' "$PREFLIGHT" | awk -F= '$1 == "base" { print $2; exit }')

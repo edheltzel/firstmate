@@ -60,6 +60,39 @@ case "$number" in
   *[!0-9]*) exit 0 ;;
 esac
 
+atlas_opted_in=0
+atlas_binding_state=absent
+atlas_meta_identity=none
+if [ -n "$POLL_TASK_ID" ] && [ -n "$POLL_STATE" ]; then
+  poll_meta="$POLL_STATE/$POLL_TASK_ID.meta"
+  if [ -f "$poll_meta" ] && [ ! -L "$poll_meta" ]; then
+    atlas_meta_identity=$(sed -n 's/^pr_identity=//p' "$poll_meta" | tail -1)
+  fi
+  poll_binding="$POLL_STATE/$POLL_TASK_ID.pr-binding"
+  if [ -e "$poll_binding" ] || [ -L "$poll_binding" ]; then
+    atlas_opted_in=1
+    if [ -f "$poll_binding" ] && [ ! -L "$poll_binding" ] \
+      && [ "$(stat -f %l "$poll_binding" 2>/dev/null || stat -c %h "$poll_binding" 2>/dev/null)" = 1 ]; then
+      atlas_binding_profile=$(awk -F= '$1 == "profile" { count++; value=$2 } END { if (count == 1 && value != "") print value; else exit 1 }' "$poll_binding" 2>/dev/null || true)
+      if [ "$atlas_binding_profile" = atlas-pat ]; then
+        atlas_binding_state=valid
+      else
+        atlas_binding_state=invalid
+      fi
+    else
+      atlas_binding_state=invalid
+    fi
+  elif [ "$atlas_meta_identity" = atlas-pat ]; then
+    atlas_opted_in=1
+    atlas_binding_state=missing
+  fi
+  if [ "$atlas_meta_identity" = atlas-pat ]; then
+    atlas_opted_in=1
+  elif [ "$atlas_binding_state" = valid ]; then
+    atlas_binding_state=invalid
+  fi
+fi
+
 # Every component is revalidated here rather than trusted from the sidecar, and
 # the stored URL must then be exactly reconstructible from those components, so
 # a doctored sidecar cannot redirect this poll at another host or project.
@@ -77,6 +110,15 @@ case "$provider" in
       .|..|*[!A-Za-z0-9._-]*) exit 0 ;;
     esac
     [ "$url" = "https://github.com/$owner/$repo/pull/$number" ] || exit 0
+    if [ "$atlas_opted_in" = 1 ] && [ "$atlas_binding_state" != valid ]; then
+      if [ "$atlas_binding_state" = missing ] || [ -z "$POLL_TASK_ID" ] || [ -z "$POLL_ROOT" ] \
+        || [ -z "$POLL_HOME" ] || [ -z "$POLL_STATE" ]; then
+        printf '%s\n' 'read-error: Atlas PR binding is unavailable'
+      else
+        printf '%s\n' 'read-error: Atlas PR binding is invalid or downgraded'
+      fi
+      exit 0
+    fi
     if [ -n "$POLL_TASK_ID" ] && [ -n "$POLL_ROOT" ] && [ -n "$POLL_HOME" ] \
       && [ -f "$POLL_STATE/$POLL_TASK_ID.pr-binding" ] \
       && [ ! -L "$POLL_STATE/$POLL_TASK_ID.pr-binding" ]; then
@@ -99,6 +141,7 @@ case "$provider" in
       [ "$merged" = 1 ] && printf '%s\n' merged
       exit 0
     fi
+    [ "$atlas_opted_in" = 0 ] || { printf '%s\n' 'read-error: Atlas PR binding could not be evaluated'; exit 0; }
     state=$(gh pr view "$url" --json state -q .state 2>/dev/null) || exit 0
     [ "$state" = MERGED ] && printf '%s\n' merged
     ;;

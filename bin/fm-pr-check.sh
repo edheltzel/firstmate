@@ -66,8 +66,11 @@ PR_HEAD=
 BINDING="$STATE/$ID.pr-binding"
 PR_IDENTITY=$(grep '^pr_identity=' "$META" | tail -1 | cut -d= -f2- || true)
 BINDING_IDENTITY=
-if [ -f "$BINDING" ] && [ ! -L "$BINDING" ]; then
-  BINDING_IDENTITY=$(sed -n 's/^profile=//p' "$BINDING" | head -1)
+if [ -e "$BINDING" ] || [ -L "$BINDING" ]; then
+  BINDING_IDENTITY=$(fm_pr_binding_profile "$BINDING") || {
+    echo "error: task host identity binding is invalid; refusing to arm the watcher" >&2
+    exit 1
+  }
   [ "$BINDING_IDENTITY" = atlas-pat ] || {
     echo "error: task host identity binding is unsupported; refusing to arm the watcher" >&2
     exit 1

@@ -18,6 +18,12 @@
 #   fm-pr-identity.sh verify <task-id> <pr-url>
 #   fm-pr-identity.sh read <task-id> <pr-url>
 #   fm-pr-identity.sh merge-assert <task-id> <pr-url>
+#   fm-pr-identity.sh reconcile <task-id> <pr-url>
+#   fm-pr-identity.sh reset <task-id> --confirm-no-pr
+#
+# Failure categories are stable prefixes for automation: credential-*,
+# signing-policy, commits, commit-attribution, repository, branch, pr-mismatch,
+# read-auth, verify, publication-state, retry-unsafe, concurrent, and state-write.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,7 +42,10 @@ EXPECTED_LOGIN=Atlas-Key
 EXPECTED_AUTHOR_NAME=Atlas
 EXPECTED_AUTHOR_EMAIL=atlas@rainyday.media
 PROFILE=atlas-pat
+GH_AXI_SUPPORTED_VERSION=0.1.27
 PAT=
+ATLAS_API_STATUS=unknown
+HOST_COMMIT_ERROR=unknown
 LOCK_DIR=
 LOCK_PROCESS=
 TMP_FILE=
@@ -177,8 +186,21 @@ load_pat() {
 }
 
 atlas_api() {
-  env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GH_HOST \
-    GH_TOKEN="$PAT" "$GH_AXI" api "$1" 2>/dev/null
+  local endpoint=$1 output_file=${2:-} output status
+  ATLAS_API_STATUS=transport
+  if output=$(env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GH_HOST \
+    GH_TOKEN="$PAT" "$GH_AXI" api "$endpoint" 2>&1); then
+    ATLAS_API_STATUS=200
+    if [ -n "$output_file" ]; then
+      printf '%s\n' "$output" > "$output_file"
+    else
+      printf '%s\n' "$output"
+    fi
+    return 0
+  fi
+  status=$(printf '%s\n' "$output" | sed -n 's/.*HTTP \([0-9][0-9][0-9]\).*/\1/p' | tail -1 || true)
+  [ -n "$status" ] && ATLAS_API_STATUS=$status
+  return 1
 }
 
 host_api() {
@@ -186,37 +208,49 @@ host_api() {
     "$GH_AXI" api "$1" 2>/dev/null
 }
 
-api_scalar() {
-  local raw=$1 key=$2
-  printf '%s\n' "$raw" | awk -F':[[:space:]]*' -v wanted="$key" '{ gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); if ($1 == wanted) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); if ($2 ~ /^".*"$/) { sub(/^"/, "", $2); sub(/"$/, "", $2) } print $2; exit } }'
+host_api_request() {
+  env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GH_HOST \
+    "$GH_AXI" api "$@" 2>/dev/null
 }
 
-api_section_scalar() {
-  local raw=$1 section=$2 key=$3
-  printf '%s\n' "$raw" | awk -F':[[:space:]]*' -v wanted_section="$section" -v wanted="$key" '
-    { indent=$0; sub(/[^[:space:]].*$/, "", indent); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1) }
-    indent == "" && $1 == wanted_section { inside=1; next }
-    indent == "" && $1 != wanted_section { inside=0 }
-    inside && $1 == wanted { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); if ($2 ~ /^".*"$/) { sub(/^"/, "", $2); sub(/"$/, "", $2) } print $2; exit }
-  '
+require_gh_axi_contract() {
+  local version
+  version=$("$GH_AXI" --version 2>/dev/null) \
+    || fail dependency unknown no "supported gh-axi version could not be verified"
+  [ "$version" = "$GH_AXI_SUPPORTED_VERSION" ] \
+    || fail dependency unknown no "unsupported gh-axi version; expected $GH_AXI_SUPPORTED_VERSION"
 }
 
 verify_atlas_access() {
   local repo=$1 response login permission
   response=$(atlas_api /user) || fail credential-auth none no "Atlas credential authentication failed"
-  login=$(api_scalar "$response" login)
+  login=$(fm_pr_toon_scalar "$response" login)
   [ "$login" = "$EXPECTED_LOGIN" ] || fail credential-identity none no "Atlas credential did not authenticate as the expected login"
   response=$(atlas_api "/repos/$repo/collaborators/$EXPECTED_LOGIN/permission") \
     || fail credential-capability none no "Atlas credential capability could not be verified"
-  permission=$(api_scalar "$response" permission)
+  permission=$(fm_pr_toon_scalar "$response" permission)
   case "$permission" in admin|maintain|write) ;; *) fail credential-capability none no "Atlas credential lacks repository write capability" ;; esac
 }
 
 verify_unsigned_policy() {
-  local repo=$1 base=$2 response enabled
-  response=$(atlas_api "/repos/$repo/branches/$base/protection/required_signatures") \
-    || fail signing-policy unknown no "repository unsigned-signing policy could not be verified"
-  enabled=$(api_scalar "$response" enabled)
+  local repo=$1 base=$2 response enabled response_file
+  response_file=$(mktemp "$STATE/.fm-atlas-policy.XXXXXX") \
+    || fail state-write unknown no "repository signing policy response is unavailable"
+  if ! atlas_api "/repos/$repo/branches/$base/protection/required_signatures" "$response_file"; then
+    rm -f -- "$response_file"
+    # GitHub documents 404 from this optional sub-resource as no required
+    # signature policy for the branch. Forbidden, authentication, malformed,
+    # and server failures remain unknown and therefore refuse publication.
+    [ "$ATLAS_API_STATUS" = 404 ] \
+      || fail signing-policy unknown no "repository unsigned-signing policy could not be verified"
+    return 0
+  fi
+  response=$(cat "$response_file") || {
+    rm -f -- "$response_file"
+    fail signing-policy unknown no "repository signing policy response could not be read"
+  }
+  rm -f -- "$response_file"
+  enabled=$(fm_pr_toon_scalar "$response" enabled)
   case "$enabled" in
     false|False|0) ;;
     true|True|1) fail signing-policy none no "repository requires signed commits but this profile is unsigned" ;;
@@ -226,6 +260,7 @@ verify_unsigned_policy() {
 
 preflight() {
   local id=$1 project_key=$2 project_dir=$3 profile repo base project_real
+  require_gh_axi_contract
   task_valid "$id" || fail metadata none no "invalid task identity"
   safe_project_key "$project_key" || fail metadata none no "invalid canonical project key"
   [ -d "$project_dir" ] && [ ! -L "$project_dir" ] || fail metadata none no "project checkout is unavailable"
@@ -415,8 +450,10 @@ git_auth_command() {
 
 push_task() {
   local id=$1 base_ref remote remote_head
+  require_gh_axi_contract
   load_metadata "$id"
   acquire_lock "$id"
+  publication_retry_gate "$id"
   load_pat
   verify_atlas_access "$META_REPO"
   verify_unsigned_policy "$META_REPO" "$META_BASE"
@@ -454,28 +491,29 @@ pr_number_from_url() {
 
 read_pr() {
   local id=$1 url=$2 number raw login head_ref head_sha base_ref state merged merged_at expected_head head_line base_line
+  require_gh_axi_contract
   load_metadata "$id"
   number=$(pr_number_from_url "$url") || fail pr-mismatch unknown no "PR URL is not the recorded repository"
   raw=$(host_api "/repos/$META_REPO/pulls/$number") || fail read-auth unknown no "host PR read authentication failed"
-  login=$(api_section_scalar "$raw" user login); [ -n "$login" ] || login=$(api_scalar "$raw" login)
-  [ -n "$login" ] || login=$(api_scalar "$raw" user)
-  head_ref=$(api_section_scalar "$raw" head ref)
-  head_sha=$(api_section_scalar "$raw" head sha)
-  base_ref=$(api_section_scalar "$raw" base ref)
+  login=$(fm_pr_toon_section_scalar "$raw" user login); [ -n "$login" ] || login=$(fm_pr_toon_scalar "$raw" login)
+  [ -n "$login" ] || login=$(fm_pr_toon_scalar "$raw" user)
+  head_ref=$(fm_pr_toon_section_scalar "$raw" head ref)
+  head_sha=$(fm_pr_toon_section_scalar "$raw" head sha)
+  base_ref=$(fm_pr_toon_section_scalar "$raw" base ref)
   if [ -z "$head_ref" ] || [ -z "$head_sha" ]; then
-    head_line=$(api_scalar "$raw" head)
+    head_line=$(fm_pr_toon_scalar "$raw" head)
     head_ref=${head_line#ref }
     head_ref=${head_ref%%,*}
     head_sha=${head_line#*sha }
   fi
   if [ -z "$base_ref" ]; then
-    base_line=$(api_scalar "$raw" base)
+    base_line=$(fm_pr_toon_scalar "$raw" base)
     base_ref=${base_line#ref }
     base_ref=${base_ref%%,*}
   fi
-  state=$(api_scalar "$raw" state)
-  merged=$(api_scalar "$raw" merged)
-  merged_at=$(api_scalar "$raw" merged_at)
+  state=$(fm_pr_toon_scalar "$raw" state)
+  merged=$(fm_pr_toon_scalar "$raw" merged)
+  merged_at=$(fm_pr_toon_scalar "$raw" merged_at)
   case "$merged" in true|True|1) merged=1 ;; *) merged=0 ;; esac
   case "$merged_at" in null|Null|'<nil>'|'') merged_at= ;; esac
   [ "$merged" = 1 ] || [ -n "$merged_at" ] && merged=1
@@ -489,58 +527,36 @@ read_pr() {
     "$state" "$merged" "$META_REPO" "$head_ref" "$base_ref" "$head_sha" "$login" "$META_REPO" "$number"
 }
 
-toon_commit_rows() {
-  awk '
-    function emit_item() {
-      if (sha != "") print sha "\t" author "\t" committer
-    }
-    /^\[[0-9]+\]:[[:space:]]*$/ {
-      emit_item(); in_item=1; tabular=0; sha=""; author=""; committer=""; section=""; next
-    }
-    /^\[[0-9]+\]\{sha\}:[[:space:]]*$/ {
-      emit_item(); in_item=0; tabular=1; next
-    }
-    /^[^[:space:]]/ { tabular=0 }
-    tabular && /^[[:space:]]+"?[0-9a-f]{40}"?[[:space:]]*$/ {
-      line=$0; gsub(/^[[:space:]]+|[[:space:]]+$/, "", line); gsub(/^"|"$/, "", line); print line "\t\t"; next
-    }
-    in_item && /^[[:space:]]+- sha:[[:space:]]*/ {
-      line=$0; sub(/^[[:space:]]+- sha:[[:space:]]*/, "", line); gsub(/[[:space:]]+$/, "", line); gsub(/^"|"$/, "", line); sha=line; next
-    }
-    in_item && /^    author:/ {
-      line=$0; sub(/^    author:[[:space:]]*/, "", line)
-      gsub(/^"|"$/, "", line); if (line != "") author=line; else section="author"
-      next
-    }
-    in_item && /^    committer:/ {
-      line=$0; sub(/^    committer:[[:space:]]*/, "", line)
-      gsub(/^"|"$/, "", line); if (line != "") committer=line; else section="committer"
-      next
-    }
-    in_item && section == "author" && /^      login:/ {
-      line=$0; sub(/^      login:[[:space:]]*/, "", line); gsub(/^"|"$/, "", line); author=line; section=""; next
-    }
-    in_item && section == "committer" && /^      login:/ {
-      line=$0; sub(/^      login:[[:space:]]*/, "", line); gsub(/^"|"$/, "", line); committer=line; section=""; next
-    }
-    in_item && /^    [A-Za-z0-9_]+:/ { section="" }
-    END { emit_item() }
-  '
-}
-
 host_commit_rows() {
-  local endpoint=$1 page raw rows
+  local endpoint=$1 page raw rows count
+  HOST_COMMIT_ERROR=unknown
   page=1
   while [ "$page" -le 100 ]; do
-    raw=$(host_api "$endpoint?per_page=100&page=$page") || return 1
-    rows=$(toon_commit_rows <<EOF
+    raw=$(host_api "$endpoint?per_page=100&page=$page") || {
+      HOST_COMMIT_ERROR=read-auth
+      return 1
+    }
+    count=$(fm_pr_toon_array_count "$raw") || {
+      HOST_COMMIT_ERROR=malformed
+      return 1
+    }
+    rows=$(fm_pr_toon_commit_rows <<EOF
 $raw
 EOF
-)
-    [ -n "$rows" ] || return 0
-    printf '%s\n' "$rows"
+) || {
+      HOST_COMMIT_ERROR=malformed
+      return 1
+    }
+    [ -n "$rows" ] && printf '%s\n' "$rows"
+    [ "$count" -eq 0 ] && return 0
+    [ "$count" -lt 100 ] && return 0
+    [ "$page" -lt 100 ] || {
+      HOST_COMMIT_ERROR=pagination
+      return 1
+    }
     page=$((page + 1))
   done
+  HOST_COMMIT_ERROR=pagination
   return 1
 }
 
@@ -569,7 +585,11 @@ verify_task_commits() {
   fi
   if ! host_commit_rows "/repos/$META_REPO/pulls/$number/commits" > "$rows_file"; then
     rm -f -- "$local_file" "$remote_file" "$rows_file"; TMP_FILE=
-    verification_error read-auth unknown no "PR commit-list read authentication failed"
+    case "$HOST_COMMIT_ERROR" in
+      malformed) verification_error verify-malformed unknown no "PR commit-list response was malformed" ;;
+      pagination) verification_error verify-pagination unknown no "PR commit-list pagination could not be completed" ;;
+      *) verification_error read-auth unknown no "PR commit-list read authentication failed" ;;
+    esac
     return 1
   fi
   cut -f1 "$rows_file" | sed '/^$/d' > "$remote_file"
@@ -638,10 +658,30 @@ publication_field() {
   printf '%s\n' "$fallback"
 }
 
+publication_retry_gate() {
+  local id=$1 retry_state remote_state
+  retry_state=$(publication_field "$id" retry_safe yes)
+  remote_state=$(publication_field "$id" remote_state unknown)
+  case "$retry_state" in
+    yes) ;;
+    no) fail retry-unsafe "$remote_state" no "publication state is retry-unsafe; reconcile or explicitly reset it" ;;
+    *) fail publication-state "$remote_state" no "publication record has an invalid retry state" ;;
+  esac
+}
+
+publication_duplicate_gate() {
+  local id=$1 existing_url
+  existing_url=$(publication_field "$id" pr_url '')
+  [ -z "$existing_url" ] \
+    || fail publication-duplicate pushed no "a PR already exists for this task; reconcile it before any create retry"
+}
+
 create_task() {
   local id=$1 title_file=$2 body_file=$3 title raw url read_output
   load_metadata "$id"
   acquire_lock "$id"
+  publication_retry_gate "$id"
+  publication_duplicate_gate "$id"
   [ -f "$title_file" ] && [ ! -L "$title_file" ] || fail input pushed no "PR title file is unavailable"
   [ -f "$body_file" ] && [ ! -L "$body_file" ] || fail input pushed no "PR body file is unavailable"
   title=$(cat "$title_file") || fail input pushed no "PR title could not be read"
@@ -676,16 +716,31 @@ create_task() {
   printf 'created: url=%s\n' "$url"
 }
 
+reset_task() {
+  local id=$1 confirmation=$2 existing_url
+  load_metadata "$id"
+  [ "$confirmation" = --confirm-no-pr ] \
+    || fail publication-state unknown no "reset requires --confirm-no-pr"
+  acquire_lock "$id"
+  existing_url=$(publication_field "$id" pr_url '')
+  [ -z "$existing_url" ] \
+    || fail retry-unsafe pushed no "a PR URL is recorded; reconcile it instead of resetting"
+  write_record "$id" unknown reset unknown '' none yes
+  printf 'reset: task=%s retry_safe=yes\n' "$id"
+}
+
 merge_assert() {
-  local id=$1 url=$2 response login state
+  local id=$1 url=$2 response user_response login state verified_head
   response=$(read_pr "$id" "$url") || exit 1
-  login=$(env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GH_HOST \
-    "$GH_AXI" api /user 2>/dev/null | awk -F':[[:space:]]*' '$1 == "login" { print $2; exit }') \
+  user_response=$(host_api /user) \
     || fail merge-auth unknown no "captain merge authentication failed"
+  login=$(fm_pr_toon_scalar "$user_response" login)
   [ "$login" = "edheltzel" ] || fail merge-auth none no "merge authority is not Ed"
   state=$(printf '%s\n' "$response" | sed -n 's/^state=//p' | head -1)
   case "$state" in OPEN|open) ;; *) fail merge-auth none no "PR is not open for an Ed-authorized merge" ;; esac
-  printf 'merge-authority=edheltzel\n'
+  verified_head=$(printf '%s\n' "$response" | sed -n 's/^head_sha=//p' | head -1)
+  fm_pr_head_valid "$verified_head" || fail merge-auth none no "PR did not return a valid merge head"
+  printf 'merge-authority=edheltzel\nverified_head=%s\n' "$verified_head"
 }
 
 case "${1:-}" in
@@ -708,6 +763,14 @@ case "${1:-}" in
       read) read_pr "$2" "$3" ;;
       merge-assert) merge_assert "$2" "$3" ;;
     esac
+    ;;
+  reconcile)
+    [ "$#" -eq 3 ] || { usage >&2; exit 2; }
+    verify_task "$2" "$3"
+    ;;
+  reset)
+    [ "$#" -eq 3 ] || { usage >&2; exit 2; }
+    reset_task "$2" "$3"
     ;;
   --help|-h)
     usage

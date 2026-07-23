@@ -87,6 +87,17 @@ run_spawn() {
     "$SPAWN" "$@" 2>&1
 }
 
+run_spawn_with_pane() {
+  local home=$1 wt=$2 fakebin=$3 pane=$4
+  shift 4
+  FM_ROOT_OVERRIDE="$FM_FAKE_ROOT" FM_HOME="$home" \
+    FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
+    FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
+    FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$pane" TMUX="fake,1,0" \
+    GROK_HOME="$home/grok-home" PATH="$fakebin:$PATH" \
+    "$SPAWN" "$@" 2>&1
+}
+
 seed_brief() {  # <home> <id>
   mkdir -p "$1/data/$2"
   printf 'trivial brief for %s\n' "$2" > "$1/data/$2/brief.md"
@@ -243,6 +254,49 @@ test_unknown_project_key_falls_back_and_warns() {
   pass "fm-spawn --project-key: an unknown key falls back to no-mistakes, is recorded, and is visibly diagnosed"
 }
 
+test_atlas_spawn_abort_removes_only_unpublished_binding() {
+  local case_dir fake_root out rc
+  read_case "$(make_case atlas-abort Firstmate '- Atlas [direct-PR pr-identity=atlas-pat] - synthetic broker project (added 2026-07-23)')"
+  seed_brief "$HOME_DIR" atlas-abort-z8
+  case_dir=$(dirname "$HOME_DIR")
+  fake_root="$case_dir/fake-root"
+  mkdir -p "$fake_root"
+  cp -R "$ROOT/bin" "$fake_root/bin"
+  rm -f "$fake_root/bin/fm-pr-identity.sh"
+  cat > "$fake_root/bin/fm-pr-identity.sh" <<'SH'
+#!/usr/bin/env bash
+set -eu
+[ "${1:-}" = preflight ] || exit 1
+id=$2
+project_key=$3
+project=$4
+project_real=$(cd "$project" && pwd -P)
+umask 077
+printf '%s\n' \
+  'version=1' \
+  "task=$id" \
+  'profile=atlas-pat' \
+  "project_key=$project_key" \
+  'repo=example/repo' \
+  "branch=fm/$id" \
+  'base=main' \
+  "project=$project_real" > "$FM_STATE_OVERRIDE/$id.pr-binding"
+chmod 0600 "$FM_STATE_OVERRIDE/$id.pr-binding"
+printf 'profile=atlas-pat\nrepo=example/repo\nbranch=fm/%s\nbase=main\n' "$id"
+SH
+  chmod +x "$fake_root/bin/fm-pr-identity.sh"
+  FM_FAKE_ROOT="$fake_root"
+  out=$(run_spawn_with_pane "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$HOME_DIR" \
+    atlas-abort-z8 "$PROJ_DIR" --harness claude --project-key Atlas)
+  rc=$?
+  [ "$rc" -ne 0 ] || fail "Atlas spawn abort should fail when the backend did not enter a worktree"$'\n'"$out"
+  assert_absent "$HOME_DIR/state/atlas-abort-z8.pr-binding" \
+    "an aborted Atlas spawn must remove the binding created before backend setup"
+  assert_absent "$HOME_DIR/state/atlas-abort-z8.meta" \
+    "an aborted Atlas spawn must not publish task metadata"
+  pass "Atlas spawn abort removes an unpublished preflight binding and leaves no runnable task state"
+}
+
 # --- 6. secondmate: --project-key is rejected (identity is the home) -----------
 test_secondmate_rejects_project_key() {
   read_case "$(make_case sm-reject Firstmate '')"
@@ -288,6 +342,7 @@ test_end_to_end_brief_then_spawn_key_differs
 test_end_to_end_brief_then_spawn_matching_key_byte_identical
 test_scout_project_key_resolves_mode
 test_unknown_project_key_falls_back_and_warns
+test_atlas_spawn_abort_removes_only_unpublished_binding
 test_secondmate_rejects_project_key
 test_batch_rejects_project_key
 test_project_key_requires_value
