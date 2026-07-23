@@ -392,19 +392,39 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
   [ -z "$MODEL" ] || shared_args+=(--model "$MODEL")
   [ -z "$EFFORT" ] || shared_args+=(--effort "$EFFORT")
   [ -z "$BACKEND_ARG" ] || shared_args+=(--backend "$BACKEND_ARG")
+  batch_project_key() {
+    local pair_id=$1 project_dir=$2 key sidecar
+    sidecar="$DATA/$pair_id/project-key"
+    key=$(basename "$project_dir")
+    if [ -f "$sidecar" ] && [ ! -L "$sidecar" ]; then
+      key=$(head -n1 "$sidecar" 2>/dev/null | tr -d '[:space:]')
+    fi
+    [ -n "$key" ] || return 1
+    [ "$(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="$DATA" \
+      "$FM_ROOT/bin/fm-project-mode.sh" --known "$key" 2>/dev/null)" = yes ] || return 1
+    printf '%s\n' "$key"
+  }
   for pair in "${POS[@]}"; do
     case "$pair" in
       *=*) : ;;
       *) echo "error: batch dispatch expects every argument as id=repo; got '$pair'" >&2; rc=2; continue ;;
     esac
+    pair_id=${pair%%=*}
+    pair_project=${pair#*=}
+    if ! pair_key=$(batch_project_key "$pair_id" "$pair_project"); then
+      echo "batch: FAILED to spawn $pair_id ($pair_project): canonical project key is not registered" >&2
+      rc=1
+      continue
+    fi
+    pair_args=("${shared_args[@]}" --project-key "$pair_key")
     if [ "$KIND" = secondmate ]; then
       echo "error: batch dispatch does not support --secondmate; spawn each secondmate explicitly" >&2
       rc=2
       continue
     elif [ "$KIND" = scout ]; then
-      if FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "${pair%%=*}" "${pair#*=}" "${shared_args[@]+"${shared_args[@]}"}" --scout; then :; else echo "batch: FAILED to spawn ${pair%%=*} (${pair#*=})" >&2; rc=1; fi
+      if FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "$pair_id" "$pair_project" "${pair_args[@]}" --scout; then :; else echo "batch: FAILED to spawn $pair_id ($pair_project)" >&2; rc=1; fi
     else
-      if FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "${pair%%=*}" "${pair#*=}" "${shared_args[@]+"${shared_args[@]}"}"; then :; else echo "batch: FAILED to spawn ${pair%%=*} (${pair#*=})" >&2; rc=1; fi
+      if FM_SPAWN_NO_GUARD=1 "$FM_ROOT/bin/fm-spawn.sh" "$pair_id" "$pair_project" "${pair_args[@]}"; then :; else echo "batch: FAILED to spawn $pair_id ($pair_project)" >&2; rc=1; fi
     fi
   done
   exit "$rc"
@@ -854,7 +874,8 @@ EOF
       echo "error: raw launch commands are not allowed for an opted-in PR identity" >&2
       exit 1
     }
-    PREFLIGHT=$("$FM_ROOT/bin/fm-pr-identity.sh" preflight "$ID" "$PROJ_KEY" "$PROJ_ABS") || {
+    PREFLIGHT=$(env -u FM_ROOT_OVERRIDE -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE \
+      FM_HOME="$FM_HOME" "$FM_ROOT/bin/fm-pr-identity.sh" preflight "$ID" "$PROJ_KEY" "$PROJ_ABS") || {
       echo "error: Atlas PR identity preflight failed; no worker/backend was created" >&2
       exit 1
     }

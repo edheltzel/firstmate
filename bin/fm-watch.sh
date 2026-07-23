@@ -45,6 +45,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
+export FM_PR_POLL_ROOT="$FM_ROOT" FM_PR_POLL_HOME="$FM_HOME" FM_PR_POLL_STATE="$STATE"
 mkdir -p "$STATE"
 
 # shellcheck source=bin/fm-wake-lib.sh
@@ -837,6 +838,7 @@ while :; do
           host=$FM_PR_DATA_HOST
           path=$FM_PR_DATA_PATH
           number=$FM_PR_DATA_NUMBER
+          export FM_PR_POLL_TASK_ID="$id"
           run_check_capture "$SCRIPT_DIR/fm-pr-poll.sh" --validated \
             "$provider" "$url" "$host" "$path" "$number" || exit 1
           out=$FM_CHECK_RESULT

@@ -82,9 +82,22 @@ if ! caller_has_merge_method "$@"; then
 fi
 
 PR_IDENTITY=$(grep '^pr_identity=' "$META" | tail -1 | cut -d= -f2- || true)
+BINDING="$STATE/$ID.pr-binding"
+if [ -f "$BINDING" ] && [ ! -L "$BINDING" ]; then
+  PR_IDENTITY=$(sed -n 's/^profile=//p' "$BINDING" | head -1)
+  [ "$PR_IDENTITY" = atlas-pat ] || { echo "error: unsupported host identity binding" >&2; exit 1; }
+elif [ -n "$PR_IDENTITY" ]; then
+  echo "error: opted-in task has no host identity binding" >&2
+  exit 1
+fi
 if [ "$PR_IDENTITY" = atlas-pat ]; then
-  FM_ROOT_OVERRIDE="$FM_ROOT" FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
-    "$FM_ROOT/bin/fm-pr-identity.sh" merge-assert "$ID" "$URL" || exit 1
+  if [ "${FM_PR_IDENTITY_TEST_MODE:-0}" = 1 ]; then
+    FM_ROOT_OVERRIDE="$FM_ROOT" FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+      "$FM_ROOT/bin/fm-pr-identity.sh" merge-assert "$ID" "$URL" || exit 1
+  else
+    env -u FM_ROOT_OVERRIDE -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE FM_HOME="$FM_HOME" \
+      "$FM_ROOT/bin/fm-pr-identity.sh" merge-assert "$ID" "$URL" || exit 1
+  fi
   env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GH_HOST \
     gh-axi pr merge "$PR_NUMBER" --repo "$PR_OWNER/$PR_REPO" "${merge_args[@]+"${merge_args[@]}"}" "$@"
 elif [ -n "$PR_IDENTITY" ]; then

@@ -6,6 +6,7 @@
 #   fm-project-mode.sh <project-key>                     -> "<mode> <yolo>"
 #   fm-project-mode.sh --fleet <project-key> [<default>] -> "<fleet-display-name>"
 #   fm-project-mode.sh --pr-identity <project-key>       -> profile or "none"
+#   fm-project-mode.sh --known <project-key>              -> "yes" or "no"
 #
 # <project-key> is the registry KEY (the first field of a registry line), which
 # is the single canonical project identity. It is NOT necessarily the repository
@@ -70,6 +71,9 @@ if [ "${1:-}" = "--fleet" ]; then
 elif [ "${1:-}" = "--pr-identity" ]; then
   WANT=pr_identity
   shift
+elif [ "${1:-}" = "--known" ]; then
+  WANT=known
+  shift
 fi
 NAME=${1:?usage: fm-project-mode.sh [--fleet|--pr-identity] <project-key> [<default-display>]}
 # The Fleet display DEFAULT (used only when the key's entry carries no fleet=
@@ -93,7 +97,7 @@ fi
 # error marker, while preserving the old fields for existing callers.
 parsed=$(awk -v n="$NAME" '
   $1=="-" && $2==n {
-    mode="no-mistakes"; yolo="off"; fleet=""; profile="none"; profile_error="";
+    mode="no-mistakes"; yolo="off"; fleet=""; profile="none"; profile_seen=0; profile_error="";
     if ($3 ~ /^\[/) {
       s="";
       for (i=3; i<=NF; i++) { s = s (s==""?"":" ") $i; if ($i ~ /\]$/) break }
@@ -104,14 +108,16 @@ parsed=$(awk -v n="$NAME" '
         if (a[j]=="+yolo") yolo="on";
         else if (a[j] ~ /^fleet=/) fleet=substr(a[j], 7);
         else if (a[j] ~ /^pr-identity=/) {
-          if (profile != "none") profile_error="duplicate-pr-identity";
+          if (profile_seen == 1) profile_error="duplicate-pr-identity";
+          profile_seen=1;
           profile=substr(a[j], 13);
           if (profile == "") profile_error="empty-pr-identity";
           if (j == 1 || a[1] !~ /^(no-mistakes|direct-PR|local-only)$/) profile_error="reordered-pr-identity";
         }
       }
-      if (profile != "none" && mode == "local-only") profile_error="local-only-pr-identity";
-      if (profile != "none" && profile != "atlas-pat") profile_error="unknown-pr-identity";
+      if (profile_seen == 1 && mode == "local-only") profile_error="local-only-pr-identity";
+      if (profile_seen == 1 && mode == "no-mistakes") profile_error="no-mistakes-pr-identity";
+      if (profile_seen == 1 && profile != "atlas-pat") profile_error="unknown-pr-identity";
     }
     printf "%s\t%s\t%s\t%s\t%s\n", mode, yolo, fleet, profile, profile_error; exit
   }
@@ -123,6 +129,8 @@ if [ -z "$parsed" ]; then
     printf '%s\n' "$FLEET_DEFAULT"
   elif [ "$WANT" = pr_identity ]; then
     printf '%s\n' none
+  elif [ "$WANT" = known ]; then
+    printf '%s\n' no
   else
     echo "warn: project \"$NAME\" not in registry; defaulting to no-mistakes off" >&2
     echo "no-mistakes off"
@@ -145,6 +153,11 @@ if [ "$WANT" = pr_identity ]; then
     exit 2
   fi
   printf '%s\n' "$profile"
+  exit 0
+fi
+
+if [ "$WANT" = known ]; then
+  printf '%s\n' yes
   exit 0
 fi
 

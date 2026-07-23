@@ -152,40 +152,73 @@ pass "broker push checks exact branch and commit attribution while disabling pro
 cat > "$FAKEBIN/gh-axi" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
-  *'/pulls/1/commits'*) printf 'sha: 2222222222222222222222222222222222222222\n' ;;
-  *'/pulls/1'*) printf 'state: MERGED\nuser:\n  login: Atlas-Key\nhead:\n  ref: fm/task-a\n  sha: 2222222222222222222222222222222222222222\nbase:\n  ref: main\n' ;;
-  *'api /user'*)
-    [ -z "${GH_TOKEN:-}" ] || exit 1
-    printf 'login: edheltzel\n'
+  *'/pulls/1/commits'*)
+    if [ "${FM_TEST_BAD_COMMITS:-0}" = 1 ]; then
+      printf '[1]:\n  - sha: 3333333333333333333333333333333333333333\n    author:\n      login: Atlas-Key\n    committer:\n      login: Atlas-Key\n'
+    else
+      cat "$FM_TEST_ROOT/tests/fixtures/gh-axi-pr-commits.toon"
+    fi
     ;;
+  *'/pulls/1'*) cat "$FM_TEST_ROOT/tests/fixtures/gh-axi-pr-${FM_TEST_PR_VIEW:-open}.toon" ;;
+  *'api /user'*)
+    if [ -n "${GH_TOKEN:-}" ]; then printf 'login: Atlas-Key\n'; else printf 'login: edheltzel\n'; fi
+    ;;
+  *collaborators/Atlas-Key/permission*) printf 'permission: write\n' ;;
+  *required_signatures*) printf 'enabled: false\n' ;;
+  *'pr create'*) printf 'https://github.com/edheltzel/fixture/pull/1\n' ;;
   *) exit 1 ;;
 esac
 SH
 chmod +x "$FAKEBIN/gh-axi"
-read_out=$(run_broker read task-a 'https://github.com/edheltzel/fixture/pull/1') || fail "synthetic PR read unexpectedly failed"
+export FM_TEST_ROOT="$ROOT" FM_TEST_PR_VIEW=open
+read_out=$(run_broker read task-a 'https://github.com/edheltzel/fixture/pull/1') || fail "real-TOON PR read unexpectedly failed"
 assert_contains "$read_out" 'author=Atlas-Key' "read verification should assert the PR author"
 assert_contains "$read_out" 'head_sha=2222222222222222222222222222222222222222' "read verification should return the exact head"
-verify_out=$(run_broker verify task-a 'https://github.com/edheltzel/fixture/pull/1') || fail "synthetic PR verification unexpectedly failed"
+verify_out=$(run_broker verify task-a 'https://github.com/edheltzel/fixture/pull/1') || fail "real-TOON PR verification unexpectedly failed"
 assert_contains "$verify_out" 'verified=1' "verify should complete only after the commit-set check"
 merge_out=$(run_broker merge-assert task-a 'https://github.com/edheltzel/fixture/pull/1') || fail "synthetic merge assertion unexpectedly failed"
 assert_contains "$merge_out" 'merge-authority=edheltzel' "merge assertion should require Ed authentication"
-pass "broker read and verify paths use host auth, exact PR fields, and explicit Ed merge authority"
+pass "broker parses real gh-axi TOON for read and exact commit verification"
+
+printf 'synthetic title\n' > "$CASE_ROOT/title.md"
+printf 'synthetic body\n' > "$CASE_ROOT/body.md"
+run_broker push task-a >/dev/null || fail "synthetic push reset unexpectedly failed"
+export FM_TEST_BAD_COMMITS=1
+set +e
+create_failure=$(run_broker create task-a "$CASE_ROOT/title.md" "$CASE_ROOT/body.md" 2>&1)
+create_failure_rc=$?
+set -e
+[ "$create_failure_rc" -ne 0 ] || fail "a changed remote commit set must fail create"
+assert_contains "$create_failure" 'PR commit set differs' "create verification failure should explain the mismatch"
+assert_grep 'pr_state=verification-failed' "$HOME_DIR/state/task-a.pr-publication" \
+  "create verification failure should be durable"
+assert_grep 'retry_safe=no' "$HOME_DIR/state/task-a.pr-publication" \
+  "create verification failure must disable automatic retry"
+assert_grep 'pr_url=https://github.com/edheltzel/fixture/pull/1' "$HOME_DIR/state/task-a.pr-publication" \
+  "create verification failure must preserve the created PR URL"
+unset FM_TEST_BAD_COMMITS
+pass "create persists a verification failure with the created PR URL and retry_safe=no"
 
 printf 'pr_head=2222222222222222222222222222222222222222\n' >> "$HOME_DIR/state/task-a.meta"
 cp "$ROOT/bin/fm-pr-poll.sh" "$HOME_DIR/state/task-a.check.sh"
 chmod 0700 "$HOME_DIR/state/task-a.check.sh"
 printf 'github\nhttps://github.com/edheltzel/fixture/pull/1\ngithub.com\nedheltzel/fixture\n1\n' > "$HOME_DIR/state/task-a.pr-poll"
 chmod 0600 "$HOME_DIR/state/task-a.pr-poll"
-poll_out=$(PATH="$FAKEBIN:$PATH" "$HOME_DIR/state/task-a.check.sh")
+FM_PR_IDENTITY_TEST_MODE=1 FM_PR_POLL_ROOT="$ROOT" FM_PR_POLL_HOME="$HOME_DIR" \
+  FM_PR_POLL_STATE="$HOME_DIR/state" FM_PR_POLL_TASK_ID=task-a \
+  FM_TEST_PR_VIEW=merged PATH="$FAKEBIN:$PATH" "$HOME_DIR/state/task-a.check.sh" > "$CASE_ROOT/poll.out"
+poll_out=$(cat "$CASE_ROOT/poll.out")
 [ "$poll_out" = merged ] || fail "opted-in merged poll should emit exactly merged, got '$poll_out'"
 cat > "$FAKEBIN/gh-axi" <<'SH'
 #!/usr/bin/env bash
 exit 1
 SH
 chmod +x "$FAKEBIN/gh-axi"
-poll_error=$(PATH="$FAKEBIN:$PATH" "$HOME_DIR/state/task-a.check.sh")
+poll_error=$(FM_PR_IDENTITY_TEST_MODE=1 FM_PR_POLL_ROOT="$ROOT" FM_PR_POLL_HOME="$HOME_DIR" \
+  FM_PR_POLL_STATE="$HOME_DIR/state" FM_PR_POLL_TASK_ID=task-a PATH="$FAKEBIN:$PATH" \
+  "$HOME_DIR/state/task-a.check.sh")
 assert_contains "$poll_error" 'read-error:' "opted-in poll auth failures must be visible"
-pass "opted-in polling uses host read auth and does not silently swallow outages"
+pass "opted-in polling uses the broker verification path and detects REST merged state"
 
 set +e
 help_out=$("$BROKER" --help)

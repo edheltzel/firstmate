@@ -6,9 +6,11 @@ The legacy mode query remains the two-field `<mode> <yolo>` output, and projects
 
 Unknown profiles, duplicate profile tokens, reordered profile tokens, and every `local-only` combination fail before a worker is created.
 
-`bin/fm-spawn.sh` runs the broker preflight before backend or worktree mutation and stores only `pr_identity`, `pr_project_key`, `pr_repo`, `pr_branch`, and `pr_base` in task metadata.
+The `atlas-pat` profile is supported only for `direct-PR` until the no-mistakes publication pipeline is broker-integrated, so a no-mistakes opt-in fails closed.
 
-The metadata is a recovery binding, not proof of credential possession.
+`bin/fm-spawn.sh` runs the broker preflight before backend or worktree mutation and records a private host binding alongside the non-secret task metadata.
+
+The host binding is the authoritative recovery binding, and task metadata must match it on every broker lifecycle operation.
 
 The broker reads exactly one `ATLAS_KEY_PAT` assignment from the host environment file without sourcing or printing the file.
 
@@ -26,15 +28,15 @@ The broker refuses default-branch pushes, repository overrides, branch mismatche
 
 Before publication the broker checks the exact base-to-head commit range, Atlas author and committer fields, the repository unsigned-signature policy, and the absence of every commit signature.
 
-PR verification checks the exact repository, Atlas-Key author, task head branch, recorded base branch, head SHA, and commit set.
+PR verification checks the exact repository, Atlas-Key author and remote commit associations, task head branch, recorded base branch, head SHA, and commit set.
 
 A push or create failure writes a private partial-publication record with safe remote-state and retry fields.
 
-A successful push followed by create or verification failure preserves the remote branch and refuses automatic deletion or retry as Ed.
+A successful push followed by create or verification failure persists the PR URL or remote branch state with `retry_safe=no`, preserves the remote branch, and refuses automatic deletion or retry as Ed.
 
-Polling and teardown use host-owned read verification without the Atlas write token.
+Polling and teardown use the same host-owned broker verification path without the Atlas write token.
 
-Opted-in polling reports read-authentication or identity failures instead of silently treating them as an unmerged PR.
+Opted-in polling detects the REST `merged` or `merged_at` fields and reports read-authentication or identity failures instead of silently treating them as an unmerged PR.
 
 Opted-in teardown disables its content fallback when host read verification cannot prove the exact merged PR.
 

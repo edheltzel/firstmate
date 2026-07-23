@@ -23,6 +23,8 @@ cat > "$SCRATCH/data/projects.md" <<'EOF'
 - Agent-Themis [local-only] - registry key differs from its clone-dir basename (added 2026-07-20)
 - Aliased-Key [direct-PR fleet=Shown] - key differs from basename AND carries a fleet alias (added 2026-07-20)
 - Atlas [direct-PR fleet=Atlas pr-identity=atlas-pat] - brokered PR identity (added 2026-07-22)
+- NoMistakesIdentity [no-mistakes pr-identity=atlas-pat] - unsupported pipeline identity (added 2026-07-22)
+- ExplicitNone [direct-PR pr-identity=none] - invalid explicit absence (added 2026-07-22)
 - LocalIdentity [local-only pr-identity=atlas-pat] - invalid identity combination (added 2026-07-22)
 - UnknownIdentity [direct-PR pr-identity=unknown-profile] - invalid identity profile (added 2026-07-22)
 - DuplicateIdentity [direct-PR pr-identity=atlas-pat pr-identity=atlas-pat] - invalid duplicate (added 2026-07-22)
@@ -90,7 +92,11 @@ pass "fm-project-mode: the default '<mode> <yolo>' output stays byte-identical f
 [ "$(run --pr-identity Legacy)" = "none" ] || fail "legacy registry lines should return none"
 pass "fm-project-mode --pr-identity: absent opt-in is an explicit none"
 
-for invalid in LocalIdentity UnknownIdentity DuplicateIdentity ReorderedIdentity; do
+[ "$(run --known Atlas)" = yes ] || fail "registered Atlas key should be known"
+[ "$(run --known Unregistered)" = no ] || fail "unregistered key should not be known"
+pass "fm-project-mode --known distinguishes canonical registry keys"
+
+for invalid in NoMistakesIdentity ExplicitNone LocalIdentity UnknownIdentity DuplicateIdentity ReorderedIdentity; do
   set +e
   identity_error=$(FM_HOME="$SCRATCH" FM_DATA_OVERRIDE="$SCRATCH/data" "$ROOT/bin/fm-project-mode.sh" --pr-identity "$invalid" 2>&1)
   identity_rc=$?

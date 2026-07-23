@@ -47,6 +47,13 @@ META_BRANCH=
 META_BASE=
 META_WORKTREE=
 META_HEAD=
+META_BINDING=
+META_BINDING_PROFILE=
+META_BINDING_PROJECT_KEY=
+META_BINDING_REPO=
+META_BINDING_BRANCH=
+META_BINDING_BASE=
+META_BINDING_PROJECT=
 
 # shellcheck source=bin/fm-pr-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-pr-lib.sh"
@@ -59,6 +66,15 @@ fail() {
   printf 'error[%s]: %s; remote=%s; retry=%s\n' "$1" "$4" "$2" "$3" >&2
   exit 1
 }
+
+reject_runtime_overrides() {
+  [ "$TEST_MODE" = 1 ] && return 0
+  [ -z "${FM_ROOT_OVERRIDE:-}" ] || fail metadata unknown no "production broker rejects FM_ROOT_OVERRIDE"
+  [ -z "${FM_STATE_OVERRIDE:-}" ] || fail metadata unknown no "production broker rejects FM_STATE_OVERRIDE"
+  [ -z "${FM_DATA_OVERRIDE:-}" ] || fail metadata unknown no "production broker rejects FM_DATA_OVERRIDE"
+}
+
+reject_runtime_overrides
 
 cleanup() {
   [ -z "$TMP_FILE" ] || rm -f -- "$TMP_FILE"
@@ -168,6 +184,11 @@ host_api() {
     "$GH_AXI" api "$1" 2>/dev/null
 }
 
+host_api_paginated() {
+  env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GH_HOST \
+    "$GH_AXI" api "$1" --paginate 2>/dev/null
+}
+
 api_scalar() {
   local raw=$1 key=$2
   printf '%s\n' "$raw" | awk -F':[[:space:]]*' -v wanted="$key" '{ gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1); if ($1 == wanted) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit } }'
@@ -207,7 +228,7 @@ verify_unsigned_policy() {
 }
 
 preflight() {
-  local id=$1 project_key=$2 project_dir=$3 profile repo base
+  local id=$1 project_key=$2 project_dir=$3 profile repo base project_real
   task_valid "$id" || fail metadata none no "invalid task identity"
   safe_project_key "$project_key" || fail metadata none no "invalid canonical project key"
   [ -d "$project_dir" ] && [ ! -L "$project_dir" ] || fail metadata none no "project checkout is unavailable"
@@ -224,17 +245,74 @@ preflight() {
   load_pat
   verify_atlas_access "$repo"
   verify_unsigned_policy "$repo" "$base"
+  project_real=$(cd "$project_dir" 2>/dev/null && pwd -P) \
+    || fail repository none no "project checkout path could not be canonicalized"
+  write_binding "$id" "$project_key" "$repo" "fm/$id" "$base" "$project_real"
   printf 'profile=%s\nrepo=%s\nbranch=fm/%s\nbase=%s\n' "$PROFILE" "$repo" "$id" "$base"
 }
 
-load_metadata() {
+write_binding() {
+  local id=$1 project_key=$2 repo=$3 branch=$4 base=$5 worktree=$6 tmp
+  mkdir -p "$STATE" || fail state-write unknown no "task state is unavailable"
+  tmp=$(mktemp "$STATE/.fm-pr-binding.$id.XXXXXX") \
+    || fail state-write unknown no "identity binding is unavailable"
+  TMP_FILE=$tmp
+  umask 077
+  {
+    printf 'version=1\n'
+    printf 'task=%s\nprofile=%s\nproject_key=%s\nrepo=%s\nbranch=%s\nbase=%s\nproject=%s\n' \
+      "$id" "$PROFILE" "$project_key" "$repo" "$branch" "$base" "$worktree"
+  } > "$tmp" || fail state-write unknown no "identity binding could not be written"
+  chmod 0600 "$tmp" || fail state-write unknown no "identity binding could not be protected"
+  mv -f -- "$tmp" "$STATE/$id.pr-binding" \
+    || fail state-write unknown no "identity binding could not be committed"
+  TMP_FILE=
+}
+
+load_binding() {
   local id=$1 value
+  META_BINDING="$STATE/$id.pr-binding"
+  [ -f "$META_BINDING" ] && [ ! -L "$META_BINDING" ] \
+    || fail metadata unknown no "host identity binding is unavailable"
+  value=$(stat -f %l "$META_BINDING" 2>/dev/null || stat -c %h "$META_BINDING" 2>/dev/null)
+  [ "$value" = 1 ] || fail metadata unknown no "host identity binding is unsafe"
+  for value in version task profile project_key repo branch base project; do
+    [ "$(metadata_count "$META_BINDING" "$value")" -eq 1 ] \
+      || fail metadata unknown no "host identity binding has duplicate or missing fields"
+  done
+  [ "$(metadata_value "$META_BINDING" version)" = 1 ] \
+    || fail metadata unknown no "host identity binding version is unsupported"
+  [ "$(metadata_value "$META_BINDING" task)" = "$id" ] \
+    || fail metadata unknown no "host identity binding task is inconsistent"
+  META_BINDING_PROFILE=$(metadata_value "$META_BINDING" profile)
+  META_BINDING_PROJECT_KEY=$(metadata_value "$META_BINDING" project_key)
+  META_BINDING_REPO=$(metadata_value "$META_BINDING" repo)
+  META_BINDING_BRANCH=$(metadata_value "$META_BINDING" branch)
+  META_BINDING_BASE=$(metadata_value "$META_BINDING" base)
+  META_BINDING_PROJECT=$(metadata_value "$META_BINDING" project)
+  [ "$META_BINDING_PROFILE" = "$PROFILE" ] \
+    || fail profile unknown no "host identity binding is not the Atlas broker profile"
+  safe_project_key "$META_BINDING_PROJECT_KEY" \
+    || fail metadata unknown no "host identity binding project identity is invalid"
+  repo_valid "$META_BINDING_REPO" \
+    || fail metadata unknown no "host identity binding repository is invalid"
+  [ "$META_BINDING_BRANCH" = "fm/$id" ] \
+    || fail branch none no "host identity binding branch does not match the task identity"
+  safe_branch "$META_BINDING_BASE" \
+    || fail metadata unknown no "host identity binding base branch is invalid"
+  [ -d "$META_BINDING_PROJECT" ] && [ ! -L "$META_BINDING_PROJECT" ] \
+    || fail metadata unknown no "host identity binding project is unavailable"
+}
+
+load_metadata() {
+  local id=$1 value current_profile
   task_valid "$id" || fail metadata unknown no "invalid task identity"
+  load_binding "$id"
   META="$STATE/$id.meta"
   [ -f "$META" ] && [ ! -L "$META" ] || fail metadata unknown no "task metadata is unavailable"
   value=$(stat -f %l "$META" 2>/dev/null || stat -c %h "$META" 2>/dev/null)
   [ "$value" = 1 ] || fail metadata unknown no "task metadata is unsafe"
-  for value in pr_identity pr_project_key pr_repo pr_branch pr_base worktree; do
+  for value in pr_identity pr_project_key pr_repo pr_branch pr_base project worktree; do
     [ "$(metadata_count "$META" "$value")" -eq 1 ] || fail metadata unknown no "task metadata has duplicate or missing identity fields"
   done
   META_PROFILE=$(metadata_value "$META" pr_identity)
@@ -243,6 +321,26 @@ load_metadata() {
   META_BRANCH=$(metadata_value "$META" pr_branch)
   META_BASE=$(metadata_value "$META" pr_base)
   META_WORKTREE=$(metadata_value "$META" worktree)
+  [ "$META_PROFILE" = "$META_BINDING_PROFILE" ] \
+    || fail profile unknown no "task metadata disagrees with the host identity binding"
+  [ "$META_PROJECT_KEY" = "$META_BINDING_PROJECT_KEY" ] \
+    || fail metadata unknown no "task metadata disagrees with the host project binding"
+  [ "$META_REPO" = "$META_BINDING_REPO" ] \
+    || fail repository unknown no "task metadata disagrees with the host repository binding"
+  [ "$META_BRANCH" = "$META_BINDING_BRANCH" ] \
+    || fail branch none no "task metadata disagrees with the host branch binding"
+  [ "$META_BASE" = "$META_BINDING_BASE" ] \
+    || fail metadata unknown no "task metadata disagrees with the host base binding"
+  META_PROJECT=$(metadata_value "$META" project)
+  value=$(cd "$META_PROJECT" 2>/dev/null && pwd -P) \
+    || fail metadata unknown no "task metadata project path is unavailable"
+  [ "$value" = "$META_BINDING_PROJECT" ] \
+    || fail metadata unknown no "task metadata disagrees with the host project binding"
+  current_profile=$(FM_HOME="$FM_HOME" FM_DATA_OVERRIDE="${FM_DATA_OVERRIDE:-$FM_HOME/data}" \
+    "$FM_ROOT/bin/fm-project-mode.sh" --pr-identity "$META_PROJECT_KEY" 2>/dev/null) \
+    || fail profile unknown no "current project identity policy could not be verified"
+  [ "$current_profile" = "$PROFILE" ] \
+    || fail profile unknown no "current project identity policy no longer authorizes the Atlas broker"
   [ "$META_PROFILE" = "$PROFILE" ] || fail profile unknown no "task is not bound to the Atlas broker profile"
   safe_project_key "$META_PROJECT_KEY" || fail metadata unknown no "task project identity is invalid"
   repo_valid "$META_REPO" || fail metadata unknown no "task repository binding is invalid"
@@ -356,7 +454,7 @@ pr_number_from_url() {
 }
 
 read_pr() {
-  local id=$1 url=$2 number raw login head_ref head_sha base_ref state expected_head head_line base_line
+  local id=$1 url=$2 number raw login head_ref head_sha base_ref state merged merged_at expected_head head_line base_line
   load_metadata "$id"
   number=$(pr_number_from_url "$url") || fail pr-mismatch unknown no "PR URL is not the recorded repository"
   raw=$(host_api "/repos/$META_REPO/pulls/$number") || fail read-auth unknown no "host PR read authentication failed"
@@ -377,54 +475,146 @@ read_pr() {
     base_ref=${base_ref%%,*}
   fi
   state=$(api_scalar "$raw" state)
+  merged=$(api_scalar "$raw" merged)
+  merged_at=$(api_scalar "$raw" merged_at)
+  case "$merged" in true|True|1) merged=1 ;; *) merged=0 ;; esac
+  case "$merged_at" in null|Null|'<nil>'|'') merged_at= ;; esac
+  [ "$merged" = 1 ] || [ -n "$merged_at" ] && merged=1
   [ "$login" = "$EXPECTED_LOGIN" ] || fail pr-mismatch none no "PR author is not Atlas-Key"
   [ "$head_ref" = "$META_BRANCH" ] || fail pr-mismatch none no "PR head branch is not the task branch"
   fm_pr_head_valid "$head_sha" || fail pr-mismatch none no "PR head is invalid"
   [ "$base_ref" = "$META_BASE" ] || fail pr-mismatch none no "PR base branch is not the recorded base"
   expected_head=$(metadata_value "$META" pr_head)
   [ -z "$expected_head" ] || [ "$expected_head" = "$head_sha" ] || fail pr-mismatch none no "PR head changed after identity verification"
-  printf 'state=%s\nrepo=%s\nbranch=%s\nbase=%s\nhead_sha=%s\nauthor=%s\nurl=https://github.com/%s/pull/%s\n' \
-    "$state" "$META_REPO" "$head_ref" "$base_ref" "$head_sha" "$login" "$META_REPO" "$number"
+  printf 'state=%s\nmerged=%s\nrepo=%s\nbranch=%s\nbase=%s\nhead_sha=%s\nauthor=%s\nurl=https://github.com/%s/pull/%s\n' \
+    "$state" "$merged" "$META_REPO" "$head_ref" "$base_ref" "$head_sha" "$login" "$META_REPO" "$number"
+}
+
+toon_commit_rows() {
+  awk '
+    function emit_item() {
+      if (sha != "") print sha "\t" author "\t" committer
+    }
+    /^\[[0-9]+\]:[[:space:]]*$/ {
+      emit_item(); in_item=1; tabular=0; sha=""; author=""; committer=""; section=""; next
+    }
+    /^\[[0-9]+\]\{sha\}:[[:space:]]*$/ {
+      emit_item(); in_item=0; tabular=1; next
+    }
+    /^[^[:space:]]/ { tabular=0 }
+    tabular && /^[[:space:]]+[0-9a-f]{40}[[:space:]]*$/ {
+      line=$0; gsub(/^[[:space:]]+|[[:space:]]+$/, "", line); print line "\t\t"; next
+    }
+    in_item && /^[[:space:]]+- sha:[[:space:]]*/ {
+      line=$0; sub(/^[[:space:]]+- sha:[[:space:]]*/, "", line); gsub(/[[:space:]]+$/, "", line); sha=line; next
+    }
+    in_item && /^    author:/ {
+      line=$0; sub(/^    author:[[:space:]]*/, "", line)
+      if (line != "") author=line; else section="author"
+      next
+    }
+    in_item && /^    committer:/ {
+      line=$0; sub(/^    committer:[[:space:]]*/, "", line)
+      if (line != "") committer=line; else section="committer"
+      next
+    }
+    in_item && section == "author" && /^      login:/ {
+      line=$0; sub(/^      login:[[:space:]]*/, "", line); author=line; section=""; next
+    }
+    in_item && section == "committer" && /^      login:/ {
+      line=$0; sub(/^      login:[[:space:]]*/, "", line); committer=line; section=""; next
+    }
+    in_item && /^    [A-Za-z0-9_]+:/ { section="" }
+    END { emit_item() }
+  '
+}
+
+verification_error() {
+  printf 'error[%s]: %s; remote=%s; retry=%s\n' "$1" "$4" "$2" "$3" >&2
+  return 1
 }
 
 verify_task_commits() {
-  local id=$1 number=$2 raw base_ref local_file remote_file line
-  load_commit_binding >/dev/null
-  base_ref=$(git -C "$META_WORKTREE" rev-parse --verify "refs/remotes/origin/$META_BASE" 2>/dev/null || \
-    git -C "$META_WORKTREE" rev-parse --verify "refs/heads/$META_BASE" 2>/dev/null) \
-    || fail commits unknown no "task base branch cannot be resolved locally"
-  local_file=$(mktemp "$STATE/.fm-atlas-local-commits.XXXXXX") || fail commits unknown no "commit comparison is unavailable"
-  remote_file=$(mktemp "$STATE/.fm-atlas-remote-commits.XXXXXX") || fail commits unknown no "commit comparison is unavailable"
-  TMP_FILE=$remote_file
-  git -C "$META_WORKTREE" log --format='%H' "$base_ref..HEAD" | sort -u > "$local_file"
-  raw=$(host_api "/repos/$META_REPO/pulls/$number/commits") || {
-    rm -f -- "$local_file"
-    fail read-auth unknown no "PR commit-list read authentication failed"
-  }
-  printf '%s\n' "$raw" | awk -F':[[:space:]]*' '$1 == "sha" { print $2 }' > "$remote_file"
-  [ -s "$remote_file" ] || { rm -f -- "$local_file"; fail pr-mismatch none no "PR commit list is empty"; }
-  while IFS= read -r line; do
-    fm_pr_head_valid "$line" || { rm -f -- "$local_file"; fail pr-mismatch none no "PR commit list contains an invalid SHA"; }
-  done < "$remote_file"
+  local id=$1 number=$2 raw base_ref local_file remote_file rows_file row sha author committer
+  if ! base_ref=$(load_commit_binding); then
+    verification_error commits unknown no "task commit binding could not be loaded"
+    return 1
+  fi
+  local_file=$(mktemp "$STATE/.fm-atlas-local-commits.XXXXXX") \
+    || { verification_error commits unknown no "commit comparison is unavailable"; return 1; }
+  remote_file=$(mktemp "$STATE/.fm-atlas-remote-commits.XXXXXX") \
+    || { rm -f -- "$local_file"; verification_error commits unknown no "commit comparison is unavailable"; return 1; }
+  rows_file=$(mktemp "$STATE/.fm-atlas-remote-rows.XXXXXX") \
+    || { rm -f -- "$local_file" "$remote_file"; verification_error commits unknown no "commit comparison is unavailable"; return 1; }
+  TMP_FILE=$rows_file
+  if ! git -C "$META_WORKTREE" log --format='%H' "$base_ref..HEAD" | sort -u > "$local_file"; then
+    rm -f -- "$local_file" "$remote_file" "$rows_file"; TMP_FILE=
+    verification_error commits unknown no "local commit set could not be read"
+    return 1
+  fi
+  if ! raw=$(host_api_paginated "/repos/$META_REPO/pulls/$number/commits"); then
+    rm -f -- "$local_file" "$remote_file" "$rows_file"; TMP_FILE=
+    verification_error read-auth unknown no "PR commit-list read authentication failed"
+    return 1
+  fi
+  toon_commit_rows <<EOF > "$rows_file"
+$raw
+EOF
+  cut -f1 "$rows_file" | sed '/^$/d' > "$remote_file"
+  if [ ! -s "$remote_file" ]; then
+    rm -f -- "$local_file" "$remote_file" "$rows_file"; TMP_FILE=
+    verification_error pr-mismatch none no "PR commit list is empty"
+    return 1
+  fi
+  while IFS=$(printf '\t') read -r sha author committer; do
+    if ! fm_pr_head_valid "$sha"; then
+      rm -f -- "$local_file" "$remote_file" "$rows_file"; TMP_FILE=
+      verification_error pr-mismatch none no "PR commit list contains an invalid SHA"
+      return 1
+    fi
+    if [ "$author" != "$EXPECTED_LOGIN" ] || [ "$committer" != "$EXPECTED_LOGIN" ]; then
+      rm -f -- "$local_file" "$remote_file" "$rows_file"; TMP_FILE=
+      verification_error commit-attribution none no "a remote PR commit is not associated with Atlas-Key"
+      return 1
+    fi
+  done < "$rows_file"
   sort -u -o "$remote_file" "$remote_file"
   if ! cmp -s "$local_file" "$remote_file"; then
-    rm -f -- "$local_file"
-    fail pr-mismatch none no "PR commit set differs from the verified task commit set"
+    rm -f -- "$local_file" "$remote_file" "$rows_file"; TMP_FILE=
+    verification_error pr-mismatch none no "PR commit set differs from the verified task commit set"
+    return 1
   fi
-  rm -f -- "$local_file" "$remote_file"
+  rm -f -- "$local_file" "$remote_file" "$rows_file"
   TMP_FILE=
 }
 
 verify_task() {
-  local id=$1 url=$2 read_output number head
+  local id=$1 url=$2 read_output number head remote_state
   load_metadata "$id"
   acquire_lock "$id"
-  read_output=$(read_pr "$id" "$url") || exit 1
+  read_output=$(read_pr "$id" "$url") || {
+    remote_state=$(publication_field "$id" remote_state unknown)
+    write_record "$id" "$remote_state" verification-failed "$(publication_field "$id" head unknown)" "$url" read-auth no
+    fail read-auth "$remote_state" no "PR identity verification failed; remote state is preserved"
+  }
   number=$(pr_number_from_url "$url") || fail pr-mismatch unknown no "PR URL is not the recorded repository"
-  verify_task_commits "$id" "$number"
+  if ! verify_task_commits "$id" "$number"; then
+    remote_state=$(publication_field "$id" remote_state unknown)
+    write_record "$id" "$remote_state" verification-failed "$(publication_field "$id" head unknown)" "$url" verify no
+    fail verify "$remote_state" no "PR commit attribution could not be verified; remote state is preserved"
+  fi
   head=$(printf '%s\n' "$read_output" | sed -n 's/^head_sha=//p' | head -1)
   write_record "$id" published verified "$head" "$url" none yes
   printf '%s\nverified=1\n' "$read_output"
+}
+
+publication_field() {
+  local id=$1 key=$2 fallback=$3 file="$STATE/$1.pr-publication" value
+  if [ -f "$file" ] && [ ! -L "$file" ]; then
+    value=$(metadata_value "$file" "$key")
+    [ -n "$value" ] && { printf '%s\n' "$value"; return 0; }
+  fi
+  printf '%s\n' "$fallback"
 }
 
 create_task() {
@@ -452,7 +642,7 @@ create_task() {
     write_record "$id" pushed create-unattributed "$META_HEAD" "" create no
     fail create pushed no "PR creation returned no attributable repository URL"
   }
-  write_record "$id" pushed created "$META_HEAD" "$url" none yes
+  write_record "$id" pushed created "$META_HEAD" "$url" unverified no
   read_output=$(read_pr "$id" "$url") || {
     write_record "$id" pushed verification-failed "$META_HEAD" "$url" verify no
     fail verify pushed no "created PR could not be attributed safely; the remote branch is preserved"
@@ -473,7 +663,7 @@ merge_assert() {
     || fail merge-auth unknown no "captain merge authentication failed"
   [ "$login" = "edheltzel" ] || fail merge-auth none no "merge authority is not Ed"
   state=$(printf '%s\n' "$response" | sed -n 's/^state=//p' | head -1)
-  case "$state" in OPEN|open|CLOSED|closed|MERGED|merged) ;; *) fail merge-auth none no "PR state could not be verified before merge" ;; esac
+  case "$state" in OPEN|open) ;; *) fail merge-auth none no "PR is not open for an Ed-authorized merge" ;; esac
   printf 'merge-authority=edheltzel\n'
 }
 

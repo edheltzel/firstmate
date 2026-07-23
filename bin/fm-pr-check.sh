@@ -63,20 +63,47 @@ fi
 # bin/fm-review-diff.sh resolves the head from the remote when none is recorded.
 WT=$(grep '^worktree=' "$META" | tail -1 | cut -d= -f2- || true)
 PR_HEAD=
+BINDING="$STATE/$ID.pr-binding"
 PR_IDENTITY=$(grep '^pr_identity=' "$META" | tail -1 | cut -d= -f2- || true)
-if [ "$PR_IDENTITY" = atlas-pat ]; then
-  [ "$PROVIDER" = github ] || { echo "error: Atlas identity verification supports GitHub PRs only" >&2; exit 1; }
-  READ_OUTPUT=$(FM_ROOT_OVERRIDE="$FM_ROOT" FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
-    "$FM_ROOT/bin/fm-pr-identity.sh" read "$ID" "$URL") || {
-    echo "error: Atlas PR read verification failed; refusing to arm the watcher" >&2
+BINDING_IDENTITY=
+if [ -f "$BINDING" ] && [ ! -L "$BINDING" ]; then
+  BINDING_IDENTITY=$(sed -n 's/^profile=//p' "$BINDING" | head -1)
+  [ "$BINDING_IDENTITY" = atlas-pat ] || {
+    echo "error: task host identity binding is unsupported; refusing to arm the watcher" >&2
     exit 1
   }
-  PR_HEAD=$(printf '%s\n' "$READ_OUTPUT" | sed -n 's/^head_sha=//p' | head -1)
-  fm_pr_head_valid "$PR_HEAD" || { echo "error: Atlas PR read verification returned no valid head" >&2; exit 1; }
+  [ "$PR_IDENTITY" = atlas-pat ] || {
+    echo "error: task metadata no longer matches its host identity binding" >&2
+    exit 1
+  }
+  PR_IDENTITY=$BINDING_IDENTITY
+elif [ -n "$PR_IDENTITY" ]; then
+  echo "error: opted-in task has no host identity binding; refusing to arm the watcher" >&2
+  exit 1
+fi
+if [ "$PR_IDENTITY" = atlas-pat ]; then
+  [ "$PROVIDER" = github ] || { echo "error: Atlas identity verification supports GitHub PRs only" >&2; exit 1; }
+  if [ "${FM_PR_IDENTITY_TEST_MODE:-0}" = 1 ]; then
+    VERIFY_OUTPUT=$(FM_ROOT_OVERRIDE="$FM_ROOT" FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" \
+      "$FM_ROOT/bin/fm-pr-identity.sh" verify "$ID" "$URL") || {
+      echo "error: Atlas PR verification failed; refusing to arm the watcher" >&2
+      exit 1
+    }
+  else
+    VERIFY_OUTPUT=$(env -u FM_ROOT_OVERRIDE -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE \
+      FM_HOME="$FM_HOME" "$FM_ROOT/bin/fm-pr-identity.sh" verify "$ID" "$URL") || {
+      echo "error: Atlas PR verification failed; refusing to arm the watcher" >&2
+      exit 1
+    }
+  fi
+  PR_HEAD=$(printf '%s\n' "$VERIFY_OUTPUT" | sed -n 's/^head_sha=//p' | head -1)
+  fm_pr_head_valid "$PR_HEAD" || { echo "error: Atlas PR verification returned no valid head" >&2; exit 1; }
 elif [ -n "$PR_IDENTITY" ]; then
   echo "error: unknown task PR identity profile" >&2
   exit 1
-elif [ "$PROVIDER" = github ] && [ -n "$WT" ] && [ -d "$WT" ] && command -v gh >/dev/null 2>&1; then
+fi
+if [ -z "$PR_IDENTITY" ] && [ "$PROVIDER" = github ] && [ -n "$WT" ] && [ -d "$WT" ] \
+  && command -v gh >/dev/null 2>&1; then
   if REMOTE_HEAD=$(cd "$WT" && gh pr view "$URL" --json headRefOid -q .headRefOid 2>/dev/null) \
     && fm_pr_head_valid "$REMOTE_HEAD"; then
     PR_HEAD=$REMOTE_HEAD
