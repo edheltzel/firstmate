@@ -38,6 +38,7 @@ EXPECTED_AUTHOR_EMAIL=atlas@rainyday.media
 PROFILE=atlas-pat
 PAT=
 LOCK_DIR=
+LOCK_PROCESS=
 TMP_FILE=
 META=
 META_PROFILE=
@@ -78,7 +79,8 @@ reject_runtime_overrides
 
 cleanup() {
   [ -z "$TMP_FILE" ] || rm -f -- "$TMP_FILE"
-  [ -z "$LOCK_DIR" ] || rmdir "$LOCK_DIR" 2>/dev/null || true
+  [ -z "$LOCK_DIR" ] || [ "$LOCK_PROCESS" != "${BASHPID:-$$}" ] \
+    || rmdir "$LOCK_DIR" 2>/dev/null || true
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
@@ -354,6 +356,7 @@ acquire_lock() {
   LOCK_DIR="$STATE/.fm-pr-identity-$id.lock"
   mkdir "$LOCK_DIR" 2>/dev/null || fail concurrent unknown no "another broker operation owns this task"
   chmod 0700 "$LOCK_DIR" || fail concurrent unknown no "task broker lock is unsafe"
+  LOCK_PROCESS=${BASHPID:-$$}
 }
 
 write_record() {
