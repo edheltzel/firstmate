@@ -144,6 +144,10 @@ test_ship_and_scout_launches_scrub_selectors_and_retain_shared_home() {
     assert_contains "$launch" "$prefix'$HOME_DIR' " "$kind launch did not retain the resolved shared FM_HOME"
     assert_contains "$launch" "FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE=" \
       "$kind launch did not scrub all five selector overrides"
+    printf 'status for %s\n' "$id" > "$HOME_DIR/state/$id.status"
+    printf 'report for %s\n' "$id" > "$HOME_DIR/data/$id/report.md"
+    FM_HOME="$HOME_DIR" bash -c 'test -r "$FM_HOME/data/$1/brief.md" && test -r "$FM_HOME/state/$1.status" && test -r "$FM_HOME/data/$1/report.md"' \
+      _ "$id" || fail "$kind worker could not read its shared brief/status/report surface"
   done
   pass "fm-spawn.sh: ship and scout carriers receive the shared-home selector boundary"
 }
