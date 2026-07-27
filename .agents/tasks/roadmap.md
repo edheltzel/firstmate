@@ -1,165 +1,223 @@
-# OMP Harness Integration - Tasks Axi Roadmap
+# OMP Experimental Worker Spike - Planning Roadmap
 
-This roadmap is the human-readable presentation of the OMP harness integration work.
-The executable task records live in `.agents/tasks/backlog.md` and are owned by Tasks Axi, not by this document.
-The revised plan at `.agents/plans/omp-harness-integration-plan.md` is the authority for every full contract detail; this roadmap only maps and points into it.
+This roadmap is the planning and dispatch map for the corrected OMP work.
 
-## Purpose
+The full contract is owned by `.agents/plans/omp-harness-integration-plan.md`.
 
-This roadmap maps the plan's ten implementation units U0 through U9 onto ten executable Tasks Axi backlog items.
-Each backlog item carries its owning unit, goal, requirement IDs, acceptance examples, live-matrix scenarios, file surfaces, completion and verification evidence, and stop conditions.
-The backlog encodes the plan's unit dependency graph as `blocked-by` edges so the ready queue always reflects what may start next.
+The executable task records are owned by Tasks Axi in `.agents/tasks/backlog.md`.
 
-## Canonical commands
+This roadmap does not authorize implementation and does not claim OMP support.
 
-Every backlog mutation and query must pass the backlog file explicitly with `--file .agents/tasks/backlog.md`.
+## Current decision
 
-- List every task: `tasks-axi list --file .agents/tasks/backlog.md`.
-- Show one task in full: `tasks-axi show omp-u5-primary-extensions --full --file .agents/tasks/backlog.md`.
-- Show what is unblocked and may start now: `tasks-axi ready --file .agents/tasks/backlog.md`.
-- Normalize and re-render the backlog: `tasks-axi render --file .agents/tasks/backlog.md`.
-- Start a unit when its blockers have cleared: `tasks-axi start omp-u0-early-detection-correctness --file .agents/tasks/backlog.md`.
-- Close a shipped unit with its PR: `tasks-axi done omp-u2-identity-config --pr <url> --file .agents/tasks/backlog.md`.
-- Close the U1 scout with its report: `tasks-axi done omp-u1-verification-ledger --report <path> --file .agents/tasks/backlog.md`.
+The Red Team disposition is BLOCK for first-class or verified OMP support.
 
-## Phase order and dependency graph
+The only eventual implementation scope is an explicitly opt-in experimental tmux worker under an isolated temporary `FM_HOME`.
 
-The graph is acyclic because every edge points from a higher-numbered unit to lower-numbered units only.
-U0 and U1 start in parallel because neither has a blocker.
+The experimental label is exactly `experimental tmux worker; unverified; no primary, secondmate, recovery, or Herdr support`.
 
-| Unit | Task ID | Kind | Blocked by |
-| --- | --- | --- | --- |
-| U0 | omp-u0-early-detection-correctness | ship | (none) |
-| U1 | omp-u1-verification-ledger | scout | (none) |
-| U2 | omp-u2-identity-config | ship | U0, U1 |
-| U3 | omp-u3-launch-profiles | ship | U1, U2 |
-| U4 | omp-u4-worker-completion-extension | ship | U1, U3 |
-| U5 | omp-u5-primary-extensions | ship | U1, U2, U3, U4 |
-| U6 | omp-u6-startup-supervision | ship | U5 |
-| U7 | omp-u7-liveness-controls | ship | U1, U3, U5, U6 |
-| U8 | omp-u8-cleanup-recovery-trust | ship | U4, U5, U6, U7 |
-| U9 | omp-u9-publish-and-gate | ship | U0, U2, U3, U4, U5, U6, U7, U8 |
+OMP remains absent from every verified-harness allowlist, normal dispatch profile, primary-supervisor protocol, secondmate path, recovery or liveness claim, and Herdr support claim.
 
-The linear critical path runs U1 then U2 then U3 then U4 then U5 then U6 then U7 then U8 then U9.
-U0 is a self-contained early milestone that can land at any point before U9 and is not on the U1-through-U9 activation path.
+This branch is planning-only because the captain narrowed the current work to documentation and tracking.
 
-## Early milestone versus first-class activation boundary
+Commit `5be5e14` is the preserved, separate plan-correction commit.
 
-U0 is the captain's approved early-correctness milestone that fixes OMP misdetection and the option-safe `basename` crash and keeps non-OMP children under an OMP primary detecting as themselves.
-U0 must not add `omp` to any first-class supervision allowlist, so a detected `omp` primary routes to the existing fail-safe unknown supervision fallback until the full adapter lands.
-First-class OMP activation begins only when U1 through U9 supply the complete supervision, lifecycle, recovery, and verification contracts.
-U6 is the unit that adds `omp` to the supervision allowlist, and only alongside its guard extension, so detection never outruns supervision.
+No worker launcher, extension, test, cleanup integration, or support policy is implemented by the planning phase.
 
-## Requirement-to-task matrix
+Every future implementation task is held with a captain hold until a new explicit authorization clears this branch's planning-only boundary.
 
-Every requirement R1 through R39 in the plan maps to at least one owning unit, exactly as the plan's unit Requirement tags represent it.
+## Authority and evidence baseline
 
-| Requirement | Owning unit(s) |
-| --- | --- |
-| R1 | U0 |
-| R2 | U0 |
-| R3 | U2 |
-| R4 | U0 |
-| R5 | U2 |
-| R6 | U1, U3 |
-| R7 | U3 |
-| R8 | U1, U3 |
-| R9 | U3 |
-| R10 | U3 |
-| R11 | U1, U4 |
-| R12 | U4, U8 |
-| R13 | U1, U4 |
-| R14 | U1, U3, U4, U7 |
-| R15 | U5, U6, U8 |
-| R16 | U5, U6 |
-| R17 | U5, U6 |
-| R18 | U5, U6 |
-| R19 | U4, U5, U6, U8 |
-| R20 | U5, U6, U8 |
-| R21 | U1, U7 |
-| R22 | U1, U7 |
-| R23 | U1, U7 |
-| R24 | U1, U5, U7 |
-| R25 | U4, U8 |
-| R26 | U6, U7, U8 |
-| R27 | U9 |
-| R28 | U6, U9 |
-| R29 | U9 |
-| R30 | U0, U2, U3, U4, U5, U6, U7, U8, U9 |
-| R31 | U0 |
-| R32 | U0 |
-| R33 | U1, U3 |
-| R34 | U3 |
-| R35 | U4, U8 |
-| R36 | U5 |
-| R37 | U5, U8 |
-| R38 | U1, U7 |
-| R39 | U9 |
+The plan is the single owner for exact requirements, acceptance examples, S0 gates, hard stops, current-code surfaces, and the Definition of Done.
 
-The plan's U1 Requirement tag deliberately excludes R12 and R15 through R20, which are firstmate guarantees proven by U4 through U8 rather than OMP primitives the spike can observe.
+The plan records the revalidated runtime as `/Users/ed/.bun/bin/omp` resolving to `/Users/ed/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js`.
 
-## Acceptance-example ownership
+The pinned package is `@oh-my-pi/pi-coding-agent` version `17.1.5` with Bun `1.3.14` observed.
 
-Every acceptance example AE1 through AE45 is owned by at least one unit, and U9 re-runs the full AE1 through AE45 set as the final gate.
-AE16 is the existing-harness regression example that every unit re-verifies.
+The pinned package manifest SHA-256 is `3574ab69ffc6108192110a87e8fa07edae67892fe2519b4d33c917c798c6a405`.
 
-| Unit | Acceptance examples |
-| --- | --- |
-| U0 | AE1, AE2, AE3, AE4, AE16, AE22, AE23, AE24 |
-| U1 | AE5, AE6, AE7, AE8, AE9, AE10, AE11, AE12, AE13, AE14, AE17, AE18, AE19, AE20, AE21, AE22, AE31, AE32, AE37, AE38, AE39, AE42 |
-| U2 | AE1, AE2, AE3, AE4, AE16, AE22 |
-| U3 | AE5, AE16, AE17, AE18, AE39, AE40, AE41 |
-| U4 | AE6, AE15, AE16, AE19, AE31, AE32, AE33 |
-| U5 | AE7, AE8, AE9, AE10, AE11, AE12, AE16, AE17, AE21, AE25, AE26, AE27, AE28, AE29, AE30, AE44, AE45 |
-| U6 | AE7, AE8, AE10, AE11, AE12, AE16, AE28, AE29 |
-| U7 | AE13, AE14, AE16, AE20, AE21, AE28, AE36, AE38, AE43 |
-| U8 | AE12, AE15, AE16, AE20, AE21, AE33, AE34, AE35, AE36 |
-| U9 | AE1 through AE45 (the full acceptance set) |
+The pinned CLI SHA-256 is `9898943d1ac04994ed2747d0bcce9ce6e736ee0f04d00b51833294ef5d179f3b`.
 
-## Live-matrix ownership
+The current command surface includes `omp launch [MESSAGES...] [FLAGS...]` and `omp launch --help` exits zero.
 
-The plan's forty-three-row live verification matrix is produced by U1 as evidence and exercised across the units below, then re-run in full by U9.
+The broken `--no-extensions` plus explicit `-e` combination is prohibited because current OMP suppresses the explicit extension in that combination.
 
-| Unit | Live-matrix scenarios |
-| --- | --- |
-| U0 | Row 26 (non-OMP child detects as its own harness) |
-| U1 | Produces the whole pre-merge live matrix; mandatory rows are native per-turn completion, primary stop, pre-tool blocking, idle and streaming follow-up, countable continuation, and Herdr hosting and classification, plus abnormal-completion (row 30), multi-turn (row 31), and N-consecutive-run behavior |
-| U2 | Row 26 |
-| U3 | Rows 2, 17, 39, 40 |
-| U4 | Rows 6, 18, 19, 25, 30, 31, 32 |
-| U5 | Rows 5, 8, 9, 10, 11, 12, 13, 22, 23, 27, 28, 29, 36, 37, 38, 42, 43 (watcher continuity: successor before wake, typed restoration failure) |
-| U6 | Rows 1, 8, 9, 12, 13, 27, 28 |
-| U7 | Rows 14, 15, 20, 21, 22, 27, 35, 41 (landed Herdr workspace contract unchanged: Themis primary, Archon-<id> secondmate, per-project <Fleet display name>-Fleet worker) |
-| U8 | Rows 5, 24, 25, 32, 33, 34, 35 |
-| U9 | The full pre-merge live ledger, rows 1 through 43, with each corruption-sensitive row passing at least 20 consecutive runs |
+Host identity must use the resolved executable and argv ancestry because OMP child shells set mixed `OMPCODE=1` and `CLAUDECODE=1` markers that are not host identity.
 
-## Stop conditions
+The startup handshake must precede every task brief and must fail closed on missing, failed, duplicate, unexpected, replaced, path-mismatched, owner-mismatched, mode-mismatched, or hash-mismatched registration.
 
-The plan's stop conditions bound every unit and are reproduced there in full; the load-bearing ones for this task map are summarized here.
+The effective thinking level must be read from OMP state and must match the requested policy before work starts.
 
-- OMP must expose native per-turn completion, primary stop, pre-tool block, idle-and-streaming follow-up, and a countable continuation mechanism, or U1 blocks the program.
-- Herdr must be pre-verified in U1 to host and classify an OMP or Bun agent before Herdr parity is claimed, or Herdr support is a blocker or an explicitly staged tmux-first deferral.
-- A named OMP launch must resolve the executable from a trusted absolute path, verify its provenance, and confirm a supported version before extensions load.
-- An OMP primary extension must resolve its own `FM_HOME` fail-closed and never fall back to the shared code root.
-- The turn-end guard must not recurse indefinitely or exhaust OMP continuations silently, and it may end loudly with a visible failure after its bounded allowance.
-- The OMP primary watcher must own the landed extension-driven watcher-continuity contract per `docs/watcher-continuity.md`, starting and verifying a singleton successor and rechecking session-lock ownership before delivering the wake, applying bounded exponential retry, and surfacing a typed continuity-restoration failure at the retry limit rather than a re-arm reminder.
-- The pre-merge live evidence must be sanitized of captured credentials before it is handed off and attached.
-- Existing Claude, Codex, OpenCode, Pi, and Grok behavior and tests must remain unchanged.
+Every future live claim must distinguish per-turn completion from terminal task completion and queue acknowledgement from actual follow-up delivery.
 
-## Evidence handoff
+Every future failure path must make continuation exhaustion, follow-up suppression, missing terminal events, hidden extension failures, and cleanup failures visibly non-successful.
 
-U1 produces one sanitized durable live-evidence artifact in which argv is redacted allowlist-style and captured environment values are redacted to variable names, with defined storage, access, and retention.
-The implementation executor hands that sanitized artifact to the supervising firstmate session before repository validation begins.
-U9 attaches the artifact as durable validation evidence only after redaction has passed.
+## Phase graph
 
-## Release exit criteria
+The graph is intentionally linear through the experimental spike and stops at a fresh Red Team reassessment.
 
-U9 declares OMP supported only after code, live evidence, documentation, and regressions agree.
-`omp` is added to verified adapter lists only after U0 through U8 acceptance and every required live row passes, with each corruption-sensitive row passing at least 20 consecutive runs.
-Targeted tests, repository lint, the no-mistakes pipeline, and CI must pass, and the final diff review must confirm no stale five-harness lists and no disturbance of the landed Herdr workspace contract, the primary supervisor workspace `Themis`, the secondmate supervisor workspaces `Archon-<secondmate-id>`, and the per-project ordinary-worker `<Fleet display name>-Fleet` workspaces resolved by `bin/fm-project-mode.sh --fleet`.
-Documentation may call OMP verified only when both CI and the pre-merge live ledger pass and redaction is confirmed.
+First-class work is a separate deferred branch that cannot start merely because the spike succeeds.
 
-## Authority
+| Phase | Task ID | Kind | Dependency | Current state |
+| --- | --- | --- | --- | --- |
+| P0 | `omp-o5-plan-correction` | docs | none | Done in `5be5e14` |
+| P1 | `omp-o5-spike-preflight` | scout | P0 | Captain-held |
+| P2 | `omp-o5-spike-launch-isolation` | ship | P1 | Captain-held |
+| P3 | `omp-o5-spike-handshake-state` | ship | P2 | Captain-held |
+| P4 | `omp-o5-spike-live-lifecycle` | ship | P3 | Captain-held |
+| P5 | `omp-o5-spike-cleanup-evidence` | ship | P4 | Captain-held |
+| P6 | `omp-o5-redteam-reassessment` | scout | P5 | Captain-held |
+| P7 | `omp-o5-firstclass-gates` | scout | P6 plus fresh authorization | Captain-held and blocked |
+| P8 | `omp-o5-firstclass-integration` | ship | P7 plus every S0 gate | Captain-held and blocked |
 
-The revised plan at `.agents/plans/omp-harness-integration-plan.md` is the single authority for full requirement text, acceptance examples, the complete live matrix, component design, and the Definition of Done.
-This roadmap and the `.agents/tasks/backlog.md` records are a navigation and dispatch surface over that plan, not a second source of truth.
+P0 records the corrected plan only and contains no runtime or repository implementation.
+
+P1 establishes a dated preflight ledger before any worker code is allowed.
+
+P2 creates the opt-in launcher and isolated runtime boundary without adding OMP to normal Firstmate dispatch.
+
+P3 makes extension registration and effective thinking state hard gates before the brief is delivered.
+
+P4 proves one real normal streamed turn and one real abort or error path with fail-visible lifecycle semantics.
+
+P5 proves real Firstmate task cleanup and records exact verification evidence.
+
+P6 reopens the Red Team review and may leave first-class support blocked even if the worker spike passes.
+
+P7 is a new evidence-only review of every first-class S0 gate and is not implied by P6 passing.
+
+P8 is the only phase that could eventually change verified policy, and it requires a separate authorization after P7.
+
+## Phase contracts
+
+### P1 - Experimental spike preflight ledger
+
+Re-run `command -v omp`, `readlink /Users/ed/.bun/bin/omp`, `omp --version`, `bun --version`, and package and CLI `shasum -a 256` checks.
+
+Capture `omp launch --help` including its zero exit status and exact launch syntax.
+
+Audit project, user, profile, plugin, `PI_CONFIG_DIR`, and `PI_CODING_AGENT_DIR` discovery inputs before choosing a launch vector.
+
+Prove that ambient extension discovery is excluded without relying on the broken `--no-extensions` and explicit-extension combination.
+
+Capture host executable and argv ancestry separately from child-shell marker values.
+
+Stop with `blocked:` if discovery cannot be excluded, identity depends on mixed markers, or the pinned runtime has drifted without a new decision.
+
+### P2 - Experimental worker launch and isolation
+
+Use a separately named explicit opt-in entry point that is not an accepted harness name or normal dispatch profile.
+
+Require an explicit temporary `FM_HOME` and refuse the active Firstmate home, repository root, and non-temporary homes.
+
+Use only a dedicated tmux socket and task-specific tmux session.
+
+Create fresh HOME, XDG config, data, state, cache, OMP profile, and empty project-root inputs.
+
+Clear `PI_CONFIG_DIR` and `PI_CODING_AGENT_DIR` and preflight all discovery roots.
+
+Use the pinned absolute executable and never pass the contradicted no-extensions flag combination.
+
+Keep the path worker-only with no primary, secondmate, multi-home, recovery, or Herdr mode.
+
+Stop if any launch path broadens those boundaries or accepts a normal Firstmate dispatch route.
+
+### P3 - Handshake and effective state gate
+
+Generate one canonical extension with restrictive directory and file modes.
+
+Bind the handshake to the canonical path, expected content hash, task token, owner, mode, and exact registration set.
+
+Require the extension handshake before any task instructions or worker brief are sent.
+
+Reject missing, failed, duplicate, unexpected, replaced, path-mismatched, owner-mismatched, mode-mismatched, and hash-mismatched registration.
+
+Query OMP state and verify the effective model and thinking level against the requested values.
+
+Reject silent thinking downgrades such as requested `max` resolving to `xhigh`.
+
+Stop if OMP reaches ready or accepts work after a required extension failure.
+
+### P4 - Real normal and abort or error lifecycle
+
+Run one real normal streamed RPC turn against a local unauthenticated mock OpenAI-compatible stream.
+
+Require streamed assistant output, one `turn_end`, and one terminal `agent_end` with `isTerminal:true`.
+
+Run one real abort or error turn against a deliberately slow or failing stream after the stream has started.
+
+Require an abort acknowledgement plus a terminal event or typed process failure before cleanup.
+
+Treat acknowledgements as queue acceptance rather than proof of follow-up start or completion.
+
+Treat missing terminal events, duplicate turn signals, hidden extension errors, suppressed follow-ups, and normal-looking stops after errors as failures.
+
+Keep continuation budget, follow-up delivery, terminal events, and visible failure semantics as future first-class gates rather than inferred spike support.
+
+### P5 - Real cleanup and evidence
+
+Record experimental task metadata before launch, including temporary root, generated extension, tmux socket, session, and isolated run root.
+
+Invoke the real `bin/fm-teardown.sh` task path for both normal and abort or error outcomes.
+
+Prove cleanup of generated extension, state, temporary files, RPC logs, process, tmux session, tmux socket, OMP profile, and isolated HOME.
+
+Do not invoke normal dispatch, secondmate-home cleanup, watcher recovery, PR cleanup, or Herdr operations.
+
+Record the date, exact versions, exact commands, exact output, exit statuses, redacted argv, handshake, thinking state, streams, terminal events, and cleanup assertions.
+
+Run focused deterministic tests for every implemented contract, then the complete `for test_file in tests/*.test.sh; do bash "$test_file"; done` loop and `bin/fm-lint.sh` when shell files change.
+
+Stop if any cleanup failure can look like success or if evidence is skipped, mocked, inferred, or inconclusive.
+
+### P6 - Fresh Red Team reassessment
+
+Compare the complete evidence record against every hard stop and S0 gate in the plan.
+
+Preserve the experimental label even when all bounded worker checks pass.
+
+Do not add OMP to any allowlist, profile, protocol, secondmate path, recovery classifier, or Herdr claim as part of reassessment.
+
+Record unresolved evidence as a typed block rather than weakening a gate.
+
+### P7 and P8 - Deferred first-class track
+
+Require a new captain authorization before beginning any first-class gate work.
+
+Reprove discovery isolation, host identity, extension startup, RPC lifecycle, continuation budget, follow-up delivery, backend semantics, two-home ownership, recovery, cleanup, and regression coverage.
+
+Keep the runtime cap of eight distinct from a lower Firstmate continuation budget and surface every exhaustion or handler failure visibly.
+
+Prove tmux and Herdr lifecycle behavior before either backend is called supported.
+
+Prove primary, persistent secondmate, two-home, recovery, and complete cleanup ownership before any first-class allowlist change.
+
+Update every owning documentation and test surface atomically only after all gates pass.
+
+Run the full test loop, applicable shell lint, repository validation owner, and required live repetition matrix.
+
+Never call OMP verified from a partial spike, a primitive runtime observation, a mocked transport, or a single successful turn.
+
+## Tracking operations
+
+Use the explicit backlog path for every query or mutation.
+
+- `npx -y tasks-axi list --file .agents/tasks/backlog.md`
+- `npx -y tasks-axi show omp-o5-spike-handshake-state --full --file .agents/tasks/backlog.md`
+- `npx -y tasks-axi ready --file .agents/tasks/backlog.md`
+- `npx -y tasks-axi list --state held --file .agents/tasks/backlog.md`
+- `npx -y tasks-axi render --file .agents/tasks/backlog.md`
+
+The ready queue must remain empty while this planning-only branch is active.
+
+Each future task must be started only after its dependency evidence and captain hold are explicitly cleared.
+
+Each completed task must record its durable report or review artifact before the next dependent task is considered.
+
+## Handoff criteria
+
+The branch is ready for guarded local fast-forward review only when the plan and roadmap commits are focused, the worktree is clean, and no implementation artifact remains.
+
+The handoff must state that commit `5be5e14` remains preserved and that no OMP support was implemented.
+
+The next worker must begin by reading the plan, this roadmap, the corresponding full backlog task, and the preserved reports before any implementation authorization is considered.
