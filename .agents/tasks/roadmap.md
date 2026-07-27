@@ -1,223 +1,171 @@
-# OMP Experimental Worker Spike - Planning Roadmap
+# OMP staged support - Tasks Axi planning manifest
 
-This roadmap is the planning and dispatch map for the corrected OMP work.
+This file is the committed Tasks Axi-compatible planning manifest for the OMP work.
 
-The full contract is owned by `.agents/plans/omp-harness-integration-plan.md`.
+The canonical contract is `.agents/plans/omp-harness-integration-plan.md`.
 
-The executable task records are owned by Tasks Axi in `.agents/tasks/backlog.md`.
+The plan owns the full requirement, architecture, evidence, validation, hard-stop, and decision text.
 
-This roadmap does not authorize implementation and does not claim OMP support.
+This manifest owns stable task IDs, phase order, dependencies, activation state, acceptance pointers, and captain-facing progress fields.
 
-## Current decision
+The current artifact state is `pending second Red Team validation`.
 
-The Red Team disposition is BLOCK for first-class or verified OMP support.
+The second Red Team task is `omp-final-plan-redteam-o6`.
 
-The only eventual implementation scope is an explicitly opt-in experimental tmux worker under an isolated temporary `FM_HOME`.
+No implementation authority exists until O6 returns `PASS` with no plan-blocking finding and its decision-hold inventory verifies clean.
 
-The experimental label is exactly `experimental tmux worker; unverified; no primary, secondmate, recovery, or Herdr support`.
+No OMP runtime support is implemented by this branch.
 
-OMP remains absent from every verified-harness allowlist, normal dispatch profile, primary-supervisor protocol, secondmate path, recovery or liveness claim, and Herdr support claim.
+## Activation boundary
 
-This branch is planning-only because the captain narrowed the current work to documentation and tracking.
+The live firstmate backlog at `data/backlog.md` must not receive any new P1-P8 implementation task from this manifest before O6 passes.
 
-Commit `5be5e14` is the preserved, separate plan-correction commit.
+The tracked `.agents/tasks/backlog.md` intentionally contains only the completed prior plan-correction record and no future implementation rows.
 
-No worker launcher, extension, test, cleanup integration, or support policy is implemented by the planning phase.
+The rows below are manifest-only records and are not executable backlog entries yet.
 
-Every future implementation task is held with a captain hold until a new explicit authorization clears this branch's planning-only boundary.
+After O6 passes, a deliberate activation step may add the rows to the live backlog with the listed `blocked-by` edges.
 
-## Authority and evidence baseline
+Activation must not add OMP to verified allowlists, normal dispatch, primary supervision, secondmates, recovery, or Herdr claims.
 
-The plan is the single owner for exact requirements, acceptance examples, S0 gates, hard stops, current-code surfaces, and the Definition of Done.
+The only support labels available before final P8 publication are `experimental worker-only` and `provisional tmux worker`.
 
-The plan records the revalidated runtime as `/Users/ed/.bun/bin/omp` resolving to `/Users/ed/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js`.
+The exact experimental result label is `experimental tmux worker; unverified; no primary, secondmate, recovery, or Herdr support`.
 
-The pinned package is `@oh-my-pi/pi-coding-agent` version `17.1.5` with Bun `1.3.14` observed.
+## Stable task manifest
 
-The pinned package manifest SHA-256 is `3574ab69ffc6108192110a87e8fa07edae67892fe2519b4d33c917c798c6a405`.
+`State` is a planning state until activation and does not mean that a task is held for a captain decision.
 
-The pinned CLI SHA-256 is `9898943d1ac04994ed2747d0bcce9ce6e736ee0f04d00b51833294ef5d179f3b`.
+`Evidence` points to the acceptance rows in the canonical plan.
 
-The current command surface includes `omp launch [MESSAGES...] [FLAGS...]` and `omp launch --help` exits zero.
+`needs:human` is `none` for every current row because O4 found no unresolved captain choice.
 
-The broken `--no-extensions` plus explicit `-e` combination is prohibited because current OMP suppresses the explicit extension in that combination.
+| Phase | Milestone | Task ID | Dependencies | State | Evidence and acceptance pointer | Plan section |
+| --- | --- | --- | --- | --- | --- | --- |
+| P0 | Plan traceability correction | `omp-o5-plan-traceability` | none | complete in `a070dff` | C01-C25 compliance matrix, V01-V25 validation matrix, STOP-01 through STOP-12, clean docs checks | P0 |
+| P0 | Independent second Red Team | `omp-final-plan-redteam-o6` | `omp-o5-plan-traceability` | queued in live backlog, no implementation | Every C01-C25 row, every task, dependency, gate, rollback, evidence row, progress field, and decision classification | P0 |
+| P1 | Runtime identity ledger | `omp-p1-runtime-pin` | O6 PASS | planned, manifest-only | REQ-EVID-01, REQ-LINK-01, V01, V24 | P1 |
+| P1 | Discovery and flag safety ledger | `omp-p1-discovery-isolation` | O6 PASS | planned, manifest-only | REQ-DISC-01, REQ-DISC-02, V02, V03, STOP-01 | P1 |
+| P1 | Host ancestry identity ledger | `omp-p1-identity-ancestry` | O6 PASS | planned, manifest-only | REQ-ID-01, REQ-ID-02, V04, STOP-03 | P1 |
+| P2 | Experimental worker launcher | `omp-p2-experimental-launch` | all P1 tasks | planned, manifest-only | REQ-SCOPE-01, REQ-DISC-01, V02, V03, P2 worker-only contract | P2 |
+| P2 | Mandatory extension handshake | `omp-p2-extension-handshake` | `omp-p2-experimental-launch` | planned, manifest-only | REQ-EXT-01, REQ-EXT-02, V05, V06, V07, STOP-02 | P2 |
+| P2 | Effective thinking-state gate | `omp-p2-thinking-state` | `omp-p2-experimental-launch` | planned, manifest-only | REQ-STATE-01, V08, STOP-04 | P2 |
+| P3 | Native RPC lifecycle adapter | `omp-p3-rpc-lifecycle` | `omp-p1-runtime-pin`, `omp-p1-identity-ancestry`, `omp-p2-experimental-launch` | planned, manifest-only | REQ-RPC-01, REQ-RPC-02, V09, V10, V11, V12 | P3 |
+| P3 | Continuation and follow-up failure semantics | `omp-p3-continuation-followup` | `omp-p3-rpc-lifecycle` | planned, manifest-only | REQ-CONT-01, REQ-FOLLOW-01, V13, V14, STOP-05 | P3 |
+| P3 | Real worker normal and abort E2E | `omp-p3-worker-live` | `omp-p2-extension-handshake`, `omp-p2-thinking-state`, `omp-p3-continuation-followup` | planned, manifest-only | REQ-RPC-02, REQ-LIVE-01, V10, V12, V15 | P3 |
+| P3 | Real worker cleanup E2E | `omp-p3-cleanup-live` | `omp-p3-worker-live` | planned, manifest-only | REQ-CLEAN-01, REQ-CLEAN-02, V21, V22, STOP-09 | P3 |
+| P3 | Focused and full regression loop | `omp-p3-regression` | `omp-p3-cleanup-live` | planned, manifest-only | REQ-REG-01, V23, full `tests/*.test.sh` loop, applicable lint | P3 |
+| P4 | Tmux OMP ancestry and liveness classifier | `omp-p4-tmux-classifier` | `omp-p3-regression` | planned, manifest-only | REQ-BACKEND-01, V16, STOP-06 | P4 |
+| P4 | Provisional tmux worker evidence | `omp-p4-tmux-provisional` | `omp-p4-tmux-classifier`, `omp-p3-worker-live` | planned, manifest-only | REQ-SCOPE-01, REQ-LIVE-01, V16, V25, provisional label | P4 |
+| P5 | Herdr lifecycle parity | `omp-p5-herdr-parity` | `omp-p4-tmux-provisional` | planned, manifest-only | REQ-BACKEND-02, V17, STOP-06, STOP-08 | P5 |
+| P6 | Primary continuity and supervision | `omp-p6-supervision-continuity` | `omp-p5-herdr-parity` | planned, manifest-only | REQ-WATCH-01, V18, STOP-05 | P6 |
+| P6 | Startup policy and supervision protocol | `omp-p6-startup-policy` | `omp-p6-supervision-continuity` | planned, manifest-only | REQ-EXT-02, REQ-SCOPE-01, V18, V25 | P6 |
+| P7 | Two-home isolation | `omp-p7-two-home-isolation` | `omp-p6-startup-policy` | planned, manifest-only | REQ-HOME-01, V19, STOP-07 | P7 |
+| P7 | Sole-owner recovery | `omp-p7-recovery` | `omp-p7-two-home-isolation` | planned, manifest-only | REQ-REC-01, V20, STOP-06, STOP-07 | P7 |
+| P7 | Complete cleanup and refusal matrix | `omp-p7-cleanup-complete` | `omp-p7-recovery` | planned, manifest-only | REQ-CLEAN-01, REQ-CLEAN-02, V21, V22, STOP-09 | P7 |
+| P8 | Full live and repository verification | `omp-p8-full-validation` | all P7 tasks | planned, manifest-only | REQ-REG-01, REQ-LIVE-01, V17-V25, STOP-10, STOP-11, STOP-12 | P8 |
+| P8 | First-class policy and documentation publication | `omp-p8-policy-publication` | `omp-p8-full-validation` and no open stop | planned, manifest-only | REQ-SCOPE-01, REQ-MAP-01, REQ-DOC-01, V25, all C01-C25, final Definition of Done | P8 |
 
-Host identity must use the resolved executable and argv ancestry because OMP child shells set mixed `OMPCODE=1` and `CLAUDECODE=1` markers that are not host identity.
+## Phase and dependency rules
 
-The startup handshake must precede every task brief and must fail closed on missing, failed, duplicate, unexpected, replaced, path-mismatched, owner-mismatched, mode-mismatched, or hash-mismatched registration.
+P0 is serialized because independent Red Team validation must inspect the plan and manifest before any implementation task exists in the live backlog.
 
-The effective thinking level must be read from OMP state and must match the requested policy before work starts.
+P1 evidence tasks may run in parallel after O6 passes because runtime identity, discovery isolation, and host ancestry are separate evidence ledgers.
 
-Every future live claim must distinguish per-turn completion from terminal task completion and queue acknowledgement from actual follow-up delivery.
+P2 launch, handshake, and state work is serialized at the brief-delivery gate, although handshake and state fixtures may run in parallel after launcher preflight.
 
-Every future failure path must make continuation exhaustion, follow-up suppression, missing terminal events, hidden extension failures, and cleanup failures visibly non-successful.
+P3 lifecycle and failure semantics must precede real worker E2E, and real worker E2E must precede cleanup and the full regression loop.
 
-## Phase graph
+P4 is serialized after P3 because tmux liveness cannot be claimed from a fixture-only worker result.
 
-The graph is intentionally linear through the experimental spike and stops at a fresh Red Team reassessment.
+P5 is serialized after provisional tmux evidence because Herdr parity requires the same native lifecycle contract and the same pinned runtime.
 
-First-class work is a separate deferred branch that cannot start merely because the spike succeeds.
+P6 supervision is serialized after backend parity because a watcher cannot claim liveness or successor ownership on an unverified backend.
 
-| Phase | Task ID | Kind | Dependency | Current state |
-| --- | --- | --- | --- | --- |
-| P0 | `omp-o5-plan-correction` | docs | none | Done in `5be5e14` |
-| P1 | `omp-o5-spike-preflight` | scout | P0 | Captain-held |
-| P2 | `omp-o5-spike-launch-isolation` | ship | P1 | Captain-held |
-| P3 | `omp-o5-spike-handshake-state` | ship | P2 | Captain-held |
-| P4 | `omp-o5-spike-live-lifecycle` | ship | P3 | Captain-held |
-| P5 | `omp-o5-spike-cleanup-evidence` | ship | P4 | Captain-held |
-| P6 | `omp-o5-redteam-reassessment` | scout | P5 | Captain-held |
-| P7 | `omp-o5-firstclass-gates` | scout | P6 plus fresh authorization | Captain-held and blocked |
-| P8 | `omp-o5-firstclass-integration` | ship | P7 plus every S0 gate | Captain-held and blocked |
+P7 is serialized after supervision because multi-home recovery depends on the actual watcher and lock ownership contract.
 
-P0 records the corrected plan only and contains no runtime or repository implementation.
+P8 is serialized after every prior phase and has no bypass for a partial matrix.
 
-P1 establishes a dated preflight ledger before any worker code is allowed.
+After activation, Tasks Axi `blocked-by` edges provide readiness automatically.
 
-P2 creates the opt-in launcher and isolated runtime boundary without adding OMP to normal Firstmate dispatch.
+Ordinary future tasks are not captain-held by default.
 
-P3 makes extension registration and effective thinking state hard gates before the brief is delivered.
+Only a real policy, product, destructive, or security decision may create a structured `needs:human` hold.
 
-P4 proves one real normal streamed turn and one real abort or error path with fail-visible lifecycle semantics.
+The current `needs:human` set is empty.
 
-P5 proves real Firstmate task cleanup and records exact verification evidence.
+## Progress contract
 
-P6 reopens the Red Team review and may leave first-class support blocked even if the worker spike passes.
+Status and Bearings report one active phase at a time and do not calculate progress over all future manifest rows.
 
-P7 is a new evidence-only review of every first-class S0 gate and is not implied by P6 passing.
+The current scoped denominator is the number of activated tasks in the active phase.
 
-P8 is the only phase that could eventually change verified policy, and it requires a separate authorization after P7.
+Manifest-only rows are excluded from the completed/total denominator until activation.
 
-## Phase contracts
+A task is complete only when its evidence artifact, acceptance rows, exit criterion, and rollback or containment result are recorded.
 
-### P1 - Experimental spike preflight ledger
+A task is blocked only with its requirement or STOP ID, owner, missing evidence, and containment action.
 
-Re-run `command -v omp`, `readlink /Users/ed/.bun/bin/omp`, `omp --version`, `bun --version`, and package and CLI `shasum -a 256` checks.
+The captain-facing status fields are `phase`, `milestone`, `completed/total scoped tasks`, `branch`, `blockers`, `next gate`, and `needs:human` decisions with explicit options.
 
-Capture `omp launch --help` including its zero exit status and exact launch syntax.
+The active branch for this planning revision is `fm/omp-first-class-support-o5`.
 
-Audit project, user, profile, plugin, `PI_CONFIG_DIR`, and `PI_CODING_AGENT_DIR` discovery inputs before choosing a launch vector.
+The next gate is `omp-final-plan-redteam-o6` with required result `PASS`.
 
-Prove that ambient extension discovery is excluded without relying on the broken `--no-extensions` and explicit-extension combination.
+The current blocker is independent plan validation, not an implementation failure.
 
-Capture host executable and argv ancestry separately from child-shell marker values.
+## Support-state reporting
 
-Stop with `blocked:` if discovery cannot be excluded, identity depends on mixed markers, or the pinned runtime has drifted without a new decision.
+P1 through P3 may report only the exact experimental worker label after their gates pass.
 
-### P2 - Experimental worker launch and isolation
+P4 may report only the provisional tmux worker label after its live matrix passes.
 
-Use a separately named explicit opt-in entry point that is not an accepted harness name or normal dispatch profile.
+P5 through P7 may report backend, supervision, or recovery evidence only as gated internal evidence, never as public or verified support.
 
-Require an explicit temporary `FM_HOME` and refuse the active Firstmate home, repository root, and non-temporary homes.
+P8 is the only phase that may publish first-class verified support.
 
-Use only a dedicated tmux socket and task-specific tmux session.
+OMP remains absent from verified-harness allowlists, normal dispatch profiles, primary supervision selection, secondmate routing, recovery classifiers, and Herdr support claims until P8 publication.
 
-Create fresh HOME, XDG config, data, state, cache, OMP profile, and empty project-root inputs.
+## Red Team handoff checklist
 
-Clear `PI_CONFIG_DIR` and `PI_CODING_AGENT_DIR` and preflight all discovery roots.
+O6 must verify the plan's pinned command surface and hashes against the O2 and O4 evidence.
 
-Use the pinned absolute executable and never pass the contradicted no-extensions flag combination.
+O6 must verify that the noext contradiction is unresolved and remains a hard stop until a future runtime or hermeticity proof clears it.
 
-Keep the path worker-only with no primary, secondmate, multi-home, recovery, or Herdr mode.
+O6 must verify every C01-C25 disposition has a requirement, owner, task, evidence row, gate, containment action, and captain field.
 
-Stop if any launch path broadens those boundaries or accepts a normal Firstmate dispatch route.
+O6 must verify all five convergent weaknesses map to concrete tasks and acceptance evidence.
 
-### P3 - Handshake and effective state gate
+O6 must verify all twelve STOP rows prevent false success or premature support.
 
-Generate one canonical extension with restrictive directory and file modes.
+O6 must verify the current-code map includes secondmate positional parsing, raw launch, generated hook, send, continuity, all cleanup lists, and full regression ownership.
 
-Bind the handshake to the canonical path, expected content hash, task token, owner, mode, and exact registration set.
+O6 must verify the manifest has no default captain holds and no newly activated P1-P8 implementation rows in `.agents/tasks/backlog.md` or `data/backlog.md`.
 
-Require the extension handshake before any task instructions or worker brief are sent.
+O6 must verify the full regression loop and live evidence requirements are explicit.
 
-Reject missing, failed, duplicate, unexpected, replaced, path-mismatched, owner-mismatched, mode-mismatched, and hash-mismatched registration.
+O6 must verify no captain choice is invented where the evidence-based BLOCK is sufficient.
 
-Query OMP state and verify the effective model and thinking level against the requested values.
+## Tasks Axi commands
 
-Reject silent thinking downgrades such as requested `max` resolving to `xhigh`.
-
-Stop if OMP reaches ready or accepts work after a required extension failure.
-
-### P4 - Real normal and abort or error lifecycle
-
-Run one real normal streamed RPC turn against a local unauthenticated mock OpenAI-compatible stream.
-
-Require streamed assistant output, one `turn_end`, and one terminal `agent_end` with `isTerminal:true`.
-
-Run one real abort or error turn against a deliberately slow or failing stream after the stream has started.
-
-Require an abort acknowledgement plus a terminal event or typed process failure before cleanup.
-
-Treat acknowledgements as queue acceptance rather than proof of follow-up start or completion.
-
-Treat missing terminal events, duplicate turn signals, hidden extension errors, suppressed follow-ups, and normal-looking stops after errors as failures.
-
-Keep continuation budget, follow-up delivery, terminal events, and visible failure semantics as future first-class gates rather than inferred spike support.
-
-### P5 - Real cleanup and evidence
-
-Record experimental task metadata before launch, including temporary root, generated extension, tmux socket, session, and isolated run root.
-
-Invoke the real `bin/fm-teardown.sh` task path for both normal and abort or error outcomes.
-
-Prove cleanup of generated extension, state, temporary files, RPC logs, process, tmux session, tmux socket, OMP profile, and isolated HOME.
-
-Do not invoke normal dispatch, secondmate-home cleanup, watcher recovery, PR cleanup, or Herdr operations.
-
-Record the date, exact versions, exact commands, exact output, exit statuses, redacted argv, handshake, thinking state, streams, terminal events, and cleanup assertions.
-
-Run focused deterministic tests for every implemented contract, then the complete `for test_file in tests/*.test.sh; do bash "$test_file"; done` loop and `bin/fm-lint.sh` when shell files change.
-
-Stop if any cleanup failure can look like success or if evidence is skipped, mocked, inferred, or inconclusive.
-
-### P6 - Fresh Red Team reassessment
-
-Compare the complete evidence record against every hard stop and S0 gate in the plan.
-
-Preserve the experimental label even when all bounded worker checks pass.
-
-Do not add OMP to any allowlist, profile, protocol, secondmate path, recovery classifier, or Herdr claim as part of reassessment.
-
-Record unresolved evidence as a typed block rather than weakening a gate.
-
-### P7 and P8 - Deferred first-class track
-
-Require a new captain authorization before beginning any first-class gate work.
-
-Reprove discovery isolation, host identity, extension startup, RPC lifecycle, continuation budget, follow-up delivery, backend semantics, two-home ownership, recovery, cleanup, and regression coverage.
-
-Keep the runtime cap of eight distinct from a lower Firstmate continuation budget and surface every exhaustion or handler failure visibly.
-
-Prove tmux and Herdr lifecycle behavior before either backend is called supported.
-
-Prove primary, persistent secondmate, two-home, recovery, and complete cleanup ownership before any first-class allowlist change.
-
-Update every owning documentation and test surface atomically only after all gates pass.
-
-Run the full test loop, applicable shell lint, repository validation owner, and required live repetition matrix.
-
-Never call OMP verified from a partial spike, a primitive runtime observation, a mocked transport, or a single successful turn.
-
-## Tracking operations
-
-Use the explicit backlog path for every query or mutation.
+Use the explicit tracked manifest path for local artifact validation.
 
 - `npx -y tasks-axi list --file .agents/tasks/backlog.md`
-- `npx -y tasks-axi show omp-o5-spike-handshake-state --full --file .agents/tasks/backlog.md`
 - `npx -y tasks-axi ready --file .agents/tasks/backlog.md`
-- `npx -y tasks-axi list --state held --file .agents/tasks/backlog.md`
 - `npx -y tasks-axi render --file .agents/tasks/backlog.md`
 
-The ready queue must remain empty while this planning-only branch is active.
+The current `ready` result must contain zero implementation tasks because the manifest is awaiting O6.
 
-Each future task must be started only after its dependency evidence and captain hold are explicitly cleared.
+Do not run `tasks-axi add` for any P1-P8 ID until O6 passes and the activation decision is recorded.
 
-Each completed task must record its durable report or review artifact before the next dependent task is considered.
+When activation is authorized, add the rows with the dependency IDs in this manifest and verify `ready` exposes only the first unblocked ordinary tasks.
 
-## Handoff criteria
+## Handoff definition
 
-The branch is ready for guarded local fast-forward review only when the plan and roadmap commits are focused, the worktree is clean, and no implementation artifact remains.
+This manifest is ready for O6 only when its plan pointer, stable IDs, dependencies, evidence rows, state labels, progress fields, and activation boundary are internally consistent.
 
-The handoff must state that commit `5be5e14` remains preserved and that no OMP support was implemented.
+The branch handoff must state that no OMP runtime support was implemented.
 
-The next worker must begin by reading the plan, this roadmap, the corresponding full backlog task, and the preserved reports before any implementation authorization is considered.
+The branch handoff must state that `5be5e14` remains preserved and the new plan correction is separate.
+
+The worktree must be clean and the commits must remain a local fast-forward candidate.
