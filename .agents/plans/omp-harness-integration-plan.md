@@ -34,7 +34,7 @@ The committed tracking manifest is `.agents/tasks/roadmap.md`.
 
 The tracked `.agents/tasks/backlog.md` contains no future implementation tasks until the second Red Team validates this plan and manifest.
 
-The live firstmate backlog at `data/backlog.md` must not receive OMP implementation tasks before that validation.
+The live firstmate backlog at `data/backlog.md` must not receive new P1-P8 implementation rows before that validation.
 
 The external task `omp-final-plan-redteam-o6` remains the only next validation gate and is already blocked on `omp-first-class-support-o5` in the live backlog.
 
@@ -205,6 +205,7 @@ The requirement IDs below are the stable join keys used by the phase manifest, c
 | REQ-CLEAN-01 | Enumerate and clean nested hooks/state, top-level hooks/state, temp, PR poll, extension, watcher, backend, and secondmate-home artifacts. | `bin/fm-teardown.sh` owner; real generated artifacts are required. |
 | REQ-CLEAN-02 | Preserve dirty, unlanded, and unresolved-decision refusal and make cleanup failure visible. | Teardown and decision-hold owners; refusal tests are mandatory. |
 | REQ-MAP-01 | Include secondmate positional parsing, raw launch, generated hook, send, continuity, all cleanup lists, and full regression owners. | This plan owns the inventory; future code changes must update the nearest owner docs. |
+| REQ-DOC-01 | Remove stale `th-*` paths and inconsistent persistent-supervisor terminology from the plan and future documentation. | Plan and documentation owners; P0 checks current names and P8 checks every published support surface. |
 | REQ-REG-01 | Run every existing `tests/*.test.sh`, focused OMP tests, applicable lint, and all supported harness/backend axes. | `.no-mistakes.yaml:22-28` and repository test owner; a shortened list is not sufficient. |
 | REQ-LIVE-01 | Require live evidence for worker, watcher, tmux, Herdr, two-home, recovery, and teardown claims. | Evidence ledger owner; skipped, mocked, inferred, or inconclusive rows block promotion. |
 | REQ-LINK-01 | Validate each external source link at the pinned commit and classify individually stale links. | Evidence documentation owner; no blanket stale-link claim. |
@@ -239,6 +240,8 @@ Future task records point to these owners instead of copying their contracts.
 | Source and link evidence | OMP evidence record and package manifest | `omp-p1-runtime-pin` and `omp-p8-policy-publication`; pin each link and command. |
 
 Pi and Claude extensions are behavioral references only.
+
+The plan and future documentation must use current Firstmate paths and role names rather than stale `th-*` paths or inconsistent persistent-supervisor terminology.
 
 No OMP implementation may import Pi APIs, Pi event types, or fail-open helper behavior without a separate OMP-native equivalence proof.
 
@@ -510,7 +513,7 @@ No row marked incorporated means the runtime behavior has already passed.
 | C12 | incorporated | REQ-RPC-02, REQ-LIVE-01 | Worker completion owner; `omp-p3-worker-live` | Multiple turns, abort, tool/provider error, extension throw/timeout, dropped callback, duplicate event, and process exit. | Missing exact-once signal is typed failure; no cleanup success inferred. |
 | C13 | incorporated with blocking gate | REQ-BACKEND-01 | `tmux.sh`, backend owner; `omp-p4-tmux-classifier` | Running, idle, streaming, interrupted, shell-after-owner, dead owner, and unknown wrapper states. | Unknown stays unknown and never respawns; provisional state remains blocked. |
 | C14 | deferred with blocking gate | REQ-BACKEND-02 | `herdr.sh`; `omp-p5-herdr-parity` | Preserve versioned idle recognition, then run ready, prompt, stream, follow-up, steer, abort, exit, resume, and recovery. | Narrow positive fact permits no parity claim; captain sees Herdr gate. |
-| C15 | incorporated | REQ-SCOPE-01, REQ-BACKEND-02 | State model; `omp-p4-tmux-provisional`, `omp-p5-herdr-parity`, `omp-p8-policy-publication` | State transition tests and docs reject first-class wording during tmux-only phases. | No Herdr evidence means no first-class state; no human choice. |
+| C15 | incorporated | REQ-SCOPE-01, REQ-BACKEND-02, REQ-DOC-01 | State model and documentation; `omp-p4-tmux-provisional`, `omp-p5-herdr-parity`, `omp-p8-policy-publication` | State transition tests, current-path checks, and docs reject first-class wording during tmux-only phases. | No Herdr evidence means no first-class state; stale paths or terminology block publication. |
 | C16 | incorporated | REQ-BACKEND-01, REQ-REC-01 | Backend and recovery owners; `omp-p4-tmux-classifier`, `omp-p7-recovery` | Unknown-is-not-dead, owner process state, successor ordering, and recovery tests. | Conservative unknown remains containment; progress shows recovery gate. |
 | C17 | incorporated | REQ-MAP-01 | `fm-spawn.sh:449-466`, raw launch, dispatch; `omp-p2-experimental-launch`, `omp-p8-policy-publication` | Positional parser, home-path ambiguity, raw route, and profile validation tests. | Omitted seam blocks implementation readiness; no public policy. |
 | C18 | incorporated | REQ-CLEAN-01, REQ-CLEAN-02 | `fm-teardown.sh`; `omp-p3-cleanup-live`, `omp-p7-cleanup-complete` | All nested/top-level lists, generated artifacts, processes, temp, polls, dirty/unlanded, and unresolved-decision cases. | Any residue or bypass blocks; rollback uses real teardown. |
@@ -654,7 +657,7 @@ The O6 Red Team task can reproduce every C01-C25 mapping through a requirement, 
 
 The `.agents/tasks` manifest contains stable future IDs but no executable implementation rows until O6 passes.
 
-The live firstmate backlog contains no OMP implementation task before O6 validation.
+The live firstmate backlog contains no newly activated P1-P8 implementation task before O6 validation.
 
 Markdown, link/path, Tasks Axi parse and render, and documentation validation pass.
 
