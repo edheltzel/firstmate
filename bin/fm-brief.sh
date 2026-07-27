@@ -51,6 +51,8 @@
 # self-governance section when a touched project AGENTS.md lacks it.
 # Every ship and scout brief includes one shared commit-discipline section so
 # completed work is committed incrementally and the worktree is clean at done.
+# Ship and scout briefs also include the generated ordinary-worker ownership
+# boundary; secondmate charters retain their own firstmate startup contract.
 # Refuses to overwrite an existing brief.
 set -eu
 
