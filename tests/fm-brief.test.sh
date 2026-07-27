@@ -111,6 +111,32 @@ test_commit_discipline_applies_to_every_crewmate_brief() {
   pass "fm-brief.sh: every ship mode and scout carries one shared commit-discipline contract"
 }
 
+test_ordinary_worker_role_boundary_is_generated_only_for_ship_and_scout() {
+  local home ship scout secondmate
+  home="$TMP_ROOT/ordinary-worker-boundary-home"
+  mkdir -p "$home/data"
+
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" boundary-ship-c2 firstmate >/dev/null 2>&1
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" boundary-scout-c3 firstmate --scout >/dev/null 2>&1
+  FM_HOME="$home" FM_SECONDMATE_CHARTER='boundary charter' \
+    "$ROOT/bin/fm-brief.sh" boundary-secondmate-c4 --secondmate --no-projects >/dev/null 2>&1
+  ship="$home/data/boundary-ship-c2/brief.md"
+  scout="$home/data/boundary-scout-c3/brief.md"
+  secondmate="$home/data/boundary-secondmate-c4/brief.md"
+
+  for brief in "$ship" "$scout"; do
+    assert_grep "# Ordinary-worker role boundary" "$brief" \
+      "ordinary worker brief missing its explicit role boundary"
+    assert_grep "Do not run primary session startup or bootstrap" "$brief" \
+      "ordinary worker brief permits primary startup"
+    assert_grep "report it as a launch-boundary defect" "$brief" \
+      "ordinary worker brief lacks contradictory-nudge handling"
+  done
+  assert_no_grep "# Ordinary-worker role boundary" "$secondmate" \
+    "secondmate charter must retain its own primary startup role"
+  pass "fm-brief.sh: ship and scout briefs carry the ordinary-worker role boundary"
+}
+
 test_faster_paths_use_configured_authority_without_stacked_review() {
   local home id brief
   home="$TMP_ROOT/configured-authority-home"
@@ -410,6 +436,7 @@ test_script_parses
 test_help_includes_entire_header
 test_ship_modes_generate_clean_briefs
 test_commit_discipline_applies_to_every_crewmate_brief
+test_ordinary_worker_role_boundary_is_generated_only_for_ship_and_scout
 test_faster_paths_use_configured_authority_without_stacked_review
 test_no_mistakes_dod_wording
 test_ship_project_memory_wording

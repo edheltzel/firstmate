@@ -107,7 +107,7 @@ assert_meta_profile() {
 }
 
 test_no_profile_keeps_claude_launch_unchanged() {
-  local rec id out status expected launch
+  local rec id out status expected launch prefix
   id=profile-off-z1
   rec=$(make_spawn_case profile-off claude "$id")
   read_case_record "$rec"
@@ -119,9 +119,51 @@ test_no_profile_keeps_claude_launch_unchanged() {
   assert_meta_profile "$HOME_DIR/state/$id.meta" claude default default
 
   launch=$(cat "$LAUNCH_LOG")
-  expected="CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions \"\$(cat '$HOME_DIR/data/$id/brief.md')\""
+  prefix="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME='$HOME_DIR' "
+  expected="${prefix}CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions \"\$(cat '$HOME_DIR/data/$id/brief.md')\""
   [ "$launch" = "$expected" ] || fail "no-profile claude launch changed"$'\n'"expected: $expected"$'\n'"actual:   $launch"
-  pass "no --model/--effort records defaults and keeps the claude launch byte-identical"
+  pass "no --model/--effort records defaults and applies the ordinary-worker environment boundary"
+}
+
+test_ship_and_scout_launches_scrub_selectors_and_retain_shared_home() {
+  local kind rec id out status launch prefix
+  prefix="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME="
+  for kind in ship scout; do
+    id="boundary-$kind-z17"
+    rec=$(make_spawn_case "boundary-$kind" claude "$id")
+    read_case_record "$rec"
+    if [ "$kind" = scout ]; then
+      out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --scout)
+    else
+      out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+    fi
+    status=$?
+    expect_code 0 "$status" "$kind spawn should succeed"
+    assert_contains "$out" "spawned $id harness=claude kind=$kind" "$kind spawn did not report its kind"
+    launch=$(cat "$LAUNCH_LOG")
+    assert_contains "$launch" "$prefix'$HOME_DIR' " "$kind launch did not retain the resolved shared FM_HOME"
+    assert_contains "$launch" "FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE=" \
+      "$kind launch did not scrub all five selector overrides"
+  done
+  pass "fm-spawn.sh: ship and scout carriers receive the shared-home selector boundary"
+}
+
+test_secondmate_launch_keeps_home_relocation_and_selector_scrub() {
+  local rec id sm sm_real out status launch
+  id=boundary-secondmate-z18
+  rec=$(make_spawn_case secondmate-boundary codex "$id")
+  read_case_record "$rec"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  sm_real=$(cd "$sm" && pwd -P)
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)
+  status=$?
+  expect_code 0 "$status" "secondmate boundary spawn should succeed"
+  assert_contains "$out" "spawned $id harness=codex kind=secondmate" "secondmate boundary spawn did not report its kind"
+  launch=$(cat "$LAUNCH_LOG")
+  assert_contains "$launch" "FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME='$sm_real' " \
+    "secondmate launch did not retain its isolated home and selector scrub"
+  pass "fm-spawn.sh: secondmate home and selector behavior remains unchanged"
 }
 
 test_active_dispatch_profile_requires_explicit_harness_for_ship() {
@@ -205,7 +247,8 @@ test_active_dispatch_profile_allows_raw_launch_command() {
   assert_contains "$out" "spawned $id harness=custom-agent" "spawn did not report raw command harness"
   assert_meta_profile "$HOME_DIR/state/$id.meta" custom-agent default default
   launch=$(cat "$LAUNCH_LOG")
-  [ "$launch" = "custom-agent --flag" ] || fail "raw launch command changed"$'\n'"actual: $launch"
+  [ "$launch" = "FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME='$HOME_DIR' custom-agent --flag" ] \
+    || fail "raw launch command changed"$'\n'"actual: $launch"
   pass "active crew-dispatch profile allows the raw launch-command escape hatch"
 }
 
@@ -386,6 +429,8 @@ test_active_dispatch_profile_does_not_block_secondmate_launch() {
 }
 
 test_no_profile_keeps_claude_launch_unchanged
+test_ship_and_scout_launches_scrub_selectors_and_retain_shared_home
+test_secondmate_launch_keeps_home_relocation_and_selector_scrub
 test_active_dispatch_profile_requires_explicit_harness_for_ship
 test_active_dispatch_profile_requires_explicit_harness_for_scout
 test_active_dispatch_profile_allows_explicit_harness
