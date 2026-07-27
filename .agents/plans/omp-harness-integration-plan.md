@@ -130,11 +130,11 @@ An isolated profile or HOME alone is not proof that project `.omp` settings, dir
 
 The OMP host was observed as `bun /Users/ed/.bun/bin/omp ...` and did not export `OMPCODE` or `CLAUDECODE`.
 
-OMP child-shell source `pi-utils/src/procmgr.ts:38-48` sets both `OMPCODE=1` and `CLAUDECODE=1`.
+OMP child-shell source `@oh-my-pi/pi-utils/src/procmgr.ts:38-48` sets both `OMPCODE=1` and `CLAUDECODE=1`.
 
 Host identity must use executable and argv ancestry rather than mixed child markers.
 
-OMP source `src/model/model-controls.ts:470-510` resolves requested thinking through model capability.
+OMP source `src/session/model-controls.ts:470-510` resolves requested thinking through model capability.
 
 The effective `get_state.thinkingLevel` can be `xhigh` when the request says `max`.
 
@@ -146,7 +146,7 @@ OMP source `src/extensibility/extensions/runner.ts:627-667` turns handler throw,
 
 OMP source `src/session/agent-session.ts:5272-5294` can suppress automatic follow-up resume after interrupt, retry, or an invalid transcript tail.
 
-OMP source `src/rpc/rpc-mode.ts:1026-1034` acknowledges follow-up queueing rather than eventual turn start.
+OMP source `src/modes/rpc/rpc-mode.ts:1026-1034` acknowledges follow-up queueing rather than eventual turn start.
 
 Herdr `0.7.5-preview` directly recognized a running `bun ... omp` process as `agent:"omp", agent_status:"idle"` in a named lab.
 
