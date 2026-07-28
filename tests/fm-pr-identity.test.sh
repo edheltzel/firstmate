@@ -11,7 +11,12 @@ HOME_DIR="$CASE_ROOT/home"
 PROJECT="$CASE_ROOT/project"
 FAKEBIN="$CASE_ROOT/fakebin"
 ENV_FILE="$CASE_ROOT/synthetic.env"
-mkdir -p "$HOME_DIR/data" "$HOME_DIR/state" "$FAKEBIN" "$PROJECT"
+SIGNING_KEY="${FM_TEST_WORKER_SIGNING_KEY:-${HOME:-}/.ssh/atlas_signing.pub}"
+SIGNER_PRINCIPAL="${FM_TEST_WORKER_SIGNER_PRINCIPAL:-296298943+Atlas-Key@users.noreply.github.com}"
+SIGNING_FINGERPRINT=$(ssh-keygen -lf "$SIGNING_KEY" -E sha256 2>/dev/null \
+  | awk 'NF >= 2 { count++; value=$2 } END { if (count != 1) exit 1; print value }') \
+  || fail "configured test signing key is unavailable: $SIGNING_KEY"
+mkdir -p "$HOME_DIR/data" "$HOME_DIR/state" "$HOME_DIR/config" "$FAKEBIN" "$PROJECT"
 
 cat > "$HOME_DIR/data/projects.md" <<'EOF'
 - Atlas [direct-PR pr-identity=atlas-pat] - synthetic broker project (added 2026-07-22)
@@ -49,10 +54,23 @@ git -C "$PROJECT" -c user.name='Atlas' -c user.email='atlas@rainyday.media' add 
 git -C "$PROJECT" -c user.name='Atlas' -c user.email='atlas@rainyday.media' commit -qm initial
 git -C "$PROJECT" branch -M main
 git -C "$PROJECT" remote add origin git@github.com:edheltzel/fixture.git
+cat > "$HOME_DIR/config/worker-git-identity" <<EOF
+[worker]
+	name = Atlas
+	email = atlas@rainyday.media
+	signingKey = $SIGNING_KEY
+	fingerprint = $SIGNING_FINGERPRINT
+	principal = $SIGNER_PRINCIPAL
+[gpg]
+	format = ssh
+[commit]
+	gpgSign = true
+EOF
 
 run_broker() {
   FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$HOME_DIR" FM_DATA_OVERRIDE="$HOME_DIR/data" \
-    FM_STATE_OVERRIDE="$HOME_DIR/state" FM_ATLAS_ENV_FILE="$ENV_FILE" \
+    FM_STATE_OVERRIDE="$HOME_DIR/state" FM_CONFIG_OVERRIDE="$HOME_DIR/config" \
+    FM_ATLAS_ENV_FILE="$ENV_FILE" \
     FM_PR_IDENTITY_TEST_MODE=1 FM_PR_IDENTITY_GH_AXI="$FAKEBIN/gh-axi" PATH="$FAKEBIN:$PATH" "$BROKER" "$@"
 }
 
@@ -178,6 +196,7 @@ pass "mutable task metadata cannot downgrade the host-bound Atlas identity"
 
 cat > "$FAKEBIN/git" <<'SH'
 #!/usr/bin/env bash
+if [ "${1:-}" = config ]; then exec /usr/bin/git "$@"; fi
 case "$*" in
   *'remote get-url origin'*) printf 'git@github.com:edheltzel/fixture.git\n' ;;
   *'rev-parse --show-toplevel'*) printf '%s\n' "$FM_TEST_PROJECT" ;;
@@ -187,8 +206,15 @@ case "$*" in
   *'status --porcelain'*) ;;
   *'rev-list'*) printf '2222222222222222222222222222222222222222\n' ;;
   *'log --format=%H '* ) printf '%s\n' "${FM_TEST_LOCAL_COMMITS:-2222222222222222222222222222222222222222}" ;;
-  *'log --format='*) printf '2222222222222222222222222222222222222222\tAtlas\tatlas@rainyday.media\tAtlas\tatlas@rainyday.media\n' ;;
-  *'cat-file commit'*) ;;
+  *'log --format='*)
+    case "${FM_TEST_SIGNATURE_MODE:-signed}" in
+      signed) printf '2222222222222222222222222222222222222222\tAtlas\tatlas@rainyday.media\tAtlas\tatlas@rainyday.media\tG\t%s\t%s\n' "$FM_TEST_SIGNER_PRINCIPAL" "$FM_TEST_SIGNING_FINGERPRINT" ;;
+      unsigned) printf '2222222222222222222222222222222222222222\tAtlas\tatlas@rainyday.media\tAtlas\tatlas@rainyday.media\tN\t\t\n' ;;
+      personal) printf '2222222222222222222222222222222222222222\tAtlas\tatlas@rainyday.media\tAtlas\tatlas@rainyday.media\tG\tpersonal@example.invalid\tSHA256:personal\n' ;;
+      invalid) printf '2222222222222222222222222222222222222222\tAtlas\tatlas@rainyday.media\tAtlas\tatlas@rainyday.media\tG\t%s\t%s\n' "$FM_TEST_SIGNER_PRINCIPAL" "$FM_TEST_SIGNING_FINGERPRINT" ;;
+    esac
+    ;;
+  *'verify-commit --raw'*) [ "${FM_TEST_SIGNATURE_MODE:-signed}" != invalid ] ;;
   *'branch --show-current'*) printf 'fm/task-a\n' ;;
   *'ls-remote'*) printf '2222222222222222222222222222222222222222\trefs/heads/fm/task-a\n' ;;
   *'push origin fm/task-a:fm/task-a'*)
@@ -203,6 +229,8 @@ chmod +x "$FAKEBIN/git"
 FM_TEST_PROJECT=$(cd "$PROJECT" && pwd -P)
 FM_TEST_TRANSPORT_LOG="$CASE_ROOT/transport.log"
 export FM_TEST_PROJECT FM_TEST_TRANSPORT_LOG
+export FM_TEST_SIGNER_PRINCIPAL="$SIGNER_PRINCIPAL"
+export FM_TEST_SIGNING_FINGERPRINT="$SIGNING_FINGERPRINT"
 push_out=$(run_broker push task-a) || fail "synthetic broker push unexpectedly failed"
 assert_contains "$push_out" 'pushed: repo=edheltzel/fixture branch=fm/task-a' "push should report only safe binding data"
 assert_present "$HOME_DIR/state/task-a.pr-publication" "push should publish a partial-publication record"
@@ -265,13 +293,13 @@ merge_out=$(run_broker merge-assert task-a 'https://github.com/edheltzel/fixture
 assert_contains "$merge_out" 'merge-authority=edheltzel' "merge assertion should require Ed authentication"
 pass "broker parses real gh-axi TOON for read and exact commit verification"
 
-test_unsigned_policy_contract() {
+test_signed_policy_contract() {
   local mode output rc
   export FM_TEST_POLICY_MODE=404
   output=$(run_broker preflight task-policy Atlas "$PROJECT") \
     || fail "documented not-protected signing policy should be accepted"
   assert_contains "$output" 'profile=atlas-pat' "404 not-protected result should retain the broker profile"
-  for mode in 403 401 500 malformed true; do
+  for mode in 403 401 500 malformed; do
     export FM_TEST_POLICY_MODE=$mode
     set +e
     output=$(run_broker preflight task-policy Atlas "$PROJECT" 2>&1)
@@ -280,11 +308,67 @@ test_unsigned_policy_contract() {
     [ "$rc" -ne 0 ] || fail "signing policy mode $mode must refuse preflight"
     assert_contains "$output" 'signing-policy' "signing policy mode $mode should remain unknown or refused"
   done
+  for mode in false true; do
+    export FM_TEST_POLICY_MODE=$mode
+    output=$(run_broker preflight task-policy Atlas "$PROJECT") \
+      || fail "documented branch signing policy mode $mode should be compatible with the signed profile"
+    assert_contains "$output" 'profile=atlas-pat' \
+      "signed profile should remain active for branch signing policy mode $mode"
+  done
   unset FM_TEST_POLICY_MODE
-  pass "unsigned policy accepts only documented 404 absence and refuses 403/auth/server/malformed/protected results"
+  pass "signed policy accepts documented 404, required-signatures true/false, and refuses unknown policy results"
 }
 
-test_unsigned_policy_contract
+test_signed_policy_contract
+
+test_worker_identity_and_signature_failures() {
+  local output rc backup="$CASE_ROOT/worker-git-identity.good" key_link key_value key value
+  cp "$HOME_DIR/config/worker-git-identity" "$backup"
+  for key_value in \
+    'fingerprint=SHA256:wrong' \
+    'principal=personal@example.invalid' \
+    "signingKey=$CASE_ROOT/missing-signing-key.pub"; do
+    key=${key_value%%=*}
+    value=${key_value#*=}
+    cp "$backup" "$HOME_DIR/config/worker-git-identity"
+    sed -E -i.bak "s|^[[:space:]]*${key}[[:space:]]*=.*|$key = $value|" \
+      "$HOME_DIR/config/worker-git-identity"
+    set +e
+    output=$(run_broker preflight task-policy Atlas "$PROJECT" 2>&1)
+    rc=$?
+    set -e
+    [ "$rc" -ne 0 ] || fail "worker identity replacement '$key_value' must refuse preflight"
+    assert_contains "$output" 'signing-policy' \
+      "worker identity replacement '$key_value' should use signing-policy refusal"
+  done
+  cp "$backup" "$HOME_DIR/config/worker-git-identity"
+  key_link="$CASE_ROOT/linked-signing-key.pub"
+  ln -s "$SIGNING_KEY" "$key_link"
+  sed -E "s|^[[:space:]]*signingKey[[:space:]]*=.*|signingKey = $key_link|" \
+    "$backup" > "$HOME_DIR/config/worker-git-identity"
+  set +e
+  output=$(run_broker preflight task-policy Atlas "$PROJECT" 2>&1)
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] || fail "symlinked signing key must refuse preflight"
+  assert_contains "$output" 'signing-policy' "symlinked signing key should use signing-policy refusal"
+  cp "$backup" "$HOME_DIR/config/worker-git-identity"
+
+  for mode in unsigned personal invalid; do
+    export FM_TEST_SIGNATURE_MODE=$mode
+    set +e
+    output=$(run_broker push task-a 2>&1)
+    rc=$?
+    set -e
+    [ "$rc" -ne 0 ] || fail "$mode local signature must refuse publication"
+    assert_contains "$output" 'signing-policy' \
+      "$mode local signature should use signing-policy refusal"
+  done
+  unset FM_TEST_SIGNATURE_MODE
+  pass "wrong key/fingerprint/principal and unsigned, personal, or invalid signatures refuse safely"
+}
+
+test_worker_identity_and_signature_failures
 
 test_commit_shapes_and_pagination() {
   local tabular hidden null_attribution malformed page_one page_two many_out failure failure_rc

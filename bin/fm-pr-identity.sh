@@ -41,6 +41,8 @@ fi
 EXPECTED_LOGIN=Atlas-Key
 EXPECTED_AUTHOR_NAME=Atlas
 EXPECTED_AUTHOR_EMAIL=atlas@rainyday.media
+EXPECTED_SIGNER_PRINCIPAL=296298943+Atlas-Key@users.noreply.github.com
+EXPECTED_SIGNING_FINGERPRINT=SHA256:r+7H1GGgXgA9i3c5S00smkLEby/6iqxt1HmGmkHgX7M
 PROFILE=atlas-pat
 GH_AXI_SUPPORTED_VERSION=0.1.27
 PAT=
@@ -49,6 +51,7 @@ HOST_COMMIT_ERROR=unknown
 LOCK_DIR=
 LOCK_PROCESS=
 TMP_FILE=
+SIGNERS_FILE=
 META=
 META_PROFILE=
 META_PROJECT_KEY=
@@ -67,6 +70,8 @@ META_BINDING_PROJECT=
 
 # shellcheck source=bin/fm-pr-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-pr-lib.sh"
+# shellcheck source=bin/fm-worker-git-identity-lib.sh disable=SC1091
+. "$SCRIPT_DIR/fm-worker-git-identity-lib.sh"
 
 usage() {
   sed -n 's/^# \{0,1\}//p' "$0" | sed -n '/^Host-owned broker for/,$p' | head -25
@@ -88,6 +93,7 @@ reject_runtime_overrides
 
 cleanup() {
   [ -z "$TMP_FILE" ] || rm -f -- "$TMP_FILE"
+  [ -z "$SIGNERS_FILE" ] || rm -f -- "$SIGNERS_FILE"
   [ -z "$LOCK_DIR" ] || [ "$LOCK_PROCESS" != "${BASHPID:-$$}" ] \
     || rmdir "$LOCK_DIR" 2>/dev/null || true
 }
@@ -232,17 +238,49 @@ verify_atlas_access() {
   case "$permission" in admin|maintain|write) ;; *) fail credential-capability none no "Atlas credential lacks repository write capability" ;; esac
 }
 
-verify_unsigned_policy() {
+require_worker_git_identity() {
+  fm_worker_git_identity_load "${FM_CONFIG_OVERRIDE:-$FM_HOME/config}" \
+    || fail signing-policy none no "configured worker Git identity is invalid: ${FM_WORKER_GIT_IDENTITY_ERROR:-validation failed}"
+  [ "$FM_WORKER_GIT_IDENTITY_CONFIGURED" = 1 ] \
+    || fail signing-policy none no "Atlas publication requires config/worker-git-identity"
+  [ "$FM_WORKER_GIT_NAME" = "$EXPECTED_AUTHOR_NAME" ] \
+    || fail signing-policy none no "configured worker Git name is not Atlas"
+  [ "$FM_WORKER_GIT_EMAIL" = "$EXPECTED_AUTHOR_EMAIL" ] \
+    || fail signing-policy none no "configured worker Git email is not the Atlas email"
+  [ "$FM_WORKER_GIT_PRINCIPAL" = "$EXPECTED_SIGNER_PRINCIPAL" ] \
+    || fail signing-policy none no "configured SSH signer principal is not the Atlas principal"
+  [ "$FM_WORKER_GIT_FINGERPRINT" = "$EXPECTED_SIGNING_FINGERPRINT" ] \
+    || fail signing-policy none no "configured SSH signing fingerprint is not the Atlas fingerprint"
+}
+
+prepare_worker_signature_verification() {
+  require_worker_git_identity
+  [ -n "$SIGNERS_FILE" ] && [ -f "$SIGNERS_FILE" ] && return 0
+  mkdir -p "$STATE" || fail state-write unknown no "signature verification state is unavailable"
+  SIGNERS_FILE=$(mktemp "$STATE/.fm-atlas-allowed-signers.XXXXXX") \
+    || fail state-write unknown no "signature verification policy is unavailable"
+  chmod 0600 "$SIGNERS_FILE" \
+    || fail state-write unknown no "signature verification policy could not be protected"
+  fm_worker_git_identity_write_allowed_signers "$SIGNERS_FILE" \
+    || fail signing-policy none no "configured SSH allowed-signers record could not be written"
+}
+
+git_worker_signature_config() {
+  git -c gpg.format=ssh -c "gpg.ssh.allowedSignersFile=$SIGNERS_FILE" "$@"
+}
+
+verify_signed_policy() {
   local repo=$1 base=$2 response enabled response_file
   response_file=$(mktemp "$STATE/.fm-atlas-policy.XXXXXX") \
     || fail state-write unknown no "repository signing policy response is unavailable"
   if ! atlas_api "/repos/$repo/branches/$base/protection/required_signatures" "$response_file"; then
     rm -f -- "$response_file"
-    # GitHub documents 404 from this optional sub-resource as no required
-    # signature policy for the branch. Forbidden, authentication, malformed,
-    # and server failures remain unknown and therefore refuse publication.
+    # GitHub documents 404 from this optional sub-resource as no branch
+    # protection record. Required or absent signatures both remain compatible
+    # with the local signed profile; forbidden, authentication, malformed, and
+    # server failures remain unknown and therefore refuse publication.
     [ "$ATLAS_API_STATUS" = 404 ] \
-      || fail signing-policy unknown no "repository unsigned-signing policy could not be verified"
+      || fail signing-policy unknown no "repository signing policy could not be verified"
     return 0
   fi
   response=$(cat "$response_file") || {
@@ -252,14 +290,14 @@ verify_unsigned_policy() {
   rm -f -- "$response_file"
   enabled=$(fm_pr_toon_scalar "$response" enabled)
   case "$enabled" in
-    false|False|0) ;;
-    true|True|1) fail signing-policy none no "repository requires signed commits but this profile is unsigned" ;;
+    false|False|0|true|True|1) ;;
     *) fail signing-policy unknown no "repository signing policy response was not explicit" ;;
   esac
 }
 
 preflight() {
   local id=$1 project_key=$2 project_dir=$3 profile repo base project_real
+  require_worker_git_identity
   require_gh_axi_contract
   task_valid "$id" || fail metadata none no "invalid task identity"
   safe_project_key "$project_key" || fail metadata none no "invalid canonical project key"
@@ -276,7 +314,7 @@ preflight() {
   safe_branch "$base" || fail repository none no "project default branch is invalid"
   load_pat
   verify_atlas_access "$repo"
-  verify_unsigned_policy "$repo" "$base"
+  verify_signed_policy "$repo" "$base"
   project_real=$(cd "$project_dir" 2>/dev/null && pwd -P) \
     || fail repository none no "project checkout path could not be canonicalized"
   write_binding "$id" "$project_key" "$repo" "fm/$id" "$base" "$project_real"
@@ -414,7 +452,9 @@ write_record() {
 }
 
 load_commit_binding() {
-  local base_ref commit author_name author_email committer_name committer_email signed
+  local base_ref commit author_name author_email committer_name committer_email
+  local signature_status signer fingerprint
+  prepare_worker_signature_verification
   base_ref=$(git -C "$META_WORKTREE" rev-parse --verify "refs/remotes/origin/$META_BASE" 2>/dev/null || \
     git -C "$META_WORKTREE" rev-parse --verify "refs/heads/$META_BASE" 2>/dev/null) \
     || fail commits unknown no "task base branch cannot be resolved locally"
@@ -422,16 +462,22 @@ load_commit_binding() {
   [ -z "$(git -C "$META_WORKTREE" status --porcelain 2>/dev/null)" ] || fail commits none no "task worktree has uncommitted changes"
   git -C "$META_WORKTREE" rev-list "$base_ref..HEAD" 2>/dev/null | grep -q . \
     || fail commits none no "task branch has no commits beyond its base"
-  while IFS=$(printf '\t') read -r commit author_name author_email committer_name committer_email; do
+  while IFS=$(printf '\t') read -r commit author_name author_email committer_name committer_email signature_status signer fingerprint; do
     [ -n "$commit" ] || continue
-    [ "$author_name" = "$EXPECTED_AUTHOR_NAME" ] && [ "$author_email" = "$EXPECTED_AUTHOR_EMAIL" ] \
+    [ "$author_name" = "$FM_WORKER_GIT_NAME" ] && [ "$author_email" = "$FM_WORKER_GIT_EMAIL" ] \
       || fail commit-attribution none no "a task commit is not attributed to Atlas"
-    [ "$committer_name" = "$EXPECTED_AUTHOR_NAME" ] && [ "$committer_email" = "$EXPECTED_AUTHOR_EMAIL" ] \
+    [ "$committer_name" = "$FM_WORKER_GIT_NAME" ] && [ "$committer_email" = "$FM_WORKER_GIT_EMAIL" ] \
       || fail commit-attribution none no "a task committer is not attributed to Atlas"
-    signed=$(git -C "$META_WORKTREE" cat-file commit "$commit" 2>/dev/null | grep -c '^gpgsig ' || true)
-    [ "$signed" -eq 0 ] || fail signing-policy none no "a task commit contains a signature under the unsigned policy"
+    [ "$signature_status" = G ] \
+      || fail signing-policy none no "a task commit does not have a valid SSH signature"
+    [ "$signer" = "$FM_WORKER_GIT_PRINCIPAL" ] \
+      || fail signing-policy none no "a task commit has the wrong SSH signer principal"
+    [ "$fingerprint" = "$FM_WORKER_GIT_FINGERPRINT" ] \
+      || fail signing-policy none no "a task commit has the wrong SSH signing fingerprint"
+    git_worker_signature_config -C "$META_WORKTREE" verify-commit --raw "$commit" >/dev/null 2>&1 \
+      || fail signing-policy none no "a task SSH signature failed Git verification"
   done <<EOF
-$(git -C "$META_WORKTREE" log --format='%H%x09%an%x09%ae%x09%cn%x09%ce' "$base_ref..HEAD" 2>/dev/null)
+$(git_worker_signature_config -C "$META_WORKTREE" log --format='%H%x09%an%x09%ae%x09%cn%x09%ce%x09%G?%x09%GS%x09%GF' "$base_ref..HEAD" 2>/dev/null)
 EOF
   printf '%s\n' "$base_ref"
 }
@@ -456,7 +502,7 @@ push_task() {
   publication_retry_gate "$id"
   load_pat
   verify_atlas_access "$META_REPO"
-  verify_unsigned_policy "$META_REPO" "$META_BASE"
+  verify_signed_policy "$META_REPO" "$META_BASE"
   base_ref=$(load_commit_binding)
   META_HEAD=$(git -C "$META_WORKTREE" rev-parse --verify HEAD 2>/dev/null) || fail commits unknown no "task head cannot be resolved"
   [ "$(git -C "$META_WORKTREE" branch --show-current 2>/dev/null)" = "$META_BRANCH" ] \
@@ -695,7 +741,7 @@ create_task() {
   [ -n "$title" ] || fail input pushed no "PR title is empty"
   load_pat
   verify_atlas_access "$META_REPO"
-  verify_unsigned_policy "$META_REPO" "$META_BASE"
+  verify_signed_policy "$META_REPO" "$META_BASE"
   load_commit_binding >/dev/null
   grep -qxF 'remote_state=pushed' "$STATE/$id.pr-publication" 2>/dev/null \
     || fail publication-state none no "push must succeed before PR creation"

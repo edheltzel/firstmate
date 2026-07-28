@@ -93,10 +93,12 @@
 #   --scout records kind=scout in the task's meta (report deliverable, scratch worktree;
 #   see AGENTS.md task lifecycle); --secondmate records kind=secondmate and launches in a
 #   provisioned firstmate home; the default is kind=ship.
-#   Ship/scout launch commands shadow all five FM_*_OVERRIDE selectors, explicitly set
-#   the shared FM_HOME, and use a task-local unsigned Atlas Git identity; secondmate
-#   launch commands use the same selector scrub, explicitly set the secondmate home,
-#   and retain that worker-only identity boundary.
+#   Ship/scout launch commands shadow all five FM_*_OVERRIDE selectors and explicitly
+#   set the shared FM_HOME. When config/worker-git-identity is present, every worker
+#   launch also uses its task-local signed SSH identity; without that opt-in, workers
+#   preserve the host/manual Git identity behavior. Secondmate launch commands use
+#   the same selector scrub, explicitly set the secondmate home, and inherit the
+#   same signed profile when configured.
 #   Before a secondmate launch, the home is locally fast-forwarded to the primary
 #   default-branch commit when safe; skipped syncs warn and launch unchanged.
 #   Ship/scout spawns refuse to launch unless the resolved task path is a real
@@ -120,9 +122,10 @@
 # Per-harness turn-end hooks are installed automatically; some live outside the worktree.
 # grok uses a firstmate-owned global hook under ${GROK_HOME:-$HOME/.grok}/hooks
 # plus a gitignored .fm-grok-turnend worktree pointer and a state token.
-# Worker Git attribution is also task-local: the launch sets GIT_CONFIG_GLOBAL to a
+# Opted-in worker Git attribution is task-local: the launch sets GIT_CONFIG_GLOBAL to a
 # generated config under TASK_TMP, which includes the host global config read-only and
-# overrides only Atlas author/committer fields plus commit.gpgSign=false.
+# applies the validated machine-local SSH signing profile. An absent profile leaves
+# GIT_CONFIG_GLOBAL untouched for generic/manual worker compatibility.
 # On success prints: spawned <id> harness=<name> kind=<ship|scout|secondmate> mode=<mode> yolo=<on|off> window=<backend-target> worktree=<path>
 # mode/yolo are resolved per-project from data/projects.md for ship/scout tasks;
 # secondmate spawns record mode=secondmate, yolo=off, home=, and projects=.
@@ -157,8 +160,14 @@ SUB_HOME_MARKER=".fm-secondmate-home"
 . "$SCRIPT_DIR/fm-gate-refuse-lib.sh"
 # shellcheck source=bin/fm-pr-lib.sh
 . "$SCRIPT_DIR/fm-pr-lib.sh"
+# shellcheck source=bin/fm-worker-git-identity-lib.sh
+. "$SCRIPT_DIR/fm-worker-git-identity-lib.sh"
 # Fail closed before any fleet mutation: a no-mistakes gate agent must never spawn
 # a direct report (see bin/fm-gate-refuse-lib.sh).
+if ! fm_worker_git_identity_load "$CONFIG"; then
+  echo "error: invalid config/worker-git-identity: ${FM_WORKER_GIT_IDENTITY_ERROR:-validation failed}; refusing spawn before backend creation" >&2
+  exit 1
+fi
 fm_refuse_if_gate_agent
 # Skip the watcher guard when re-exec'd for one pair of a batch (FM_SPAWN_NO_GUARD is
 # set by the batch loop below), so the guard runs once for the batch, not once per pair.
@@ -1226,32 +1235,20 @@ fi
 TASK_TMP="/tmp/fm-$ID"
 mkdir -p "$TASK_TMP/gotmp"
 
-# A worker must not inherit the captain's commit attribution or signing policy.
-# Keep the host's effective global config as a read-only include, then place only
-# the worker attribution override in the disposable task root. GIT_CONFIG_GLOBAL is
-# deliberately scoped to the launch command below; the primary shell and repository
-# config are never edited, and arbitrary GIT_CONFIG_COUNT state is not rewritten.
-WORKER_GIT_CONFIG="$TASK_TMP/gitconfig"
-if [ -L "$WORKER_GIT_CONFIG" ] || { [ -e "$WORKER_GIT_CONFIG" ] && [ ! -f "$WORKER_GIT_CONFIG" ]; }; then
-  echo "error: unsafe worker Git identity path $WORKER_GIT_CONFIG" >&2
-  exit 1
+# An opted-in worker must not inherit the captain's commit attribution or signing
+# policy. Keep the host's effective global config as a read-only include, then place
+# only the validated worker identity and public allowed-signer record in the
+# disposable task root. GIT_CONFIG_GLOBAL is scoped to the launch command below;
+# the primary shell, repository config, private signing key, and arbitrary
+# GIT_CONFIG_COUNT state are never edited or copied.
+WORKER_GIT_CONFIG=
+WORKER_GIT_ALLOWED_SIGNERS=
+if [ "$FM_WORKER_GIT_IDENTITY_CONFIGURED" = 1 ]; then
+  WORKER_GIT_CONFIG="$TASK_TMP/gitconfig"
+  WORKER_GIT_ALLOWED_SIGNERS="$TASK_TMP/allowed-signers"
+  fm_worker_git_identity_write_task_config "$WORKER_GIT_CONFIG" "$WORKER_GIT_ALLOWED_SIGNERS" \
+    || { echo "error: configured worker Git identity could not be materialized; refusing launch" >&2; exit 1; }
 fi
-WORKER_HOST_GIT_CONFIG=$(git config --global --show-origin --list 2>/dev/null \
-  | awk -F '\t' '$1 ~ /^file:/ { sub(/^file:/, "", $1); print $1; exit }' || true)
-if [ -n "$WORKER_HOST_GIT_CONFIG" ] && [ ! -f "$WORKER_HOST_GIT_CONFIG" ]; then
-  WORKER_HOST_GIT_CONFIG=
-fi
-WORKER_OLD_UMASK=$(umask)
-umask 077
-: > "$WORKER_GIT_CONFIG"
-if [ -n "$WORKER_HOST_GIT_CONFIG" ]; then
-  git config --file "$WORKER_GIT_CONFIG" --add include.path "$WORKER_HOST_GIT_CONFIG"
-fi
-git config --file "$WORKER_GIT_CONFIG" user.name 'Atlas'
-git config --file "$WORKER_GIT_CONFIG" user.email 'atlas@rainyday.media'
-git config --file "$WORKER_GIT_CONFIG" commit.gpgSign false
-chmod 0600 "$WORKER_GIT_CONFIG"
-umask "$WORKER_OLD_UMASK"
 
 # Per-harness turn-end hook: a file that touches state/<id>.turn-ended when the
 # agent finishes a turn. Worktree-resident hooks are kept out of git's view so
@@ -1441,7 +1438,10 @@ sq_turnend=$(shell_quote "$TURNEND")
 sq_piext=$(shell_quote "$STATE/$ID.pi-ext.ts")
 sq_piturnend=$(shell_quote "$PROJ_ABS/.pi/extensions/fm-primary-turnend-guard.ts")
 sq_piwatch=$(shell_quote "$PROJ_ABS/.pi/extensions/fm-primary-pi-watch.ts")
-sq_git_config=$(shell_quote "$WORKER_GIT_CONFIG")
+sq_git_config=
+if [ -n "$WORKER_GIT_CONFIG" ]; then
+  sq_git_config=$(shell_quote "$WORKER_GIT_CONFIG")
+fi
 MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL")
 EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT")
 LAUNCH=${LAUNCH//__MODELFLAG__/$MODELFLAG}
@@ -1459,7 +1459,11 @@ if [ "$KIND" = secondmate ]; then
 else
   sq_home=$(shell_quote "$FM_HOME")
 fi
-LAUNCH="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home GIT_CONFIG_GLOBAL=$sq_git_config $LAUNCH"
+if [ -n "$sq_git_config" ]; then
+  LAUNCH="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home GIT_CONFIG_GLOBAL=$sq_git_config $LAUNCH"
+else
+  LAUNCH="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home $LAUNCH"
+fi
 # Export GOTMPDIR into the crewmate's pane shell so the agent and every child
 # process (go build, go test, ...) inherit it. Sent before the launch command so
 # the env is set when the agent starts; the brief sleep lets the export land.
