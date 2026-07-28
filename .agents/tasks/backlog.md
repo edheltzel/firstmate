@@ -21,7 +21,7 @@
   Activation must refuse unless O8 returns PASS with no plan-blocking finding, its decision-hold inventory verifies clean, the tracked tree is clean, and no P1-P8 task is already active.
   Activation must preserve experimental-only labeling and must not add OMP to verified allowlists, normal dispatch, primary supervision, secondmate routing, recovery, or Herdr claims.
   The exact validator is `bin/fm-omp-activation.sh --check --json` and its default result is refusal unless the report, report hash, decision inventory, STOP ledger, clean-tree preimage, branch/commit preimage, and backlog byte preimage all match.
-  A successful activation may publish only the three manifest P1 evidence rows through the validator's same-directory atomic rename transaction.
+  A successful activation must atomically complete this activation record and publish only the three manifest P1 evidence rows through the validator's same-directory atomic rename transaction.
   Until that validator returns PASS, `omp-p1-activation-a7` remains blocked and no implementation task may be activated.
 
 ## Done

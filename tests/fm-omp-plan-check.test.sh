@@ -39,6 +39,38 @@ test_cycle_refuses() {
   pass "omp-plan-check: dependency cycle is refused"
 }
 
+test_forward_dependency_passes() {
+  local forward="$TMP_ROOT/forward-dependency.json" out status=0
+  mkdir -p "$TMP_ROOT"
+  jq '.tasks = [.tasks[0], .tasks[2], .tasks[1]] + .tasks[3:]' \
+    "$ROOT/.agents/tasks/omp-manifest.json" >"$forward"
+  out=$($CHECK --json --manifest "$forward") || status=$?
+  expect_code 0 "$status" "a dependency on a later manifest row should remain valid"
+  assert_contains "$out" '"status": "PASS"' "forward dependency was rejected by manifest order"
+  pass "omp-plan-check: forward dependency is order-independent"
+}
+
+test_tasks_axi_resolves_from_path() {
+  local fakebin="$TMP_ROOT/fakebin" fake_axi out status=0
+  mkdir -p "$fakebin"
+  fake_axi="$fakebin/tasks-axi"
+  cat >"$fake_axi" <<'SH'
+#!/usr/bin/env bash
+if [ "${1-}" = "--version" ]; then
+  printf '%s\n' '0.2.3'
+  exit 0
+fi
+exit 0
+SH
+  chmod +x "$fake_axi"
+  out=$(TASKS_AXI='' PATH="$fakebin:$PATH" "$CHECK" --json) || status=$?
+  expect_code 0 "$status" "Tasks Axi should resolve from PATH"
+  assert_contains "$out" '"status": "PASS"' "PATH-resolved Tasks Axi did not pass"
+  pass "omp-plan-check: Tasks Axi resolves from PATH"
+}
+
 test_current_manifest_passes
 test_unknown_dependency_refuses
 test_cycle_refuses
+test_forward_dependency_passes
+test_tasks_axi_resolves_from_path

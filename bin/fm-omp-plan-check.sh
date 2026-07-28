@@ -9,7 +9,10 @@ MANIFEST="$ROOT/.agents/tasks/omp-manifest.json"
 PLAN="$ROOT/.agents/plans/omp-harness-integration-plan.md"
 ROADMAP="$ROOT/.agents/tasks/roadmap.md"
 BACKLOG="$ROOT/.agents/tasks/backlog.md"
-TASKS_AXI=${TASKS_AXI:-/opt/homebrew/bin/tasks-axi}
+TASKS_AXI=${TASKS_AXI:-}
+if [ -z "$TASKS_AXI" ]; then
+  TASKS_AXI=$(command -v tasks-axi 2>/dev/null || true)
+fi
 JSON_OUTPUT=0
 
 usage() {
@@ -82,13 +85,13 @@ if [ "$MANIFEST_VALID" -eq 1 ]; then
       if (!seen[id]++) total++
       ids[id]=1
       for (i=2; i<=NF; i++) if ($i != "") {
-        if (!ids[$i]) missing[$i]=1
+        dependency_targets[$i]=1
         adjacency[$i]=adjacency[$i] " " id
         indegree[id]++
       }
     }
     END {
-      for (dep in missing) print "unknown dependency: " dep
+      for (dep in dependency_targets) if (!ids[dep]) print "unknown dependency: " dep
       changed=1
       while (changed) {
         changed=0

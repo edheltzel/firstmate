@@ -50,11 +50,11 @@ The only support labels available before final P8 publication are `experimental 
 
 The exact experimental result label is `experimental tmux worker; unverified; no primary, secondmate, recovery, or Herdr support`.
 
-The tested Tasks Axi executable is `/opt/homebrew/bin/tasks-axi` version `0.2.3`.
+The validated Tasks Axi executable is resolved from `PATH` and reports version `0.2.3`.
 
-The exact publication and cleanup classes are owned by `docs/omp-publication-inventory.md` and checked by `bin/fm-omp-publication-check.sh`.
+The exact publication and cleanup classes are owned by `docs/omp-publication-inventory.md` and `.agents/tasks/omp-publication-manifest.json`, and checked by `bin/fm-omp-publication-check.sh`.
 
-Non-mutating checks are `/opt/homebrew/bin/tasks-axi list --file .agents/tasks/backlog.md`, `/opt/homebrew/bin/tasks-axi show <id> --file .agents/tasks/backlog.md --full`, `/opt/homebrew/bin/tasks-axi ready --file .agents/tasks/backlog.md`, and `git diff --exit-code -- .agents/tasks/backlog.md .agents/tasks/roadmap.md`.
+Non-mutating checks are `tasks-axi list --file .agents/tasks/backlog.md`, `tasks-axi show <id> --file .agents/tasks/backlog.md --full`, `tasks-axi ready --file .agents/tasks/backlog.md`, and `git diff --exit-code -- .agents/tasks/backlog.md .agents/tasks/roadmap.md`.
 
 `tasks-axi render` is allowed only on a disposable copy of `.agents/tasks/backlog.md` for an explicit tool-compatibility probe, never on this roadmap.
 
@@ -184,10 +184,10 @@ O8 must verify no captain choice is invented where the evidence-based BLOCK is s
 
 Use the explicit parseable tracked backlog path for local artifact validation.
 
-- `/opt/homebrew/bin/tasks-axi --version`
-- `/opt/homebrew/bin/tasks-axi list --file .agents/tasks/backlog.md`
-- `/opt/homebrew/bin/tasks-axi show omp-p1-activation-a7 --file .agents/tasks/backlog.md --full`
-- `/opt/homebrew/bin/tasks-axi ready --file .agents/tasks/backlog.md`
+- `tasks-axi --version`
+- `tasks-axi list --file .agents/tasks/backlog.md`
+- `tasks-axi show omp-p1-activation-a7 --file .agents/tasks/backlog.md --full`
+- `tasks-axi ready --file .agents/tasks/backlog.md`
 - `git diff --exit-code -- .agents/tasks/backlog.md .agents/tasks/roadmap.md`
 
 The current `ready` result must contain no P1-P8 implementation task because the roadmap is awaiting O8 and activation.

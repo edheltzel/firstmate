@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Validate the OMP publication inventory and refuse mixed interrupted publication states without writing files.
-# Usage: bin/fm-omp-publication-check.sh [--json] [--inventory PATH] [--plan PATH] [--simulate STATE_JSON]
+# Validate the machine publication inventory, current source ownership, and V29 interruption state without writing files.
+# Usage: bin/fm-omp-publication-check.sh [--json] [--manifest PATH] [--inventory PATH] [--plan PATH] [--simulate STATE_JSON]
 
 set -u
 
 ROOT=$(cd -- "$(dirname -- "$0")/.." && pwd)
+MANIFEST="$ROOT/.agents/tasks/omp-publication-manifest.json"
 INVENTORY="$ROOT/docs/omp-publication-inventory.md"
 PLAN="$ROOT/.agents/plans/omp-harness-integration-plan.md"
 JSON_OUTPUT=0
@@ -17,6 +18,7 @@ usage() {
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --json) JSON_OUTPUT=1 ;;
+    --manifest) shift; MANIFEST=${1-} ;;
     --inventory) shift; INVENTORY=${1-} ;;
     --plan) shift; PLAN=${1-} ;;
     --simulate) shift; SIMULATION=${1-} ;;
@@ -33,53 +35,85 @@ error() {
   ERRORS+=("$1")
 }
 
+require_file() {
+  if [ ! -f "$1" ]; then
+    error "missing required file: $1"
+  fi
+}
+
 require_inventory_token() {
   if ! grep -Fq "$1" "$INVENTORY"; then
     error "publication inventory omits: $1"
   fi
 }
 
-if [ ! -f "$INVENTORY" ]; then
-  error "missing publication inventory: $INVENTORY"
+require_source_binding() {
+  local owner_kind=$1 artifact_id=$2 source_path=$3 token
+  if [ ! -f "$ROOT/$source_path" ]; then
+    error "$owner_kind source path is missing: $source_path"
+    return
+  fi
+  while IFS= read -r token; do
+    [ -n "$token" ] || continue
+    if ! grep -Fq "$token" "$ROOT/$source_path"; then
+      error "$owner_kind source token is missing from $source_path: $token"
+    fi
+  done < <(jq -r --arg kind "$owner_kind" --arg id "$artifact_id" --arg path "$source_path" '.artifacts[] | select(.id == $id) | .[$kind][] | select(.path == $path) | .tokens[]' "$MANIFEST")
+}
+
+require_file "$MANIFEST"
+require_file "$INVENTORY"
+require_file "$PLAN"
+
+if [ -f "$MANIFEST" ] && jq empty "$MANIFEST" >/dev/null 2>&1; then
+  if ! jq -e '.schema == "omp-publication-inventory.v1" and .version == 1 and .source_document == "docs/omp-publication-inventory.md" and (.tracked_paths | type == "array") and (.artifacts | type == "array")' "$MANIFEST" >/dev/null 2>&1; then
+    error "publication manifest schema is invalid"
+  else
+    INVENTORY_COUNT=$(jq '.artifacts | length' "$MANIFEST")
+    while IFS= read -r tracked_path; do
+      [ -n "$tracked_path" ] || continue
+      if ! git -C "$ROOT" ls-files --error-unmatch -- "$tracked_path" >/dev/null 2>&1; then
+        error "publication manifest tracked path is not tracked: $tracked_path"
+      fi
+      if [ ! -e "$ROOT/$tracked_path" ]; then
+        error "publication manifest tracked path is missing from the worktree: $tracked_path"
+      fi
+    done < <(jq -r '.tracked_paths[]' "$MANIFEST")
+
+    while IFS= read -r artifact_id; do
+      [ -n "$artifact_id" ] || continue
+      require_inventory_token "\`$artifact_id\`"
+      if ! jq -e --arg id "$artifact_id" '.artifacts[] | select(.id == $id) | (.paths | length > 0) and (.creator | length > 0) and (.cleanup | length > 0) and ((.rollback_owner | length) > 0) and (.evidence_schema == "omp-evidence.v1" or .evidence_schema == "omp-activation-preflight.v1") and ((.rollback_schema | length) > 0)' "$MANIFEST" >/dev/null 2>&1; then
+        error "publication artifact lacks paths, creator, cleanup, rollback owner, or schemas: $artifact_id"
+      fi
+      while IFS= read -r artifact_path; do
+        [ -n "$artifact_path" ] || continue
+        require_inventory_token "$artifact_path"
+      done < <(jq -r --arg id "$artifact_id" '.artifacts[] | select(.id == $id) | .paths[]' "$MANIFEST")
+      while IFS= read -r source_path; do
+        [ -n "$source_path" ] || continue
+        require_source_binding creator "$artifact_id" "$source_path"
+      done < <(jq -r --arg id "$artifact_id" '.artifacts[] | select(.id == $id) | .creator[].path' "$MANIFEST")
+      while IFS= read -r source_path; do
+        [ -n "$source_path" ] || continue
+        require_source_binding cleanup "$artifact_id" "$source_path"
+      done < <(jq -r --arg id "$artifact_id" '.artifacts[] | select(.id == $id) | .cleanup[].path' "$MANIFEST")
+    done < <(jq -r '.artifacts[].id' "$MANIFEST" | sort -u)
+
+    INVENTORY_TICK=$(printf '\140')
+    while IFS= read -r document_id; do
+      [ -n "$document_id" ] || continue
+      if ! jq -e --arg id "$document_id" '.artifacts | map(.id) | index($id) != null' "$MANIFEST" >/dev/null 2>&1; then
+        error "publication document has an unregistered inventory ID: $document_id"
+      fi
+    done < <(grep -oE "^\\| ${INVENTORY_TICK}[a-z0-9-]+${INVENTORY_TICK} \\|" "$INVENTORY" | sed -E "s/^\\| ${INVENTORY_TICK}//; s/${INVENTORY_TICK} \\|$//" | sort -u)
+  fi
 else
-  INVENTORY_COUNT=$(grep -c '^|[^-].*|' "$INVENTORY" || true)
-  for token in \
-    'bin/fm-session-lock-lib.sh' \
-    'tests/fm-session-lock.test.sh' \
-    'bin/fm-backend.sh' \
-    'bin/backends/tmux.sh' \
-    'bin/backends/herdr.sh' \
-    'bin/fm-crew-state.sh' \
-    'state/{task}.pi-ext' \
-    'state/{task}.grok-token' \
-    'state/{task}.grok-token.pointer' \
-    'projects/{project}/.claude/settings.local.json' \
-    'projects/{project}/.opencode/plugins/' \
-    'state/{task}.check.sh' \
-    'state/{task}.check-trust' \
-    'state/{task}.pr-poll' \
-    'state/{task}.pr-poll-registration' \
-    'state/{task}.pr-publication' \
-    'state/{task}.pr-binding' \
-    'state/.pr-check-quarantine/' \
-    'state/{task}.herdr-presentation' \
-    'state/{task}.backend-transition' \
-    'state/{task}.task-temp' \
-    'data/omp-evidence/{task_id}.json' \
-    'data/omp-rollback/{task_id}.json' \
-    'data/omp-activation-preflight.json' \
-    'data/omp-activation-receipt.json'; do
-    require_inventory_token "$token"
-  done
-  for owner in 'Creation owner' 'Cleanup owner' 'Rollback owner' 'omp-evidence.v1' 'omp-rollback.v1'; do
-    require_inventory_token "$owner"
-  done
+  error "publication manifest is missing or invalid JSON: $MANIFEST"
 fi
 
-if [ ! -f "$PLAN" ]; then
-  error "missing OMP plan: $PLAN"
-else
-  for token in 'docs/omp-publication-inventory.md' 'bin/fm-omp-publication-check.sh' 'V29' 'atomic' 'rollback'; do
+if [ -f "$PLAN" ]; then
+  for token in 'docs/omp-publication-inventory.md' '.agents/tasks/omp-publication-manifest.json' 'bin/fm-omp-publication-check.sh' 'V29' 'atomic' 'rollback'; do
     if ! grep -Fq "$token" "$PLAN"; then
       error "OMP plan does not reference publication invariant token: $token"
     fi
@@ -123,7 +157,7 @@ else
     printf 'BLOCK\n'
     printf '%s\n' "${ERRORS[@]}" >&2
   else
-    printf 'PASS: publication inventory and interruption invariant validated\n'
+    printf 'PASS: publication manifest, source ownership, and interruption invariant validated\n'
   fi
 fi
 

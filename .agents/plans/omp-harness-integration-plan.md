@@ -194,9 +194,9 @@ The roadmap is prose and must never be passed to `tasks-axi render`.
 
 The parseable current-record file is `.agents/tasks/backlog.md`, and the live operational backlog is `data/backlog.md`.
 
-The tested Tasks Axi executable is `/opt/homebrew/bin/tasks-axi` version `0.2.3`.
+The validated Tasks Axi executable is resolved from `PATH` and reports version `0.2.3`.
 
-The non-mutating validation commands are `/opt/homebrew/bin/tasks-axi list --file .agents/tasks/backlog.md`, `/opt/homebrew/bin/tasks-axi show <id> --file .agents/tasks/backlog.md --full`, `/opt/homebrew/bin/tasks-axi ready --file .agents/tasks/backlog.md`, and `git diff --exit-code -- .agents/tasks/backlog.md .agents/tasks/roadmap.md`.
+The non-mutating validation commands are `tasks-axi list --file .agents/tasks/backlog.md`, `tasks-axi show <id> --file .agents/tasks/backlog.md --full`, `tasks-axi ready --file .agents/tasks/backlog.md`, and `git diff --exit-code -- .agents/tasks/backlog.md .agents/tasks/roadmap.md`.
 
 `tasks-axi render` is permitted only on a disposable copy of the parseable backlog when a future tool-version check explicitly requires it, and the validation must still assert a clean Git diff afterward.
 
@@ -618,7 +618,7 @@ P8 rollback is a clean revert of the single publication commit in the staging pr
 
 ## Phase and task artifact inventory
 
-The exact current artifact classes, paths, creation owners, cleanup owners, rollback owners, and evidence schemas are owned by `docs/omp-publication-inventory.md` and checked by `bin/fm-omp-publication-check.sh`.
+The exact current artifact classes, paths, creation owners, cleanup owners, rollback owners, and evidence schemas are owned by `docs/omp-publication-inventory.md` and `.agents/tasks/omp-publication-manifest.json`, and checked by `bin/fm-omp-publication-check.sh`.
 
 The task rows below remain the phase-scoped ownership summary; no row may narrow or replace the exact inventory document.
 
@@ -626,7 +626,7 @@ Every task report must include the complete row for its task ID, with `not creat
 
 | Task IDs | Artifact, owner, process, and path inventory | Cleanup and rollback proof |
 | --- | --- | --- |
-| `omp-o5-plan-traceability`, `omp-final-plan-redteam-o6`, `omp-plan-block-corrections-o7`, `omp-corrected-plan-redteam-o8` | Owner: planning worker; processes: Markdown/link checker, `/opt/homebrew/bin/tasks-axi` 0.2.3, Git; paths: `.agents/plans/omp-harness-integration-plan.md`, `.agents/tasks/roadmap.md`, `.agents/tasks/backlog.md`, report paths under `data/`, and a unique disposable validation copy. | No runtime, backend, HOME, profile, cache, lock, wake, extension, hook, or Herdr artifacts are permitted; delete only the disposable copy, assert `git diff --exit-code`, and revert the focused documentation commit if the post-edit DOX or validation pass fails. |
+| `omp-o5-plan-traceability`, `omp-final-plan-redteam-o6`, `omp-plan-block-corrections-o7`, `omp-corrected-plan-redteam-o8` | Owner: planning worker; processes: Markdown/link checker, `tasks-axi` 0.2.3 resolved from PATH, Git; paths: `.agents/plans/omp-harness-integration-plan.md`, `.agents/tasks/roadmap.md`, `.agents/tasks/backlog.md`, report paths under `data/`, and a unique disposable validation copy. | No runtime, backend, HOME, profile, cache, lock, wake, extension, hook, or Herdr artifacts are permitted; delete only the disposable copy, assert `git diff --exit-code`, and revert the focused documentation commit if the post-edit DOX or validation pass fails. |
 | `omp-p1-activation-a7` | Owner: activation gate; processes: Tasks Axi and the gate validator only; paths: `.agents/tasks/backlog.md`, `data/backlog.md`, corrected-plan report, decision-hold record, current branch/commit, and a unique activation evidence directory. | The default outcome is refusal; no P1-P8 row, runtime process, backend, HOME, profile/cache, package, lock, wake, extension, hook, or Herdr artifact may exist on refusal, and a failed staged activation is removed by restoring the preflight backlog bytes. |
 | `omp-p1-runtime-pin`, `omp-p1-discovery-isolation`, `omp-p1-identity-ancestry` | Owner: respective P1 evidence task; processes: pinned OMP, Bun helpers, hash/link/parser commands, and descendants; paths: task-unique `HOME`, all XDG roots, `TMPDIR`, `OMP_PROFILE`, session/socket/log/evidence/package roots, and read-only source copy. | The simultaneous realpath inventory must be empty across tasks; kill only recorded descendants, remove task-local state, profiles, caches, locks, wakes, sessions, sockets, logs, packages, and evidence, and leave the installed runtime and support policy untouched. |
 | `omp-p2-experimental-launch`, `omp-p2-identity-adapter`, `omp-p2-extension-handshake`, `omp-p2-thinking-state` | Owner: launcher, identity, handshake, and state tasks; processes: OMP host, shell descendants, helper and checker processes; paths: task `FM_HOME`, `state/<task-id>.*`, generated extension and hook, immutable extension/package root, profile/cache, lock, wake, tmux socket/session, log, and evidence. | Record process descendants before launch, run the real task cleanup path, verify no state or generated hook/extension remains, and restore pre-task identity/launch behavior without changing allowlists or support state. |

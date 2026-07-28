@@ -1,0 +1,116 @@
+{
+  "schema": "omp-publication-inventory.v1",
+  "version": 1,
+  "source_document": "docs/omp-publication-inventory.md",
+  "tracked_paths": [
+    "bin/fm-session-lock-lib.sh",
+    "bin/fm-lock.sh",
+    "tests/fm-session-lock.test.sh",
+    "bin/fm-backend.sh",
+    "bin/backends/tmux.sh",
+    "bin/backends/herdr.sh",
+    "bin/fm-crew-state.sh",
+    "bin/fm-spawn.sh",
+    "bin/fm-teardown.sh",
+    "bin/fm-pr-check.sh",
+    "bin/fm-pr-lib.sh",
+    "bin/fm-check-register.sh",
+    "bin/fm-pr-check-migrate.sh",
+    "bin/fm-omp-activation.sh",
+    "bin/fm-omp-publication-check.sh",
+    "tests/fm-omp-publication-check.test.sh",
+    "docs/omp-publication-inventory.md"
+  ],
+  "artifacts": [
+    {
+      "id": "shared-lock-identity",
+      "paths": ["bin/fm-session-lock-lib.sh", "bin/fm-lock.sh", "tests/fm-session-lock.test.sh"],
+      "creator": [{"path": "bin/fm-session-lock-lib.sh", "tokens": ["FM_HARNESS_RE"]}],
+      "cleanup": [{"path": "bin/fm-lock.sh", "tokens": ["fm_lock_release"]}],
+      "rollback_owner": "omp-p2-identity-adapter",
+      "evidence_schema": "omp-evidence.v1",
+      "rollback_schema": "omp-rollback.v1"
+    },
+    {
+      "id": "backend-liveness",
+      "paths": ["bin/fm-backend.sh", "bin/backends/tmux.sh", "bin/backends/herdr.sh", "bin/fm-crew-state.sh"],
+      "creator": [{"path": "bin/fm-backend.sh", "tokens": ["fm_backend_agent_alive"]}],
+      "cleanup": [{"path": "bin/fm-teardown.sh", "tokens": ["teardown"]}],
+      "rollback_owner": "omp-p7-recovery",
+      "evidence_schema": "omp-evidence.v1",
+      "rollback_schema": "omp-rollback.v1"
+    },
+    {
+      "id": "pi-worker-hooks",
+      "paths": ["state/{task}.pi-ext", "projects/{project}/.pi/settings.json", "projects/{project}/.pi/extensions/"],
+      "creator": [{"path": "bin/fm-spawn.sh", "tokens": ["__PIEXT__"]}],
+      "cleanup": [{"path": "bin/fm-teardown.sh", "tokens": ["pi-ext.ts"]}],
+      "rollback_owner": "omp-p8-policy-publication",
+      "evidence_schema": "omp-evidence.v1",
+      "rollback_schema": "omp-rollback.v1"
+    },
+    {
+      "id": "grok-authentication",
+      "paths": ["state/{task}.grok-token", "state/{task}.grok-token.pointer", "projects/{project}/.grok/"],
+      "creator": [{"path": "bin/fm-spawn.sh", "tokens": ["grok-turnend-token"]}],
+      "cleanup": [{"path": "bin/fm-teardown.sh", "tokens": ["grok-turnend-token"]}],
+      "rollback_owner": "omp-p8-policy-publication",
+      "evidence_schema": "omp-evidence.v1",
+      "rollback_schema": "omp-rollback.v1"
+    },
+    {
+      "id": "global-worktree-hooks",
+      "paths": ["~/.config/grok/hooks/", "projects/{project}/.claude/settings.local.json", "projects/{project}/.opencode/plugins/"],
+      "creator": [{"path": "bin/fm-spawn.sh", "tokens": ["GROK_HOOKS_DIR"]}],
+      "cleanup": [{"path": "bin/fm-teardown.sh", "tokens": ["hooks_dir"]}],
+      "rollback_owner": "omp-p8-policy-publication",
+      "evidence_schema": "omp-evidence.v1",
+      "rollback_schema": "omp-rollback.v1"
+    },
+    {
+      "id": "pr-check-publication",
+      "paths": ["state/{task}.check.sh", "state/{task}.check-trust", "state/{task}.pr-poll", "state/{task}.pr-poll-registration", "state/{task}.pr-publication", "state/{task}.pr-binding", "state/.pr-check-quarantine/", "state/.pr-check-migration.log"],
+      "creator": [{"path": "bin/fm-pr-check.sh", "tokens": ["fm_pr_poll_prepare"]}, {"path": "bin/fm-check-register.sh", "tokens": ["check-trust"]}, {"path": "bin/fm-pr-check-migrate.sh", "tokens": ["LOG=\"$STATE/.pr-check-migration.log\"", "record_diagnostic"]}],
+      "cleanup": [{"path": "bin/fm-teardown.sh", "tokens": ["pr-poll"]}],
+      "rollback_owner": "omp-p8-policy-publication",
+      "evidence_schema": "omp-evidence.v1",
+      "rollback_schema": "omp-rollback.v1"
+    },
+    {
+      "id": "herdr-presentation-journal",
+      "paths": ["state/{task}.herdr-presentation"],
+      "creator": [{"path": "bin/backends/herdr.sh", "tokens": [".herdr-presentation"]}],
+      "cleanup": [{"path": "bin/fm-teardown.sh", "tokens": ["HERDR_PRESENTATION_JOURNAL"]}],
+      "rollback_owner": "omp-p5-herdr-parity",
+      "evidence_schema": "omp-evidence.v1",
+      "rollback_schema": "omp-rollback.v1"
+    },
+    {
+      "id": "transition-and-task-temp",
+      "paths": ["state/{task}.backend-transition", "state/{task}.task-temp", "state/{task}.turn-ended", "state/{task}.grok-turnend-token"],
+      "creator": [{"path": "bin/fm-spawn.sh", "tokens": ["GOTMPDIR", ".turn-ended"]}],
+      "cleanup": [{"path": "bin/fm-teardown.sh", "tokens": ["turn-ended"]}],
+      "rollback_owner": "omp-p3-cleanup-live",
+      "evidence_schema": "omp-evidence.v1",
+      "rollback_schema": "omp-rollback.v1"
+    },
+    {
+      "id": "omp-evidence-and-rollback",
+      "paths": ["data/omp-evidence/{task_id}.json", "data/omp-rollback/{task_id}.json"],
+      "creator": [{"path": "bin/fm-omp-activation.sh", "tokens": ["omp-evidence"]}],
+      "cleanup": [{"path": "bin/fm-omp-activation.sh", "tokens": ["omp-rollback"]}],
+      "rollback_owner": "task owner from omp-manifest.json",
+      "evidence_schema": "omp-evidence.v1",
+      "rollback_schema": "omp-rollback.v1"
+    },
+    {
+      "id": "omp-activation-records",
+      "paths": ["data/omp-activation-preflight.json", "data/omp-activation-receipt.json"],
+      "creator": [{"path": "bin/fm-omp-activation.sh", "tokens": ["omp-activation-preflight", "omp-activation-receipt"]}],
+      "cleanup": [{"path": "bin/fm-omp-activation.sh", "tokens": ["activation receipt"]}],
+      "rollback_owner": "omp-p1-activation-a7",
+      "evidence_schema": "omp-activation-preflight.v1",
+      "rollback_schema": "omp-activation-receipt.v1"
+    }
+  ]
+}
