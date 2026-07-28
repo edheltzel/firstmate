@@ -204,16 +204,15 @@ test_secondmate_launch_keeps_home_relocation_and_selector_scrub() {
 
 test_worker_git_identity_records_atlas_commit_and_cleans_task_config() {
   local rec id out status worker_config global_before global_after author gpg_header
+  local primary_name_before primary_email_before primary_signing_before
+  local primary_name_after primary_email_after primary_signing_after
   id=git-identity-real-z19
   rec=$(make_spawn_case git-identity-real claude "$id")
   read_case_record "$rec"
   global_before=$(git config --global --show-origin --list 2>/dev/null || true)
-  [ "$(git config --global user.name)" = "Ed Heltzel" ] \
-    || fail "primary Git name changed before worker launch"
-  [ "$(git config --global user.email)" = "402910+edheltzel@users.noreply.github.com" ] \
-    || fail "primary Git email changed before worker launch"
-  [ "$(git config --global --type bool commit.gpgSign)" = "true" ] \
-    || fail "primary Git signing policy changed before worker launch"
+  primary_name_before=$(git config --global --get user.name 2>/dev/null || true)
+  primary_email_before=$(git config --global --get user.email 2>/dev/null || true)
+  primary_signing_before=$(git config --global --type bool --get commit.gpgSign 2>/dev/null || true)
 
   out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
   status=$?
@@ -235,6 +234,15 @@ test_worker_git_identity_records_atlas_commit_and_cleans_task_config() {
   [ ! -e "$WT_DIR/.fm-worker-gitconfig" ] || fail "worker identity material leaked into the project worktree"
   global_after=$(git config --global --show-origin --list 2>/dev/null || true)
   [ "$global_before" = "$global_after" ] || fail "worker launch changed the primary global Git config"
+  primary_name_after=$(git config --global --get user.name 2>/dev/null || true)
+  primary_email_after=$(git config --global --get user.email 2>/dev/null || true)
+  primary_signing_after=$(git config --global --type bool --get commit.gpgSign 2>/dev/null || true)
+  [ "$primary_name_before" = "$primary_name_after" ] \
+    || fail "worker launch changed the primary Git name"
+  [ "$primary_email_before" = "$primary_email_after" ] \
+    || fail "worker launch changed the primary Git email"
+  [ "$primary_signing_before" = "$primary_signing_after" ] \
+    || fail "worker launch changed the primary Git signing policy"
   pass "worker Git config records unsigned Atlas attribution, survives a real linked-worktree commit, and is cleaned with the task"
 }
 
