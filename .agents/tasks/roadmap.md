@@ -4,6 +4,10 @@ This file is the committed prose roadmap for the OMP work and is not a Tasks Axi
 
 The canonical contract is `.agents/plans/omp-harness-integration-plan.md`.
 
+The machine-readable task contract is `.agents/tasks/omp-manifest.json`.
+
+`bin/fm-omp-plan-check.sh --json` is the non-mutating validator for task IDs, dependency closure, cycles, roadmap parity, plan cross-references, stable evidence IDs, rollback IDs, and Tasks Axi parsing.
+
 The plan owns the full requirement, architecture, evidence, validation, hard-stop, and decision text.
 
 This roadmap owns stable task IDs, phase order, dependencies, activation state, acceptance pointers, artifact inventories, and captain-facing progress fields.
@@ -36,11 +40,19 @@ Activation must not add OMP to verified allowlists, normal dispatch, primary sup
 
 The activation gate must refuse on `BLOCK`, `CONDITIONAL PASS`, a missing report, a stale report hash, an unverified decision hold, an unexpected P1-P8 row, a dirty tracked tree, or any open STOP row.
 
+`bin/fm-omp-activation.sh` is non-mutating by default and owns the guarded atomic backlog publication used only after every refusal condition passes.
+
+The activation control records use stable schemas: `omp-captain-authorization.v1`, `omp-decision-inventory.v1`, `omp-stop-ledger.v1`, `omp-activation-preflight.v1`, and `omp-activation-receipt.v1`.
+
+The preflight binds the corrected-plan report hash, tracked and live backlog byte hashes, live branch, live commit, clean tree, empty decision and STOP sets, and the unchanged support fence.
+
 The only support labels available before final P8 publication are `experimental worker-only` and `provisional tmux worker`.
 
 The exact experimental result label is `experimental tmux worker; unverified; no primary, secondmate, recovery, or Herdr support`.
 
 The tested Tasks Axi executable is `/opt/homebrew/bin/tasks-axi` version `0.2.3`.
+
+The exact publication and cleanup classes are owned by `docs/omp-publication-inventory.md` and checked by `bin/fm-omp-publication-check.sh`.
 
 Non-mutating checks are `/opt/homebrew/bin/tasks-axi list --file .agents/tasks/backlog.md`, `/opt/homebrew/bin/tasks-axi show <id> --file .agents/tasks/backlog.md --full`, `/opt/homebrew/bin/tasks-axi ready --file .agents/tasks/backlog.md`, and `git diff --exit-code -- .agents/tasks/backlog.md .agents/tasks/roadmap.md`.
 
@@ -56,33 +68,33 @@ Non-mutating checks are `/opt/homebrew/bin/tasks-axi list --file .agents/tasks/b
 
 | Phase | Milestone | Task ID | Dependencies | State | Evidence and acceptance pointer | Plan section |
 | --- | --- | --- | --- | --- | --- | --- |
-| P0 | Landed plan traceability correction | `omp-o5-plan-traceability` | none | complete in `967b1dc`, `a070dff`, `44a92ce`, `29511e5`, `cd3c826`, `da558ff` | C01-C25 compliance matrix, V01-V25 validation matrix, STOP-01 through STOP-12, and clean docs checks | P0 |
-| P0 | Independent second Red Team | `omp-final-plan-redteam-o6` | `omp-o5-plan-traceability` | complete 2026-07-27 with `BLOCK` | `data/omp-final-plan-redteam-o6/report.md`, every C01-C25 row, every task, dependency, gate, rollback, evidence row, progress field, and decision classification | P0 |
-| P0 | Correct O6 plan-block corrections | `omp-plan-block-corrections-o7` | `omp-final-plan-redteam-o6` | current planning/tracking correction | O6 S0/S1 mandatory corrections, artifact inventory, current-code map, and no runtime/support changes | P0 |
-| P0 | Corrected-plan Red Team | `omp-corrected-plan-redteam-o8` | `omp-plan-block-corrections-o7` | queued validation | Every O6 correction, V26-V29, activation gate, and no premature implementation row | P0 |
-| P1 | Fail-closed implementation activation | `omp-p1-activation-a7` | `omp-corrected-plan-redteam-o8` and captain authorization 2026-07-27 | queued, blocked until O8 `PASS` | Refuse unless O8 is `PASS` with no plan-blocking finding, the hold verifies, the tree is clean, and no P1-P8 task is active | P1 |
-| P1 | Runtime identity ledger | `omp-p1-runtime-pin` | `omp-p1-activation-a7` | planned, manifest-only | REQ-EVID-01, REQ-LINK-01, V01, V24, dependency hashes | P1 |
-| P1 | Discovery and flag safety ledger | `omp-p1-discovery-isolation` | `omp-p1-activation-a7` | planned, manifest-only | REQ-DISC-01, REQ-DISC-02, V02, V03, STOP-01, immutable loading contract | P1 |
-| P1 | Host ancestry identity ledger | `omp-p1-identity-ancestry` | `omp-p1-activation-a7` | planned, manifest-only | REQ-ID-01, REQ-ID-02, V04, STOP-03 | P1 |
-| P2 | Experimental worker launcher | `omp-p2-experimental-launch` | all P1 tasks | planned, manifest-only | REQ-SCOPE-01, REQ-DISC-01, V02, V03, P2 worker-only contract | P2 |
-| P2 | Executable OMP identity and environment adapter | `omp-p2-identity-adapter` | `omp-p1-runtime-pin`, `omp-p1-identity-ancestry`, and `omp-p1-activation-a7` | planned, manifest-only; blocks P6/P7 eligibility | REQ-ID-01, REQ-ID-02, V04, STOP-03; owns harness, lock, spawn environment, and bootstrap liveness implementation | P2 |
-| P2 | Mandatory extension handshake | `omp-p2-extension-handshake` | `omp-p2-experimental-launch` | planned, manifest-only | REQ-EXT-01, REQ-EXT-02, V05, V06, V07, STOP-02 | P2 |
-| P2 | Effective thinking-state gate | `omp-p2-thinking-state` | `omp-p2-experimental-launch` | planned, manifest-only | REQ-STATE-01, V08, STOP-04 | P2 |
-| P3 | Native RPC lifecycle adapter | `omp-p3-rpc-lifecycle` | `omp-p2-identity-adapter`, `omp-p2-experimental-launch`, and handshake preflight | planned, manifest-only | REQ-RPC-01, REQ-RPC-02, V09, V10, V11, V12 | P3 |
-| P3 | Continuation and follow-up failure semantics | `omp-p3-continuation-followup` | `omp-p3-rpc-lifecycle` | planned, manifest-only | REQ-CONT-01, REQ-FOLLOW-01, V13, V14, STOP-05 | P3 |
-| P3 | Real worker normal and abort E2E | `omp-p3-worker-live` | `omp-p2-extension-handshake`, `omp-p2-thinking-state`, `omp-p3-continuation-followup` | planned, manifest-only | REQ-RPC-02, REQ-LIVE-01, V10, V12, V15 | P3 |
-| P3 | Real worker cleanup E2E | `omp-p3-cleanup-live` | `omp-p3-worker-live` | planned, manifest-only | REQ-CLEAN-01, REQ-CLEAN-02, V21, V22, STOP-09 | P3 |
-| P3 | Focused and full regression loop | `omp-p3-regression` | `omp-p3-cleanup-live` | planned, manifest-only | REQ-REG-01, V23, full `tests/*.test.sh` loop, applicable lint, pinned Bun/TypeScript and dependency checks | P3 |
-| P4 | Tmux OMP ancestry and liveness classifier | `omp-p4-tmux-classifier` | `omp-p3-regression` | planned, manifest-only | REQ-BACKEND-01, V16, STOP-06 | P4 |
-| P4 | Provisional tmux worker evidence | `omp-p4-tmux-provisional` | `omp-p4-tmux-classifier`, `omp-p3-worker-live` | planned, manifest-only | REQ-SCOPE-01, REQ-LIVE-01, V16, V25, provisional label | P4 |
-| P5 | Herdr lifecycle parity | `omp-p5-herdr-parity` | `omp-p4-tmux-provisional` | planned, manifest-only | REQ-BACKEND-02, V17, STOP-06, STOP-08 | P5 |
-| P6 | Primary continuity and supervision | `omp-p6-supervision-continuity` | `omp-p5-herdr-parity` and `omp-p2-identity-adapter` | planned, manifest-only | REQ-WATCH-01, V18, STOP-05; identity owner must be complete first | P6 |
-| P6 | Startup policy and supervision protocol | `omp-p6-startup-policy` | `omp-p6-supervision-continuity` | planned, manifest-only | REQ-EXT-02, REQ-SCOPE-01, V18, V25 | P6 |
-| P7 | Two-home isolation | `omp-p7-two-home-isolation` | `omp-p6-startup-policy` and `omp-p2-identity-adapter` | planned, manifest-only | REQ-HOME-01, V19, STOP-07; identity owner must be complete first | P7 |
-| P7 | Sole-owner recovery | `omp-p7-recovery` | `omp-p7-two-home-isolation` | planned, manifest-only | REQ-REC-01, V20, STOP-06, STOP-07 | P7 |
-| P7 | Complete cleanup and refusal matrix | `omp-p7-cleanup-complete` | `omp-p7-recovery` | planned, manifest-only | REQ-CLEAN-01, REQ-CLEAN-02, V21, V22, STOP-09 | P7 |
-| P8 | Full live and repository verification | `omp-p8-full-validation` | all P7 tasks | planned, manifest-only | REQ-REG-01, REQ-LIVE-01, V17-V29, STOP-10, STOP-11, STOP-12 | P8 |
-| P8 | First-class policy and documentation publication | `omp-p8-policy-publication` | `omp-p8-full-validation` and no open stop | planned, manifest-only | REQ-SCOPE-01, REQ-MAP-01, REQ-DOC-01, REQ-MON-01, V25-V29, all C01-C25, exact inventory and revert proof | P8 |
+| P0 | Landed plan traceability correction | `omp-o5-plan-traceability` | none | complete in `967b1dc`, `a070dff`, `44a92ce`, `29511e5`, `cd3c826`, `da558ff` | `omp-evidence-omp-o5-plan-traceability`; V26,V27; `omp-rollback-omp-o5-plan-traceability` | P0 |
+| P0 | Independent second Red Team | `omp-final-plan-redteam-o6` | `omp-o5-plan-traceability` | complete 2026-07-27 with `BLOCK` | `omp-evidence-omp-final-plan-redteam-o6`; V26,V27,V28; `omp-rollback-omp-final-plan-redteam-o6` | P0 |
+| P0 | Correct O6 plan-block corrections | `omp-plan-block-corrections-o7` | `omp-final-plan-redteam-o6` | current planning/tracking correction | `omp-evidence-omp-plan-block-corrections-o7`; V26,V27,V28; `omp-rollback-omp-plan-block-corrections-o7` | P0 |
+| P0 | Corrected-plan Red Team | `omp-corrected-plan-redteam-o8` | `omp-plan-block-corrections-o7` | queued validation | `omp-evidence-omp-corrected-plan-redteam-o8`; V26,V27,V28,V29; `omp-rollback-omp-corrected-plan-redteam-o8` | P0 |
+| P1 | Fail-closed implementation activation | `omp-p1-activation-a7` | `omp-corrected-plan-redteam-o8` | queued, blocked until O8 `PASS` and authorization `captain-omp-implementation-authorization-2026-07-27` | `omp-evidence-omp-p1-activation-a7`; V26,V27,V28,V29; `omp-rollback-omp-p1-activation-a7` | P1 |
+| P1 | Runtime identity ledger | `omp-p1-runtime-pin` | `omp-p1-activation-a7` | planned, manifest-only | `omp-evidence-omp-p1-runtime-pin`; V01,V03,V26; `omp-rollback-omp-p1-runtime-pin` | P1 |
+| P1 | Discovery and flag safety ledger | `omp-p1-discovery-isolation` | `omp-p1-activation-a7` | planned, manifest-only | `omp-evidence-omp-p1-discovery-isolation`; V02,V03,V04,V26; `omp-rollback-omp-p1-discovery-isolation` | P1 |
+| P1 | Host ancestry identity ledger | `omp-p1-identity-ancestry` | `omp-p1-activation-a7` | planned, manifest-only | `omp-evidence-omp-p1-identity-ancestry`; V03,V04,V26; `omp-rollback-omp-p1-identity-ancestry` | P1 |
+| P2 | Experimental worker launcher | `omp-p2-experimental-launch` | `omp-p1-runtime-pin`, `omp-p1-discovery-isolation`, `omp-p1-identity-ancestry` | planned, manifest-only | `omp-evidence-omp-p2-experimental-launch`; V05-V10; `omp-rollback-omp-p2-experimental-launch` | P2 |
+| P2 | Executable OMP identity and environment adapter | `omp-p2-identity-adapter` | `omp-p1-runtime-pin`, `omp-p1-identity-ancestry` | planned, manifest-only; blocks P6/P7 eligibility | `omp-evidence-omp-p2-identity-adapter`; V03,V04,V05,V11; `omp-rollback-omp-p2-identity-adapter` | P2 |
+| P2 | Mandatory extension handshake | `omp-p2-extension-handshake` | `omp-p2-experimental-launch` | planned, manifest-only | `omp-evidence-omp-p2-extension-handshake`; V05,V06,V12,V13; `omp-rollback-omp-p2-extension-handshake` | P2 |
+| P2 | Effective thinking-state gate | `omp-p2-thinking-state` | `omp-p2-experimental-launch` | planned, manifest-only | `omp-evidence-omp-p2-thinking-state`; V05,V06,V14; `omp-rollback-omp-p2-thinking-state` | P2 |
+| P3 | Native RPC lifecycle adapter | `omp-p3-rpc-lifecycle` | `omp-p2-identity-adapter`, `omp-p2-experimental-launch`, `omp-p2-extension-handshake`, `omp-p2-thinking-state` | planned, manifest-only | `omp-evidence-omp-p3-rpc-lifecycle`; V15,V16,V17; `omp-rollback-omp-p3-rpc-lifecycle` | P3 |
+| P3 | Continuation and follow-up failure semantics | `omp-p3-continuation-followup` | `omp-p3-rpc-lifecycle` | planned, manifest-only | `omp-evidence-omp-p3-continuation-followup`; V18,V19; `omp-rollback-omp-p3-continuation-followup` | P3 |
+| P3 | Real worker normal and abort E2E | `omp-p3-worker-live` | `omp-p2-extension-handshake`, `omp-p2-thinking-state`, `omp-p3-continuation-followup` | planned, manifest-only | `omp-evidence-omp-p3-worker-live`; V20,V21; `omp-rollback-omp-p3-worker-live` | P3 |
+| P3 | Real worker cleanup E2E | `omp-p3-cleanup-live` | `omp-p3-worker-live` | planned, manifest-only | `omp-evidence-omp-p3-cleanup-live`; V22,V23; `omp-rollback-omp-p3-cleanup-live` | P3 |
+| P3 | Focused and full regression loop | `omp-p3-regression` | `omp-p3-cleanup-live` | planned, manifest-only | `omp-evidence-omp-p3-regression`; V24,V25; `omp-rollback-omp-p3-regression` | P3 |
+| P4 | Tmux OMP ancestry and liveness classifier | `omp-p4-tmux-classifier` | `omp-p3-regression` | planned, manifest-only | `omp-evidence-omp-p4-tmux-classifier`; V26; `omp-rollback-omp-p4-tmux-classifier` | P4 |
+| P4 | Provisional tmux worker evidence | `omp-p4-tmux-provisional` | `omp-p4-tmux-classifier`, `omp-p3-worker-live` | planned, manifest-only | `omp-evidence-omp-p4-tmux-provisional`; V26,V27; `omp-rollback-omp-p4-tmux-provisional` | P4 |
+| P5 | Herdr lifecycle parity | `omp-p5-herdr-parity` | `omp-p4-tmux-provisional` | planned, manifest-only | `omp-evidence-omp-p5-herdr-parity`; V26,V27; `omp-rollback-omp-p5-herdr-parity` | P5 |
+| P6 | Primary continuity and supervision | `omp-p6-supervision-continuity` | `omp-p5-herdr-parity`, `omp-p2-identity-adapter` | planned, manifest-only | `omp-evidence-omp-p6-supervision-continuity`; V26,V27; `omp-rollback-omp-p6-supervision-continuity` | P6 |
+| P6 | Startup policy and supervision protocol | `omp-p6-startup-policy` | `omp-p6-supervision-continuity` | planned, manifest-only | `omp-evidence-omp-p6-startup-policy`; V26,V27; `omp-rollback-omp-p6-startup-policy` | P6 |
+| P7 | Two-home isolation | `omp-p7-two-home-isolation` | `omp-p6-startup-policy`, `omp-p2-identity-adapter` | planned, manifest-only | `omp-evidence-omp-p7-two-home-isolation`; V26,V27; `omp-rollback-omp-p7-two-home-isolation` | P7 |
+| P7 | Sole-owner recovery | `omp-p7-recovery` | `omp-p7-two-home-isolation` | planned, manifest-only | `omp-evidence-omp-p7-recovery`; V26,V27; `omp-rollback-omp-p7-recovery` | P7 |
+| P7 | Complete cleanup and refusal matrix | `omp-p7-cleanup-complete` | `omp-p7-recovery` | planned, manifest-only | `omp-evidence-omp-p7-cleanup-complete`; V29; `omp-rollback-omp-p7-cleanup-complete` | P7 |
+| P8 | Full live and repository verification | `omp-p8-full-validation` | `omp-p7-cleanup-complete` | planned, manifest-only | `omp-evidence-omp-p8-full-validation`; V01-V29; `omp-rollback-omp-p8-full-validation` | P8 |
+| P8 | First-class policy and documentation publication | `omp-p8-policy-publication` | `omp-p8-full-validation` | planned, manifest-only | `omp-evidence-omp-p8-policy-publication`; V29; `omp-rollback-omp-p8-policy-publication` | P8 |
 
 ## Phase and dependency rules
 

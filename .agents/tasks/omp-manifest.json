@@ -1,0 +1,606 @@
+{
+  "schema": "omp-task-manifest.v1",
+  "version": 1,
+  "source_plan": ".agents/plans/omp-harness-integration-plan.md",
+  "source_roadmap": ".agents/tasks/roadmap.md",
+  "dependency_mode": "exact-task-ids",
+  "captain_authorization_id": "captain-omp-implementation-authorization-2026-07-27",
+  "activation_task_id": "omp-p1-activation-a7",
+  "activation_phase": "P1",
+  "activation_task_ids": [
+    "omp-p1-runtime-pin",
+    "omp-p1-discovery-isolation",
+    "omp-p1-identity-ancestry"
+  ],
+  "support_fence": "experimental tmux worker; unverified; no primary, secondmate, recovery, or Herdr support",
+  "current_task_ids": [
+    "omp-o5-plan-traceability",
+    "omp-final-plan-redteam-o6",
+    "omp-plan-block-corrections-o7",
+    "omp-corrected-plan-redteam-o8",
+    "omp-p1-activation-a7"
+  ],
+  "stop_ids": [
+    "STOP-01",
+    "STOP-02",
+    "STOP-03",
+    "STOP-04",
+    "STOP-05",
+    "STOP-06",
+    "STOP-07",
+    "STOP-08",
+    "STOP-09",
+    "STOP-10",
+    "STOP-11",
+    "STOP-12"
+  ],
+  "tasks": [
+    {
+      "phase": "P0",
+      "milestone": "Plan traceability",
+      "id": "omp-o5-plan-traceability",
+      "title": "OMP plan traceability",
+      "depends_on": [],
+      "validation_ids": ["V26", "V27"],
+      "evidence_ids": ["omp-evidence-omp-o5-plan-traceability"],
+      "rollback_id": "omp-rollback-omp-o5-plan-traceability",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "captain",
+      "state": "complete",
+      "blocked_by_stop_ids": []
+    },
+    {
+      "phase": "P0",
+      "milestone": "Independent O6 red team",
+      "id": "omp-final-plan-redteam-o6",
+      "title": "Final OMP plan red team",
+      "depends_on": ["omp-o5-plan-traceability"],
+      "validation_ids": ["V26", "V27", "V28"],
+      "evidence_ids": ["omp-evidence-omp-final-plan-redteam-o6"],
+      "rollback_id": "omp-rollback-omp-final-plan-redteam-o6",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "red-team",
+      "state": "complete",
+      "blocked_by_stop_ids": []
+    },
+    {
+      "phase": "P0",
+      "milestone": "O6 correction",
+      "id": "omp-plan-block-corrections-o7",
+      "title": "Correct OMP plan blockers",
+      "depends_on": ["omp-final-plan-redteam-o6"],
+      "validation_ids": ["V26", "V27", "V28"],
+      "evidence_ids": ["omp-evidence-omp-plan-block-corrections-o7"],
+      "rollback_id": "omp-rollback-omp-plan-block-corrections-o7",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "plan-owner",
+      "state": "complete",
+      "blocked_by_stop_ids": []
+    },
+    {
+      "phase": "P0",
+      "milestone": "O8 correction",
+      "id": "omp-corrected-plan-redteam-o8",
+      "title": "Correct OMP O8 blockers",
+      "depends_on": ["omp-plan-block-corrections-o7"],
+      "validation_ids": ["V26", "V27", "V28", "V29"],
+      "evidence_ids": ["omp-evidence-omp-corrected-plan-redteam-o8"],
+      "rollback_id": "omp-rollback-omp-corrected-plan-redteam-o8",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "promotion-worker",
+      "state": "in_flight",
+      "blocked_by_stop_ids": []
+    },
+    {
+      "phase": "P1",
+      "milestone": "Activation authority",
+      "id": "omp-p1-activation-a7",
+      "title": "Activate OMP Phase 1",
+      "depends_on": ["omp-corrected-plan-redteam-o8"],
+      "validation_ids": ["V26", "V27", "V28", "V29"],
+      "evidence_ids": ["omp-evidence-omp-p1-activation-a7"],
+      "rollback_id": "omp-rollback-omp-p1-activation-a7",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "captain",
+      "state": "blocked",
+      "blocked_by_stop_ids": ["STOP-01", "STOP-02", "STOP-03", "STOP-04", "STOP-05", "STOP-06", "STOP-07", "STOP-08", "STOP-09", "STOP-10", "STOP-11", "STOP-12"]
+    },
+    {
+      "phase": "P1",
+      "milestone": "Runtime pin",
+      "id": "omp-p1-runtime-pin",
+      "title": "Pin OMP and Bun runtime",
+      "depends_on": ["omp-p1-activation-a7"],
+      "validation_ids": ["V01", "V03", "V26"],
+      "evidence_ids": ["omp-evidence-omp-p1-runtime-pin"],
+      "rollback_id": "omp-rollback-omp-p1-runtime-pin",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P1 runtime owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-01", "STOP-02"]
+    },
+    {
+      "phase": "P1",
+      "milestone": "Discovery closure",
+      "id": "omp-p1-discovery-isolation",
+      "title": "Discover and isolate OMP extension closure",
+      "depends_on": ["omp-p1-activation-a7"],
+      "validation_ids": ["V02", "V03", "V04", "V26"],
+      "evidence_ids": ["omp-evidence-omp-p1-discovery-isolation"],
+      "rollback_id": "omp-rollback-omp-p1-discovery-isolation",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P1 discovery owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-01", "STOP-02"]
+    },
+    {
+      "phase": "P1",
+      "milestone": "Identity and ancestry",
+      "id": "omp-p1-identity-ancestry",
+      "title": "Prove OMP identity and process ancestry",
+      "depends_on": ["omp-p1-activation-a7"],
+      "validation_ids": ["V03", "V04", "V26"],
+      "evidence_ids": ["omp-evidence-omp-p1-identity-ancestry"],
+      "rollback_id": "omp-rollback-omp-p1-identity-ancestry",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P1 identity owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-03"]
+    },
+    {
+      "phase": "P2",
+      "milestone": "Experimental launch",
+      "id": "omp-p2-experimental-launch",
+      "title": "Launch isolated experimental OMP worker",
+      "depends_on": ["omp-p1-runtime-pin", "omp-p1-discovery-isolation", "omp-p1-identity-ancestry"],
+      "validation_ids": ["V05", "V06", "V07", "V08", "V09", "V10"],
+      "evidence_ids": ["omp-evidence-omp-p2-experimental-launch"],
+      "rollback_id": "omp-rollback-omp-p2-experimental-launch",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P2 launch owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-04", "STOP-05"]
+    },
+    {
+      "phase": "P2",
+      "milestone": "Identity adapter",
+      "id": "omp-p2-identity-adapter",
+      "title": "Adapt OMP identity at the worker boundary",
+      "depends_on": ["omp-p1-runtime-pin", "omp-p1-identity-ancestry"],
+      "validation_ids": ["V03", "V04", "V05", "V11"],
+      "evidence_ids": ["omp-evidence-omp-p2-identity-adapter"],
+      "rollback_id": "omp-rollback-omp-p2-identity-adapter",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P2 identity adapter owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-03", "STOP-06"]
+    },
+    {
+      "phase": "P2",
+      "milestone": "Extension handshake",
+      "id": "omp-p2-extension-handshake",
+      "title": "Prove extension registration and handshake",
+      "depends_on": ["omp-p2-experimental-launch"],
+      "validation_ids": ["V05", "V06", "V12", "V13"],
+      "evidence_ids": ["omp-evidence-omp-p2-extension-handshake"],
+      "rollback_id": "omp-rollback-omp-p2-extension-handshake",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P2 extension owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-01", "STOP-02", "STOP-07"]
+    },
+    {
+      "phase": "P2",
+      "milestone": "Effective state",
+      "id": "omp-p2-thinking-state",
+      "title": "Validate effective model and thinking state",
+      "depends_on": ["omp-p2-experimental-launch"],
+      "validation_ids": ["V05", "V06", "V14"],
+      "evidence_ids": ["omp-evidence-omp-p2-thinking-state"],
+      "rollback_id": "omp-rollback-omp-p2-thinking-state",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P2 state owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-08"]
+    },
+    {
+      "phase": "P3",
+      "milestone": "RPC lifecycle",
+      "id": "omp-p3-rpc-lifecycle",
+      "title": "Validate live RPC lifecycle",
+      "depends_on": ["omp-p2-identity-adapter", "omp-p2-experimental-launch", "omp-p2-extension-handshake", "omp-p2-thinking-state"],
+      "validation_ids": ["V15", "V16", "V17"],
+      "evidence_ids": ["omp-evidence-omp-p3-rpc-lifecycle"],
+      "rollback_id": "omp-rollback-omp-p3-rpc-lifecycle",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P3 RPC owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-04", "STOP-08"]
+    },
+    {
+      "phase": "P3",
+      "milestone": "RPC continuation",
+      "id": "omp-p3-continuation-followup",
+      "title": "Validate continuation and follow-up RPC",
+      "depends_on": ["omp-p3-rpc-lifecycle"],
+      "validation_ids": ["V18", "V19"],
+      "evidence_ids": ["omp-evidence-omp-p3-continuation-followup"],
+      "rollback_id": "omp-rollback-omp-p3-continuation-followup",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P3 continuation owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-08"]
+    },
+    {
+      "phase": "P3",
+      "milestone": "Live worker",
+      "id": "omp-p3-worker-live",
+      "title": "Validate a live OMP worker",
+      "depends_on": ["omp-p2-extension-handshake", "omp-p2-thinking-state", "omp-p3-continuation-followup"],
+      "validation_ids": ["V20", "V21"],
+      "evidence_ids": ["omp-evidence-omp-p3-worker-live"],
+      "rollback_id": "omp-rollback-omp-p3-worker-live",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P3 worker owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-04", "STOP-05", "STOP-09"]
+    },
+    {
+      "phase": "P3",
+      "milestone": "Live cleanup",
+      "id": "omp-p3-cleanup-live",
+      "title": "Validate live cleanup and teardown",
+      "depends_on": ["omp-p3-worker-live"],
+      "validation_ids": ["V22", "V23"],
+      "evidence_ids": ["omp-evidence-omp-p3-cleanup-live"],
+      "rollback_id": "omp-rollback-omp-p3-cleanup-live",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P3 cleanup owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-10"]
+    },
+    {
+      "phase": "P3",
+      "milestone": "Regression lifecycle",
+      "id": "omp-p3-regression",
+      "title": "Run lifecycle regression coverage",
+      "depends_on": ["omp-p3-cleanup-live"],
+      "validation_ids": ["V24", "V25"],
+      "evidence_ids": ["omp-evidence-omp-p3-regression"],
+      "rollback_id": "omp-rollback-omp-p3-regression",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P3 regression owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-10", "STOP-11"]
+    },
+    {
+      "phase": "P4",
+      "milestone": "Dispatch classification",
+      "id": "omp-p4-tmux-classifier",
+      "title": "Classify the experimental tmux worker",
+      "depends_on": ["omp-p3-regression"],
+      "validation_ids": ["V26"],
+      "evidence_ids": ["omp-evidence-omp-p4-tmux-classifier"],
+      "rollback_id": "omp-rollback-omp-p4-tmux-classifier",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P4 classifier owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-04", "STOP-05", "STOP-12"]
+    },
+    {
+      "phase": "P4",
+      "milestone": "Provisional dispatch",
+      "id": "omp-p4-tmux-provisional",
+      "title": "Enable provisional experimental dispatch",
+      "depends_on": ["omp-p4-tmux-classifier", "omp-p3-worker-live"],
+      "validation_ids": ["V26", "V27"],
+      "evidence_ids": ["omp-evidence-omp-p4-tmux-provisional"],
+      "rollback_id": "omp-rollback-omp-p4-tmux-provisional",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P4 dispatch owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-12"]
+    },
+    {
+      "phase": "P5",
+      "milestone": "Herdr parity",
+      "id": "omp-p5-herdr-parity",
+      "title": "Prove Herdr parity boundary",
+      "depends_on": ["omp-p4-tmux-provisional"],
+      "validation_ids": ["V26", "V27"],
+      "evidence_ids": ["omp-evidence-omp-p5-herdr-parity"],
+      "rollback_id": "omp-rollback-omp-p5-herdr-parity",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P5 Herdr owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-12"]
+    },
+    {
+      "phase": "P6",
+      "milestone": "Supervision continuity",
+      "id": "omp-p6-supervision-continuity",
+      "title": "Validate supervision continuity",
+      "depends_on": ["omp-p5-herdr-parity", "omp-p2-identity-adapter"],
+      "validation_ids": ["V26", "V27"],
+      "evidence_ids": ["omp-evidence-omp-p6-supervision-continuity"],
+      "rollback_id": "omp-rollback-omp-p6-supervision-continuity",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P6 supervision owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-04", "STOP-12"]
+    },
+    {
+      "phase": "P6",
+      "milestone": "Startup policy",
+      "id": "omp-p6-startup-policy",
+      "title": "Validate startup policy fencing",
+      "depends_on": ["omp-p6-supervision-continuity"],
+      "validation_ids": ["V26", "V27"],
+      "evidence_ids": ["omp-evidence-omp-p6-startup-policy"],
+      "rollback_id": "omp-rollback-omp-p6-startup-policy",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P6 startup owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-12"]
+    },
+    {
+      "phase": "P7",
+      "milestone": "Two-home isolation",
+      "id": "omp-p7-two-home-isolation",
+      "title": "Validate isolated Firstmate homes",
+      "depends_on": ["omp-p6-startup-policy", "omp-p2-identity-adapter"],
+      "validation_ids": ["V26", "V27"],
+      "evidence_ids": ["omp-evidence-omp-p7-two-home-isolation"],
+      "rollback_id": "omp-rollback-omp-p7-two-home-isolation",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P7 isolation owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-12"]
+    },
+    {
+      "phase": "P7",
+      "milestone": "Recovery",
+      "id": "omp-p7-recovery",
+      "title": "Validate recovery and lock ownership",
+      "depends_on": ["omp-p7-two-home-isolation"],
+      "validation_ids": ["V26", "V27"],
+      "evidence_ids": ["omp-evidence-omp-p7-recovery"],
+      "rollback_id": "omp-rollback-omp-p7-recovery",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P7 recovery owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-03", "STOP-12"]
+    },
+    {
+      "phase": "P7",
+      "milestone": "Cleanup complete",
+      "id": "omp-p7-cleanup-complete",
+      "title": "Prove all publication cleanup",
+      "depends_on": ["omp-p7-recovery"],
+      "validation_ids": ["V29"],
+      "evidence_ids": ["omp-evidence-omp-p7-cleanup-complete"],
+      "rollback_id": "omp-rollback-omp-p7-cleanup-complete",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P7 cleanup owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-10", "STOP-11"]
+    },
+    {
+      "phase": "P8",
+      "milestone": "Full validation",
+      "id": "omp-p8-full-validation",
+      "title": "Run complete OMP validation matrix",
+      "depends_on": ["omp-p7-cleanup-complete"],
+      "validation_ids": ["V01", "V02", "V03", "V04", "V05", "V06", "V07", "V08", "V09", "V10", "V11", "V12", "V13", "V14", "V15", "V16", "V17", "V18", "V19", "V20", "V21", "V22", "V23", "V24", "V25", "V26", "V27", "V28", "V29"],
+      "evidence_ids": ["omp-evidence-omp-p8-full-validation"],
+      "rollback_id": "omp-rollback-omp-p8-full-validation",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P8 validation owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-01", "STOP-02", "STOP-03", "STOP-04", "STOP-05", "STOP-06", "STOP-07", "STOP-08", "STOP-09", "STOP-10", "STOP-11", "STOP-12"]
+    },
+    {
+      "phase": "P8",
+      "milestone": "Atomic publication",
+      "id": "omp-p8-policy-publication",
+      "title": "Publish policy and evidence atomically",
+      "depends_on": ["omp-p8-full-validation"],
+      "validation_ids": ["V29"],
+      "evidence_ids": ["omp-evidence-omp-p8-policy-publication"],
+      "rollback_id": "omp-rollback-omp-p8-policy-publication",
+      "artifact_paths": {
+        "evidence": "data/omp-evidence/{task_id}.json",
+        "rollback": "data/omp-rollback/{task_id}.json"
+      },
+      "artifact_schemas": {
+        "evidence": "omp-evidence.v1",
+        "rollback": "omp-rollback.v1"
+      },
+      "owner": "P8 publication owner",
+      "state": "planned",
+      "blocked_by_stop_ids": ["STOP-10", "STOP-11", "STOP-12"]
+    }
+  ]
+}

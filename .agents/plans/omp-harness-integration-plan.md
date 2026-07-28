@@ -231,8 +231,8 @@ The requirement IDs below are the stable join keys used by the phase manifest, c
 | REQ-SCOPE-01 | Keep experimental, provisional tmux, and first-class verified support as separate named states with exact exclusions. | This plan owns the state model; every result label and policy update must point here. |
 | REQ-EVID-01 | Pin binary, package, version, Bun, hashes, launch help, RPC vector, date, commands, and output. | Evidence ledger owner; direct output is required before each runtime-dependent phase. |
 | REQ-DISC-01 | Do not use the contradicted no-extensions plus explicit-extension vector. | Launcher owner; ambient discovery must be excluded before import or the phase blocks. |
-| REQ-DISC-02 | Audit the complete installed-runtime discovery surface before required extension import, including argv controls (`--config`, `--hook`, `--add-dir`, `--extension`, `--skills`, `--no-skills`, `--no-rules`, `--profile`, `--cwd`, `--session-dir`, and `--allow-home`), environment variables and roots (`HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME`, `OMP_PROFILE`, `PI_PROFILE`, `PI_CONFIG_DIR`, and `PI_CODING_AGENT_DIR`), package and dependency roots, project manifests and settings, user/profile configuration, plugins, skills, rules, hooks, add-dir trees, symlink aliases, directory extension manifests, and replacement between preflight and import. | Launcher and extension trust owners; the inventory is generated from the pinned help/source and every unexpected root blocks launch. |
-| REQ-ID-01 | Identify the OMP host through resolved executable and argv ancestry. | `bin/fm-harness.sh` and `bin/fm-lock.sh` future owner; environment markers are not host authority. |
+| REQ-DISC-02 | Audit the complete installed-runtime discovery surface before required extension import, including argv controls (`--config`, `--hook`, `--add-dir`, `--extension`, `--plugin-dir`, `--skills`, `--no-skills`, `--no-rules`, `--profile`, `--cwd`, `--session-dir`, and `--allow-home`), environment variables and roots (`HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME`, `XDG_RUNTIME_DIR`, `OMP_PROFILE`, `PI_PROFILE`, `PI_CONFIG_DIR`, `PI_CODING_AGENT_DIR`, `PI_PACKAGE_DIR`, `PI_CONFIG_FILES`, `PI_SMOL_MODEL`, `PI_SLOW_MODEL`, `PI_PLAN_MODEL`, and `PI_NO_PTY`), package and dependency roots, package lockfiles, project manifests and settings, user/profile configuration, plugins, skills, rules, hooks, add-dir trees, symlink aliases, directory extension manifests, provider and search credentials, bundled built-ins, inline `createAutoresearchExtension` registration, and replacement between preflight and import. | Launcher and extension trust owners; the inventory is generated from the pinned help/source and every unexpected root blocks launch. |
+| REQ-ID-01 | Identify the OMP host through resolved executable and argv ancestry. | `bin/fm-harness.sh`, `bin/fm-session-lock-lib.sh`, and `bin/fm-lock.sh`; environment markers are not host authority. |
 | REQ-ID-02 | Scrub or override inherited mixed child markers before nested non-OMP Firstmate launches. | Spawn environment owner; mixed-marker and nested-shell tests are required. |
 | REQ-EXT-01 | Require canonical path, owner, mode, expected hash, task token, and exact registration set, with a content-bound immutable loading contract. | Generated extension and launcher owner; a preflight hash on a mutable pathname is insufficient, so the loader must use a verified read-only content-addressed staging root or an OMP-side byte-bound loader and prove the imported bytes match. |
 | REQ-EXT-02 | Fail before brief or charter delivery on missing, failed, duplicate, unexpected, or replaced mandatory registration. | Startup handshake owner; ready without handshake is failure. |
@@ -248,12 +248,14 @@ The requirement IDs below are the stable join keys used by the phase manifest, c
 | REQ-REC-01 | Prove restart and recovery preserve one owner and never duplicate wake or respawn unknown. | `fm-crew-state.sh`, bootstrap, backend, and recovery owners. |
 | REQ-CLEAN-01 | Enumerate and clean nested hooks/state, top-level hooks/state, temp, PR poll, extension, watcher, backend, and secondmate-home artifacts. | `bin/fm-teardown.sh` owner; real generated artifacts are required. |
 | REQ-CLEAN-02 | Preserve dirty, unlanded, and unresolved-decision refusal and make cleanup failure visible. | Teardown and decision-hold owners; refusal tests are mandatory. |
-| REQ-MAP-01 | Include secondmate positional parsing, raw launch, generated hook, send, continuity, all cleanup lists, and full regression owners. | This plan owns the inventory; future code changes must update the nearest owner docs. |
+| REQ-MAP-01 | Include secondmate positional parsing, raw launch, generated hook, send, continuity, all cleanup lists, backend liveness, shared lock identity, credential boundaries, and full regression owners. | This plan and `docs/omp-publication-inventory.md` own the inventory; future code changes must update the nearest owner docs. |
 | REQ-DOC-01 | Remove stale historical tool paths and inconsistent persistent-supervisor terminology from the plan and future documentation. | Plan and documentation owners; P0 checks current names and P8 checks every published support surface. |
 | REQ-REG-01 | Run every existing `tests/*.test.sh`, focused OMP tests, applicable lint, and all supported harness/backend axes. | `.no-mistakes.yaml:22-28` and repository test owner; a shortened list is not sufficient. |
 | REQ-LIVE-01 | Require live evidence for worker, watcher, tmux, Herdr, two-home, recovery, and teardown claims. | Evidence ledger owner; skipped, mocked, inferred, or inconclusive rows block promotion. |
 | REQ-LINK-01 | Validate each external source link at the pinned commit and classify individually stale links. | Evidence documentation owner; no blanket stale-link claim. |
 | REQ-MON-01 | Expose current phase, milestone, scoped completed/total, branch, blockers, next gate, and explicit `needs:human` decisions. | `.agents/tasks/roadmap.md` owner; progress excludes future unscheduled phases. |
+
+| REQ-CRED-01 | Permit only named OMP provider and search credential variables from the task-local credential boundary, preserve them only for the authorized worker process tree, redact names-only evidence, and refuse logging, persistence, or cleanup ambiguity. | `omp-p2-identity-adapter` owns the environment adapter; `omp-p1-discovery-isolation` owns discovery proof; V03, V04, STOP-01, STOP-02, STOP-03, and STOP-10 are required. |
 
 ## Architecture and ownership map
 
@@ -264,7 +266,8 @@ Future task records point to these owners instead of copying their contracts.
 | Contract or seam | Current owner | Future OMP owner and required evidence |
 | --- | --- | --- |
 | Harness identity and verified-name policy | `bin/fm-harness.sh` | Evidence owner `omp-p1-identity-ancestry`; executable implementation owner `omp-p2-identity-adapter`; ancestry, marker, nested-child, PID-reuse, and live argv tests; no allowlist change before P8. |
-| Lock identity and holder classification | `bin/fm-lock.sh` | Evidence owner `omp-p1-identity-ancestry`; executable implementation owner `omp-p2-identity-adapter`; lock-holder, PID-reuse, concurrent-acquisition, and live owner tests. |
+| Lock identity and holder classification | `bin/fm-session-lock-lib.sh` sourced by `bin/fm-lock.sh`, with `tests/fm-session-lock.test.sh` | Evidence owner `omp-p1-identity-ancestry`; executable implementation owner `omp-p2-identity-adapter`; lock-holder, PID-reuse, concurrent-acquisition, and live owner tests. |
+| Backend liveness and unknown-state handling | `bin/fm-backend.sh`, `bin/backends/tmux.sh`, `bin/backends/herdr.sh`, and `bin/fm-crew-state.sh` | `omp-p4-tmux-classifier`, `omp-p5-herdr-parity`, and `omp-p7-recovery`; unknown remains non-dead and every classifier result has live evidence. |
 | Dispatch selection and effort validation | `bin/fm-dispatch-select.sh` and `bin/fm-bootstrap.sh` | `omp-p8-policy-publication`; invalid effort and stale profile tests. |
 | Ordinary and secondmate launch parsing | `bin/fm-spawn.sh`, including `:449-466` | `omp-p2-experimental-launch` and `omp-p8-policy-publication`; positional, config, raw-launch, and role tests. |
 | Raw launch escape hatch | `bin/fm-spawn.sh` raw-launch path | `omp-p1-runtime-pin`; keep it explicitly unverified and test rejection of unsupported adapter routes. |
@@ -289,6 +292,36 @@ The plan and future documentation must use current Firstmate paths and role name
 
 No OMP implementation may import Pi APIs, Pi event types, or fail-open helper behavior without a separate OMP-native equivalence proof.
 
+### OMP identity and environment boundary
+
+The OMP boundary is a task-local adapter contract and is not the Firstmate selector-scrubbing contract.
+
+The adapter may set only `OMP_PROFILE`, `PI_CODING_AGENT_DIR`, `PI_PACKAGE_DIR`, `PI_CONFIG_FILES`, `PI_SMOL_MODEL`, `PI_SLOW_MODEL`, `PI_PLAN_MODEL`, `PI_NO_PTY`, and the explicitly authorized credential variables listed below.
+
+The adapter must unset inherited `PI_PROFILE`, `PI_CONFIG_DIR`, and every unlisted `OMP_*`, `PI_*`, provider, search, hook, and plugin variable before launch.
+
+The allowed provider credential names are `ANTHROPIC_API_KEY`, `ANTHROPIC_OAUTH_TOKEN`, `CLAUDE_CODE_USE_FOUNDRY`, `ANTHROPIC_FOUNDRY_API_KEY`, `ANTHROPIC_CUSTOM_HEADERS`, `CLAUDE_CODE_CLIENT_CERT`, `CLAUDE_CODE_CLIENT_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `AZURE_OPENAI_API_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`, `KILO_API_KEY`, `MISTRAL_API_KEY`, `ZAI_API_KEY`, `UMANS_AI_CODING_PLAN_API_KEY`, `MINIMAX_API_KEY`, `OPENCODE_API_KEY`, `AI_GATEWAY_API_KEY`, and `WAFER_SERVERLESS_API_KEY`.
+
+The allowed search credential names are `EXA_API_KEY`, `BRAVE_API_KEY`, `PERPLEXITY_API_KEY`, `PERPLEXITY_COOKIES`, `TAVILY_API_KEY`, `TINYFISH_API_KEY`, `FIRECRAWL_API_KEY`, `ANTHROPIC_SEARCH_API_KEY`, and `ANTHROPIC_SEARCH_BASE_URL`.
+
+Credential values may originate only from the task-local secret provider selected by the future owner, are inherited only by the authorized OMP worker descendants, are never printed or serialized, and are unset by the cleanup owner after process termination.
+
+The adapter must refuse an unknown credential name, a credential source outside the task boundary, an environment dump, a log containing a credential value, an ambiguous nested inheritance rule, or cleanup that cannot prove unsetting.
+
+`REQ-CRED-01`, `REQ-DISC-02`, `V03`, `V04`, `STOP-01`, `STOP-02`, `STOP-03`, and the per-phase rollback inventory are the acceptance cross-references for this boundary.
+
+### Immutable extension closure
+
+Discovery closure includes every pinned argv, environment, profile, session, credential, package, dependency, lockfile, project, plugin, skill, rule, hook, add-dir, symlink, bundled built-in, provider, search, and inline source that can affect import or execution.
+
+The closure must include `--plugin-dir`, `PI_PACKAGE_DIR`, `PI_CONFIG_FILES`, `PI_SMOL_MODEL`, `PI_SLOW_MODEL`, `PI_PLAN_MODEL`, provider and search credential names, and the inline `createAutoresearchExtension` path that remains reachable despite `--no-extensions`.
+
+The future loader must resolve entry, transitive, dynamic, lazy, bundled, plugin, and inline imports into a content-addressed read-only staging root before brief delivery.
+
+An unresolved dynamic or lazy import, a mutable source path, a changed byte hash, an unexpected registration, or a missing inline or bundled source is a fail-closed result.
+
+The preflight must bind `STOP-01`, `STOP-02`, `V03`, `V04`, the registration set, the staged path, and every recorded hash in one evidence artifact before the worker can become ready.
+
 ## Phased roadmap and task manifest
 
 All task IDs in this section are stable manifest IDs, not live backlog entries.
@@ -309,29 +342,29 @@ There is no current captain choice in this revision.
 | P0 | Independent second Red Team | `omp-final-plan-redteam-o6` | `omp-o5-plan-traceability` | serialized | complete 2026-07-27 with `BLOCK`; report path is `data/omp-final-plan-redteam-o6/report.md` |
 | P0 | Correct O6 plan-block corrections | `omp-plan-block-corrections-o7` | `omp-final-plan-redteam-o6` | serialized | current planning/tracking correction; no runtime or support change |
 | P0 | Corrected-plan Red Team | `omp-corrected-plan-redteam-o8` | `omp-plan-block-corrections-o7` | serialized | queued validation; `PASS` with no plan-blocking finding is required |
-| P1 | Fail-closed implementation activation | `omp-p1-activation-a7` | `omp-corrected-plan-redteam-o8` and captain authorization 2026-07-27 | serialized | activation gate only; no P1-P8 implementation record is active now |
+| P1 | Fail-closed implementation activation | `omp-p1-activation-a7` | `omp-corrected-plan-redteam-o8` | serialized | activation gate only; captain authorization `captain-omp-implementation-authorization-2026-07-27` is a separate gate; no P1-P8 implementation record is active now |
 | P1 | Runtime identity ledger | `omp-p1-runtime-pin` | `omp-p1-activation-a7` | parallel with P1 peers under disjoint-resource proof | planned |
 | P1 | Discovery and flag safety ledger | `omp-p1-discovery-isolation` | `omp-p1-activation-a7` | parallel with P1 peers under disjoint-resource proof | planned |
 | P1 | Host ancestry identity ledger | `omp-p1-identity-ancestry` | `omp-p1-activation-a7` | parallel with P1 peers under disjoint-resource proof | planned |
-| P2 | Experimental worker launcher | `omp-p2-experimental-launch` | all P1 tasks | serialized | planned |
-| P2 | Executable OMP identity and environment adapter | `omp-p2-identity-adapter` | `omp-p1-runtime-pin`, `omp-p1-identity-ancestry`, and `omp-p1-activation-a7` | serialized before supervision or recovery | planned, manifest-only |
-| P2 | Mandatory extension handshake | `omp-p2-extension-handshake` | launcher preflight | parallel with state gate | planned |
-| P2 | Effective thinking state gate | `omp-p2-thinking-state` | launcher preflight | parallel with handshake | planned |
-| P3 | Native RPC lifecycle adapter | `omp-p3-rpc-lifecycle` | `omp-p2-identity-adapter`, launcher, and handshake preflight | serialized | planned |
+| P2 | Experimental worker launcher | `omp-p2-experimental-launch` | `omp-p1-runtime-pin`, `omp-p1-discovery-isolation`, `omp-p1-identity-ancestry` | serialized | planned |
+| P2 | Executable OMP identity and environment adapter | `omp-p2-identity-adapter` | `omp-p1-runtime-pin`, `omp-p1-identity-ancestry` | serialized before supervision or recovery | planned, manifest-only |
+| P2 | Mandatory extension handshake | `omp-p2-extension-handshake` | `omp-p2-experimental-launch` | parallel with state gate | planned |
+| P2 | Effective thinking state gate | `omp-p2-thinking-state` | `omp-p2-experimental-launch` | parallel with handshake | planned |
+| P3 | Native RPC lifecycle adapter | `omp-p3-rpc-lifecycle` | `omp-p2-identity-adapter`, `omp-p2-experimental-launch`, `omp-p2-extension-handshake`, `omp-p2-thinking-state` | serialized | planned |
 | P3 | Continuation and follow-up failure semantics | `omp-p3-continuation-followup` | RPC lifecycle | serialized | planned |
 | P3 | Real worker normal and abort E2E | `omp-p3-worker-live` | handshake, state, RPC | serialized | planned |
 | P3 | Real worker cleanup E2E | `omp-p3-cleanup-live` | worker E2E | serialized | planned |
 | P3 | Focused and full regression loop | `omp-p3-regression` | cleanup E2E | serialized | planned |
-| P4 | Tmux OMP ancestry and liveness classifier | `omp-p4-tmux-classifier` | P3 regression | serialized | planned |
-| P4 | Provisional tmux worker evidence | `omp-p4-tmux-provisional` | classifier and all P3 tasks | serialized | planned |
-| P5 | Herdr lifecycle parity | `omp-p5-herdr-parity` | provisional tmux evidence | serialized | planned |
-| P6 | Primary continuity and supervision | `omp-p6-supervision-continuity` | Herdr parity and `omp-p2-identity-adapter` | serialized | planned |
-| P6 | Startup policy and protocol | `omp-p6-startup-policy` | continuity | serialized | planned |
-| P7 | Two-home isolation | `omp-p7-two-home-isolation` | startup policy and `omp-p2-identity-adapter` | serialized | planned |
-| P7 | Sole-owner recovery | `omp-p7-recovery` | two-home isolation | serialized | planned |
-| P7 | Complete cleanup and refusal matrix | `omp-p7-cleanup-complete` | recovery | serialized | planned |
-| P8 | Full live and regression verification | `omp-p8-full-validation` | all P7 tasks | serialized | planned |
-| P8 | First-class policy and documentation publication | `omp-p8-policy-publication` | full validation and no open stops | serialized | planned |
+| P4 | Tmux OMP ancestry and liveness classifier | `omp-p4-tmux-classifier` | `omp-p3-regression` | serialized | planned |
+| P4 | Provisional tmux worker evidence | `omp-p4-tmux-provisional` | `omp-p4-tmux-classifier`, `omp-p3-worker-live` | serialized | planned |
+| P5 | Herdr lifecycle parity | `omp-p5-herdr-parity` | `omp-p4-tmux-provisional` | serialized | planned |
+| P6 | Primary continuity and supervision | `omp-p6-supervision-continuity` | `omp-p5-herdr-parity`, `omp-p2-identity-adapter` | serialized | planned |
+| P6 | Startup policy and protocol | `omp-p6-startup-policy` | `omp-p6-supervision-continuity` | serialized | planned |
+| P7 | Two-home isolation | `omp-p7-two-home-isolation` | `omp-p6-startup-policy`, `omp-p2-identity-adapter` | serialized | planned |
+| P7 | Sole-owner recovery | `omp-p7-recovery` | `omp-p7-two-home-isolation` | serialized | planned |
+| P7 | Complete cleanup and refusal matrix | `omp-p7-cleanup-complete` | `omp-p7-recovery` | serialized | planned |
+| P8 | Full live and regression verification | `omp-p8-full-validation` | `omp-p7-cleanup-complete` | serialized | planned |
+| P8 | First-class policy and documentation publication | `omp-p8-policy-publication` | `omp-p8-full-validation` | serialized | planned |
 
 ### P0 - Plan correction and second Red Team gate
 
@@ -563,7 +596,7 @@ It proves current Claude, Codex, OpenCode, Pi, Grok, secondmate, backend autodet
 
 `omp-p8-policy-publication` updates verified allowlists, normal dispatch, primary supervision, secondmate routing, recovery, docs, and support claims atomically only after the full evidence ledger passes.
 
-The publication transaction has one exact tracked-surface inventory: `bin/fm-harness.sh`, `bin/fm-lock.sh`, `bin/fm-bootstrap.sh`, `bin/fm-spawn.sh`, `bin/fm-dispatch-select.sh`, `bin/fm-supervision-instructions.sh`, `bin/fm-backend.sh`, `bin/backends/tmux.sh`, `bin/backends/herdr.sh`, `bin/fm-send.sh`, `bin/fm-crew-state.sh`, `bin/fm-teardown.sh`, `bin/fm-home-seed.sh`, `.agents/skills/harness-adapters/SKILL.md`, `.agents/skills/secondmate-provisioning/SKILL.md`, `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `docs/configuration.md`, `docs/supervision-protocols/omp.md`, `docs/watcher-continuity.md`, `docs/turnend-guard.md`, and the applicable current test files.
+The publication transaction has one exact tracked-surface inventory owned by `docs/omp-publication-inventory.md`: `bin/fm-session-lock-lib.sh`, `bin/fm-lock.sh`, `bin/fm-harness.sh`, `bin/fm-bootstrap.sh`, `bin/fm-spawn.sh`, `bin/fm-dispatch-select.sh`, `bin/fm-supervision-instructions.sh`, `bin/fm-backend.sh`, `bin/backends/tmux.sh`, `bin/backends/herdr.sh`, `bin/fm-send.sh`, `bin/fm-crew-state.sh`, `bin/fm-teardown.sh`, `bin/fm-home-seed.sh`, `.agents/skills/harness-adapters/SKILL.md`, `.agents/skills/secondmate-provisioning/SKILL.md`, `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `docs/configuration.md`, `docs/supervision-protocols/omp.md`, `docs/watcher-continuity.md`, `docs/turnend-guard.md`, `docs/omp-publication-inventory.md`, and the applicable current test files.
 
 The inventory is grouped by allowlist and identity, dispatch, supervision, secondmate routing, recovery, cleanup, and public documentation surfaces, and no generated state, extension, hook, cache, socket, or Herdr lab artifact is a publication input.
 
@@ -573,7 +606,7 @@ Publication is one guarded commit from a disposable staging worktree, or one fea
 
 After publication, the invariant check must prove one consistent OMP support state across every listed surface, unchanged support for Claude, Codex, OpenCode, Pi, and Grok, no generated runtime residue, and a recoverable clean revert.
 
-The partial-failure simulation applies each inventory group alone in a disposable clone, runs the invariant check after every simulated interruption, requires refusal of every mixed old/new state, and proves `git revert --no-edit <publication-commit>` restores the pre-publication tree and support labels.
+The partial-failure simulation applies each inventory group alone in a disposable clone, runs `bin/fm-omp-publication-check.sh --simulate` after every simulated interruption, requires refusal of every mixed old/new state, and proves `git revert --no-edit <publication-commit>` restores the pre-publication tree and support labels.
 
 P8 deterministic tests cover stale five-harness lists, profile validation, documentation links, the exact publication inventory, per-surface partial-failure refusal, post-publication invariants, recoverable revert, and all existing regression suites.
 
@@ -584,6 +617,10 @@ P8 exits with first-class verified support only when every live row passes and n
 P8 rollback is a clean revert of the single publication commit in the staging proof before any public or verified policy publication, followed by the post-revert invariant and residue checks.
 
 ## Phase and task artifact inventory
+
+The exact current artifact classes, paths, creation owners, cleanup owners, rollback owners, and evidence schemas are owned by `docs/omp-publication-inventory.md` and checked by `bin/fm-omp-publication-check.sh`.
+
+The task rows below remain the phase-scoped ownership summary; no row may narrow or replace the exact inventory document.
 
 Every task report must include the complete row for its task ID, with `not created` recorded explicitly for an artifact class that the task did not use.
 
@@ -600,7 +637,28 @@ Every task report must include the complete row for its task ID, with `not creat
 | `omp-p7-two-home-isolation`, `omp-p7-recovery`, `omp-p7-cleanup-complete` | Owner: home, recovery, and cleanup tasks; processes: two OMP owners, worker, primary, secondmate, watcher, backend, provider, and all descendants; paths: two distinct `FM_HOME` trees with separate `data`, `state`, `config`, `projects`, `HOME`, XDG, profiles, caches, package roots, locks, wakes, generated extensions/hooks, task temp, logs, sessions, sockets, and evidence. | The two-home realpath and owner ledger must be disjoint, recovery must leave one owner, and teardown must exercise every nested/top-level surface plus dirty, unlanded, and unresolved-decision refusal before both homes and descendants are removed. |
 | `omp-p8-full-validation`, `omp-p8-policy-publication` | Owner: validation and publication tasks; processes: all supported harness/backend test runners, OMP live labs, invariant checker, Git; paths: disposable staging clone, exact publication inventory, complete evidence ledger, temporary Herdr lab, and no generated runtime artifacts in the tracked tree. | Run per-surface interruption simulations, prove refusal of mixed policy, commit once only after preflight, run post-publication invariants, revert the single commit in staging, and prove the pre-publication tree, labels, descendants, state, locks, wakes, and labs are restored. |
 
-No task may omit task temp, state, profile/cache, lock, wake, process descendant, generated extension/hook, backend, package, or evidence paths from its report.
+No task may omit task temp, state, profile/cache, lock, wake, process descendant, generated extension/hook, backend, package, credential boundary, or evidence paths from its report.
+
+Every task has a stable evidence ID, rollback ID, evidence path, rollback path, schema, owner, validation IDs, and exact dependency IDs in `.agents/tasks/omp-manifest.json`.
+
+`bin/fm-omp-plan-check.sh` validates manifest uniqueness, dependency closure, cycle freedom, roadmap parity, plan cross-references, Tasks Axi parsing, and version-pinned non-mutating commands.
+
+`bin/fm-omp-activation.sh` is the non-mutating-by-default O8 PASS gate and the sole guarded atomic publication owner for the first corrected implementation phase.
+
+`bin/fm-omp-publication-check.sh` is the V29 inventory and interruption validator and refuses any mixed publication state.
+
+## O8 correction matrix
+
+| Correction ID | Required correction | Stable owner tasks | Mechanical validator or evidence | Rollback and containment |
+| --- | --- | --- | --- | --- |
+| O8-S0-01 | Assign executable OMP identity, shared session-lock identity, backend liveness, environment adaptation, tests, and rollback ownership. | `omp-p1-identity-ancestry`, `omp-p2-identity-adapter`, `omp-p4-tmux-classifier`, `omp-p7-recovery` | `bin/fm-omp-plan-check.sh`; V03,V04,V26; `tests/fm-session-lock.test.sh` and the mapped backend tests | `omp-rollback-omp-p2-identity-adapter`; STOP-03 and STOP-06 keep support fenced. |
+| O8-S0-02 | Enumerate every discovery source and require immutable entry, transitive, dynamic, lazy, bundled, plugin, and inline closure. | `omp-p1-discovery-isolation`, `omp-p2-extension-handshake` | REQ-DISC-02, REQ-EXT-01, V02,V03,V04; `--plugin-dir`, package/config overrides, model/provider/search credentials, and inline autoresearch are explicit | `omp-rollback-omp-p1-discovery-isolation`; STOP-01 and STOP-02 refuse ready or brief delivery. |
+| O8-ACT-01 | Encode the already-authorized activation behind a mechanical O8 PASS, decision, clean-tree, preimage, support-fence, and no-premature-row gate. | `omp-p1-activation-a7` | `bin/fm-omp-activation.sh --check --json`; `omp-activation-check.v1`; every refusal condition is covered by `tests/fm-omp-activation.test.sh` | `omp-rollback-omp-p1-activation-a7`; default is refusal and `--activate` alone is never authority. |
+| O8-TRACK-01 | Replace prose dependency aliases with exact stable task IDs in a machine-readable graph and a parity-checked roadmap. | All task IDs in `.agents/tasks/omp-manifest.json` | `bin/fm-omp-plan-check.sh --json`; `omp-plan-check.v1`; Tasks Axi 0.2.3 list/show/ready | `omp-rollback-omp-corrected-plan-redteam-o8`; no future task row is executable before A7. |
+| O8-TRACK-02 | Give every task stable validation, evidence, rollback, path, schema, owner, and cross-reference fields. | All task IDs in `.agents/tasks/omp-manifest.json` | Manifest uniqueness and graph checks plus V01-V29, STOP-01 through STOP-12, and plan/roadmap parity | Per-task `omp-rollback-{task_id}` records; missing or ambiguous records block the phase. |
+| O8-PUB-01 | Enumerate exact P8 publication and cleanup surfaces and assign creation, cleanup, rollback, and evidence ownership. | `omp-p8-full-validation`, `omp-p8-policy-publication` | `docs/omp-publication-inventory.md`; `bin/fm-omp-publication-check.sh`; V29 and `omp-publication-check.v1` | Per-phase rollback inventories preserve the verified preimage and reject mixed publication state. |
+| O8-CRED-01 | Define allowed OMP credential names, source, lifetime, inheritance, redaction, no-log, cleanup, and refusal rules without values. | `omp-p1-discovery-isolation`, `omp-p2-identity-adapter` | REQ-CRED-01; V03,V04; plan environment boundary; names-only evidence | STOP-01, STOP-02, STOP-03, and `omp-rollback-omp-p2-identity-adapter` contain any credential ambiguity. |
+| O8-PROV-01 | Treat O7 branch text as historical and derive current branch and commit from live Git state. | `omp-corrected-plan-redteam-o8`, `omp-p1-activation-a7` | `git branch --show-current`, `git rev-parse HEAD`, and activation preflight fields | A stale or mismatched preimage refuses activation; no historical branch is authoritative. |
 
 Future Herdr lab artifacts are named and scoped only by the task that owns them, and no ordinary Herdr session is a cleanup target.
 
@@ -739,7 +797,7 @@ A blocked task reports the stop ID, evidence gap, owner, and containment state.
 
 The active branch is derived at read time from `git branch --show-current` or `git rev-parse --abbrev-ref HEAD`, and no historical branch string is authoritative.
 
-The current correction branch observed for this task is `fm/omp-plan-block-corrections-o7`, but future Status and Bearings records must derive the value from live Git state.
+The O7 correction branch name is historical provenance only; future Status and Bearings records must derive the active value from live Git state.
 
 The next gate is `omp-corrected-plan-redteam-o8` with explicit `PASS` and no plan-blocking finding required.
 
