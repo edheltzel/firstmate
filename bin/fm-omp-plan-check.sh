@@ -32,14 +32,23 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-omp-plan-check.XXXXXX")
-trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
 ERRORS=()
 MANIFEST_VALID=0
 TASK_COUNT=0
 VALIDATION_COUNT=0
 EVIDENCE_COUNT=0
 ROLLBACK_COUNT=0
+
+TMP_DIR=
+if ! TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-omp-plan-check.XXXXXX" 2>/dev/null); then
+  if [ "$JSON_OUTPUT" -eq 1 ]; then
+    jq -n '{schema:"omp-plan-check.v1",status:"BLOCK",task_count:0,validation_count:0,evidence_count:0,rollback_count:0,issues:["could not allocate plan-check temporary workspace"]}'
+  else
+    printf 'BLOCK\ncould not allocate plan-check temporary workspace\n' >&2
+  fi
+  exit 1
+fi
+trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
 
 error() {
   ERRORS+=("$1")

@@ -30,6 +30,18 @@ done
 
 ERRORS=()
 INVENTORY_COUNT=0
+INVENTORY_TICK=$(printf '\140')
+
+TMP_DIR=
+if ! TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-omp-publication-check.XXXXXX" 2>/dev/null); then
+  if [ "$JSON_OUTPUT" -eq 1 ]; then
+    jq -n '{schema:"omp-publication-check.v1",status:"BLOCK",inventory_count:0,issues:["could not allocate publication-check temporary workspace"]}'
+  else
+    printf 'BLOCK\ncould not allocate publication-check temporary workspace\n' >&2
+  fi
+  exit 1
+fi
+trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
 
 error() {
   ERRORS+=("$1")
@@ -70,6 +82,22 @@ if [ -f "$MANIFEST" ] && jq empty "$MANIFEST" >/dev/null 2>&1; then
     error "publication manifest schema is invalid"
   else
     INVENTORY_COUNT=$(jq '.artifacts | length' "$MANIFEST")
+    while IFS= read -r duplicate_id; do
+      [ -n "$duplicate_id" ] || continue
+      error "publication manifest has duplicate artifact ID: $duplicate_id"
+    done < <(jq -r '.artifacts[].id' "$MANIFEST" | sort | uniq -d)
+    while IFS= read -r duplicate_path; do
+      [ -n "$duplicate_path" ] || continue
+      error "publication manifest has duplicate tracked path: $duplicate_path"
+    done < <(jq -r '.tracked_paths[]' "$MANIFEST" | sort | uniq -d)
+    while IFS= read -r duplicate_path; do
+      [ -n "$duplicate_path" ] || continue
+      error "publication manifest has duplicate artifact path: $duplicate_path"
+    done < <(jq -r '.artifacts[].paths[]' "$MANIFEST" | sort | uniq -d)
+    while IFS=$'\t' read -r owner_kind artifact_id source_path; do
+      [ -n "$owner_kind" ] || continue
+      error "publication manifest has duplicate $owner_kind binding: $artifact_id:$source_path"
+    done < <(jq -r '.artifacts[] as $artifact | (["creator","cleanup"][] as $kind | $artifact[$kind][] | [$kind, $artifact.id, .path] | @tsv)' "$MANIFEST" | sort | uniq -d)
     while IFS= read -r tracked_path; do
       [ -n "$tracked_path" ] || continue
       if ! git -C "$ROOT" ls-files --error-unmatch -- "$tracked_path" >/dev/null 2>&1; then
@@ -82,6 +110,10 @@ if [ -f "$MANIFEST" ] && jq empty "$MANIFEST" >/dev/null 2>&1; then
 
     while IFS= read -r artifact_id; do
       [ -n "$artifact_id" ] || continue
+      DOCUMENT_ID_COUNT=$(grep -oE "^\\| ${INVENTORY_TICK}[a-z0-9-]+${INVENTORY_TICK} \\|" "$INVENTORY" | sed -E "s/^\\| ${INVENTORY_TICK}//; s/${INVENTORY_TICK} \\|$//" | grep -Fxc "$artifact_id" || true)
+      if [ "$DOCUMENT_ID_COUNT" -ne 1 ]; then
+        error "publication artifact documentation row count is $DOCUMENT_ID_COUNT: $artifact_id"
+      fi
       require_inventory_token "\`$artifact_id\`"
       if ! jq -e --arg id "$artifact_id" '.artifacts[] | select(.id == $id) | (.paths | length > 0) and (.creator | length > 0) and (.cleanup | length > 0) and ((.rollback_owner | length) > 0) and (.evidence_schema == "omp-evidence.v1" or .evidence_schema == "omp-activation-preflight.v1") and ((.rollback_schema | length) > 0)' "$MANIFEST" >/dev/null 2>&1; then
         error "publication artifact lacks paths, creator, cleanup, rollback owner, or schemas: $artifact_id"
@@ -100,7 +132,6 @@ if [ -f "$MANIFEST" ] && jq empty "$MANIFEST" >/dev/null 2>&1; then
       done < <(jq -r --arg id "$artifact_id" '.artifacts[] | select(.id == $id) | .cleanup[].path' "$MANIFEST")
     done < <(jq -r '.artifacts[].id' "$MANIFEST" | sort -u)
 
-    INVENTORY_TICK=$(printf '\140')
     while IFS= read -r document_id; do
       [ -n "$document_id" ] || continue
       if ! jq -e --arg id "$document_id" '.artifacts | map(.id) | index($id) != null' "$MANIFEST" >/dev/null 2>&1; then
@@ -135,7 +166,7 @@ if [ -n "$SIMULATION" ]; then
     esac
     while IFS= read -r path; do
       [ -n "$path" ] || continue
-      if ! grep -Fq "$path" "$INVENTORY"; then
+      if ! jq -e --arg path "$path" '([.tracked_paths[]] + [.artifacts[].paths[]] | index($path)) != null' "$MANIFEST" >/dev/null 2>&1; then
         error "simulation changed path is outside the publication inventory: $path"
       fi
     done < <(jq -r '.changed_paths[]?' "$SIMULATION")

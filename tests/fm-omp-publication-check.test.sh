@@ -54,6 +54,36 @@ test_missing_tracked_path_refuses() {
   pass "omp-publication-check: missing tracked path is refused"
 }
 
+test_duplicate_machine_inventory_refuses() {
+  local manifest="$TMP_ROOT/duplicate-inventory.json" out status
+  jq '.artifacts += [.artifacts[0]]' "$ROOT/.agents/tasks/omp-publication-manifest.json" >"$manifest"
+  status=0
+  out=$($CHECK --json --manifest "$manifest") || status=$?
+  expect_code 1 "$status" "duplicate artifact ID should block"
+  assert_contains "$out" 'duplicate artifact ID: shared-lock-identity' "duplicate artifact ID refusal was not reported"
+  jq '.tracked_paths += [.tracked_paths[0]]' "$ROOT/.agents/tasks/omp-publication-manifest.json" >"$manifest"
+  status=0
+  out=$($CHECK --json --manifest "$manifest") || status=$?
+  expect_code 1 "$status" "duplicate tracked path should block"
+  assert_contains "$out" 'duplicate tracked path: bin/fm-session-lock-lib.sh' "duplicate tracked path refusal was not reported"
+  jq '.artifacts[1].paths += [.artifacts[1].paths[0]]' "$ROOT/.agents/tasks/omp-publication-manifest.json" >"$manifest"
+  status=0
+  out=$($CHECK --json --manifest "$manifest") || status=$?
+  expect_code 1 "$status" "duplicate artifact path should block"
+  assert_contains "$out" 'duplicate artifact path: bin/fm-backend.sh' "duplicate artifact path refusal was not reported"
+  jq '.artifacts[0].creator += [.artifacts[0].creator[0]]' "$ROOT/.agents/tasks/omp-publication-manifest.json" >"$manifest"
+  status=0
+  out=$($CHECK --json --manifest "$manifest") || status=$?
+  expect_code 1 "$status" "duplicate creator binding should block"
+  assert_contains "$out" 'duplicate creator binding: shared-lock-identity:bin/fm-session-lock-lib.sh' "duplicate creator binding refusal was not reported"
+  jq '.artifacts[0].cleanup += [.artifacts[0].cleanup[0]]' "$ROOT/.agents/tasks/omp-publication-manifest.json" >"$manifest"
+  status=0
+  out=$($CHECK --json --manifest "$manifest") || status=$?
+  expect_code 1 "$status" "duplicate cleanup binding should block"
+  assert_contains "$out" 'duplicate cleanup binding: shared-lock-identity:bin/fm-lock.sh' "duplicate cleanup binding refusal was not reported"
+  pass "omp-publication-check: duplicate machine inventory rows are refused"
+}
+
 test_unknown_changed_path_refuses() {
   local state="$TMP_ROOT/unknown-path.json" out status=0
   mkdir -p "$TMP_ROOT"
@@ -61,6 +91,10 @@ test_unknown_changed_path_refuses() {
   out=$($CHECK --json --simulate "$state") || status=$?
   expect_code 1 "$status" "unknown changed publication path should block"
   assert_contains "$out" 'outside the publication inventory' "unknown changed path refusal was not reported"
+  jq '.changed_paths = ["state/{task}.pr-pol"]' "$state" >"$TMP_ROOT/substring-path.json"
+  out=$($CHECK --json --simulate "$TMP_ROOT/substring-path.json") || status=$?
+  expect_code 1 "$status" "substring-collision changed publication path should block"
+  assert_contains "$out" 'outside the publication inventory: state/{task}.pr-pol' "substring-collision changed path refusal was not reported"
   pass "omp-publication-check: unknown changed path is refused"
 }
 
@@ -90,10 +124,33 @@ test_stale_inventory_id_refuses() {
   pass "omp-publication-check: stale documentation inventory is refused"
 }
 
+test_duplicate_documentation_row_refuses() {
+  local inventory="$TMP_ROOT/duplicate-inventory.md" row out status=0 tick
+  tick=$(printf '\140')
+  cp "$ROOT/docs/omp-publication-inventory.md" "$inventory"
+  row=$(grep -F "| ${tick}shared-lock-identity${tick} |" "$inventory")
+  printf '%s\n' "$row" >>"$inventory"
+  out=$($CHECK --json --inventory "$inventory") || status=$?
+  expect_code 1 "$status" "duplicate documentation row should block"
+  assert_contains "$out" 'documentation row count is 2: shared-lock-identity' "duplicate documentation row refusal was not reported"
+  pass "omp-publication-check: duplicate documentation rows are refused"
+}
+
+test_publication_tmpdir_failure_refuses() {
+  local out status=0
+  out=$(TMPDIR="$TMP_ROOT/missing-publication-tmp" $CHECK --json) || status=$?
+  expect_code 1 "$status" "publication temporary-root failure should refuse"
+  assert_contains "$out" 'could not allocate publication-check temporary workspace' "publication temporary-root failure was not reported"
+  pass "omp-publication-check: temporary-root failure is fail-safe"
+}
+
 test_inventory_passes
 test_mixed_state_refuses
 test_pre_and_post_state_pass
 test_missing_tracked_path_refuses
+test_duplicate_machine_inventory_refuses
 test_unknown_changed_path_refuses
 test_source_owner_token_drift_refuses
 test_stale_inventory_id_refuses
+test_duplicate_documentation_row_refuses
+test_publication_tmpdir_failure_refuses

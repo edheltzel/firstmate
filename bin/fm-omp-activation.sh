@@ -26,6 +26,7 @@ if [ -z "$SHA256_TOOL" ]; then
   SHA256_TOOL=$(command -v shasum 2>/dev/null || command -v sha256sum 2>/dev/null || true)
 fi
 FAIL_STAGE=${FM_OMP_ACTIVATION_FAIL_STAGE:-}
+ACTIVATION_DATE=${FM_OMP_ACTIVATION_DATE:-$(date -u +%F)}
 ACTION=check
 JSON_OUTPUT=0
 
@@ -55,14 +56,27 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-omp-activation.XXXXXX")
-trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
 ERRORS=()
 ACTIVATION_IDS=()
 
 error() {
   ERRORS+=("$1")
 }
+
+TMP_DIR=
+if ! TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-omp-activation.XXXXXX" 2>/dev/null); then
+  if [ "$JSON_OUTPUT" -eq 1 ]; then
+    jq -n --arg schema 'omp-activation-check.v1' --arg status 'BLOCK' --arg action "$ACTION" --arg issue 'could not allocate activation temporary workspace' '{schema:$schema,status:$status,action:$action,issues:[$issue]}'
+  else
+    printf 'BLOCK\ncould not allocate activation temporary workspace\n' >&2
+  fi
+  exit 1
+fi
+trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
+
+if ! printf '%s\n' "$ACTIVATION_DATE" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
+  error "activation date must match YYYY-MM-DD: $ACTIVATION_DATE"
+fi
 
 if [ -z "$TASKS_AXI" ]; then
   error "Tasks Axi executable is unavailable on PATH"
@@ -139,14 +153,49 @@ require_file "$DECISIONS"
 require_file "$STOPS"
 require_file "$PREFLIGHT"
 
+AUTHORIZATION_ID=
+ACTIVATION_TASK_ID=
+ACTIVATION_PREREQUISITE=
 if [ -f "$MANIFEST" ] && jq empty "$MANIFEST" >/dev/null 2>&1; then
   AUTHORIZATION_ID=$(jq -r '.captain_authorization_id // empty' "$MANIFEST")
+  ACTIVATION_TASK_ID=$(jq -r '.activation_task_id // empty' "$MANIFEST")
+  ACTIVATION_PREREQUISITE=$(jq -r --arg activation_id "$ACTIVATION_TASK_ID" '.tasks[] | select(.id == $activation_id) | .depends_on[0] // empty' "$MANIFEST")
   while IFS= read -r id; do
     [ -n "$id" ] || continue
     ACTIVATION_IDS+=("$id")
   done < <(jq -r '.activation_task_ids[]?' "$MANIFEST")
 else
-  AUTHORIZATION_ID=captain-omp-implementation-authorization-2026-07-27
+  AUTHORIZATION_ID=
+fi
+
+if [ -f "$MANIFEST" ] && jq empty "$MANIFEST" >/dev/null 2>&1; then
+  if [ -z "$ACTIVATION_TASK_ID" ]; then
+    error "manifest activation_task_id is missing"
+  elif [ -z "$ACTIVATION_PREREQUISITE" ]; then
+    error "activation task prerequisite is missing from the manifest"
+  elif ! jq -e --arg activation_id "$ACTIVATION_TASK_ID" '
+    . as $root
+    | [$root.activation_task_ids[] as $id | $root.tasks[] | select(.id == $id)] as $rows
+    | if (($root.activation_task_id == $activation_id)
+        and (([$root.tasks[] | select(.id == $activation_id)] | length) == 1)
+        and (([$root.tasks[] | select(.id == $activation_id)][0].depends_on | length) == 1)
+        and (($root.activation_task_ids | all(. != $activation_id)))
+        and (($root.activation_task_ids | length) > 0)
+        and (($root.activation_task_ids | unique | length) == ($root.activation_task_ids | length))
+        and (($rows | length) == ($root.activation_task_ids | length))
+        and (($rows | map(
+          ((.title | type) == "string")
+          and ((.title | length) > 0)
+          and (.depends_on == [$activation_id])
+          and ((.evidence_ids | length) == 1)
+          and ((.evidence_ids[0] | test("^omp-evidence-")))
+          and ((.rollback_id | type) == "string")
+          and ((.rollback_id | test("^omp-rollback-")))
+        )) | all))
+      then true else false end
+  ' "$MANIFEST" >/dev/null 2>&1; then
+    error "activation task manifest rows are not closed over the activation record"
+  fi
 fi
 
 if [ -f "$AUTHORIZATION" ]; then
@@ -227,8 +276,12 @@ if [ -f "$ROOT/bin/fm-harness.sh" ]; then
 fi
 
 if [ -f "$MANIFEST" ]; then
-  if ! grep -Eq '^- \[ \] omp-p1-activation-a7([[:space:]-]|$)' "$LIVE_BACKLOG"; then
-    error "activation record omp-p1-activation-a7 is not queued in the live backlog"
+  if [ -z "${ACTIVATION_TASK_ID}" ] || ! grep -Eq "^- \[ \] ${ACTIVATION_TASK_ID}([[:space:]-]|$)" "$LIVE_BACKLOG"; then
+    error "activation record ${ACTIVATION_TASK_ID:-<missing>} is not queued in the live backlog"
+  elif ! PREIMAGE_READY_OUTPUT=$("$TASKS_AXI" ready --file "$LIVE_BACKLOG" 2>/dev/null); then
+    error "Tasks Axi could not compute readiness for the activation preimage"
+  elif ! printf '%s\n' "$PREIMAGE_READY_OUTPUT" | grep -Eq "(^|[[:space:],])${ACTIVATION_TASK_ID}(,|$)"; then
+    error "activation record $ACTIVATION_TASK_ID is not ready in the live backlog preimage"
   fi
   for activation_id in "${ACTIVATION_IDS[@]}"; do
     if contains_task "$activation_id" "$TRACKED_BACKLOG" || contains_task "$activation_id" "$LIVE_BACKLOG"; then
@@ -240,7 +293,7 @@ if [ -f "$MANIFEST" ]; then
     if ! is_activation_task "$future_id" && { contains_task "$future_id" "$TRACKED_BACKLOG" || contains_task "$future_id" "$LIVE_BACKLOG"; }; then
       error "premature P1-P8 task is present in a live or tracked backlog: $future_id"
     fi
-  done < <(jq -r '.tasks[] | select(.phase != "P0" and .id != "omp-p1-activation-a7") | .id' "$MANIFEST")
+  done < <(jq -r --arg activation_id "$ACTIVATION_TASK_ID" '.tasks[] | select(.phase != "P0" and .id != $activation_id) | .id' "$MANIFEST")
 fi
 
 if [ "$ACTION" = activate ] && [ "${#ERRORS[@]}" -eq 0 ]; then
@@ -253,15 +306,20 @@ if [ "$ACTION" = activate ] && [ "${#ERRORS[@]}" -eq 0 ]; then
     NEW_RECEIPT=
     BACKLOG_PUBLISHED=0
     RECEIPT_PUBLISHED=0
+    PUBLISHED_ROW_COUNT=0
     : >"$ROWS"
-    while IFS=$'\t' read -r task_id title; do
+    while IFS=$'\t' read -r task_id title dependency evidence_id rollback_id; do
       [ -n "$task_id" ] || continue
       {
-        printf '%s\n' "- [ ] $task_id - $title (repo: AgentThemis) (kind: ops) (priority: 0) (since 2026-07-28) blocked-by: omp-p1-activation-a7"
-        printf '%s\n' "  Manifest: .agents/tasks/omp-manifest.json; evidence: omp-evidence-$task_id; rollback: omp-rollback-$task_id."
+        printf '%s\n' "- [ ] $task_id - $title (repo: AgentThemis) (kind: ops) (priority: 0) (since $ACTIVATION_DATE) blocked-by: $dependency"
+        printf '%s\n' "  Manifest: .agents/tasks/omp-manifest.json; evidence: $evidence_id; rollback: $rollback_id."
         printf '%s\n' "  Support fence: experimental tmux worker; unverified; no primary, secondmate, recovery, or Herdr support."
       } >>"$ROWS"
-    done < <(jq -r '.tasks[] | select(.id == "omp-p1-runtime-pin" or .id == "omp-p1-discovery-isolation" or .id == "omp-p1-identity-ancestry") | [.id, .title] | @tsv' "$MANIFEST")
+      PUBLISHED_ROW_COUNT=$((PUBLISHED_ROW_COUNT + 1))
+    done < <(jq -r --arg activation_id "$ACTIVATION_TASK_ID" '.activation_task_ids[] as $id | .tasks[] | select(.id == $id) | [$id, .title, (.depends_on | join(",")), .evidence_ids[0], .rollback_id] | @tsv' "$MANIFEST")
+    if [ "$PUBLISHED_ROW_COUNT" -ne "${#ACTIVATION_IDS[@]}" ]; then
+      error "manifest activation task rows did not produce the expected publication set"
+    fi
 
     LIVE_DIR=$(dirname -- "$LIVE_BACKLOG")
     RECEIPT_DIR=$(dirname -- "$RECEIPT")
@@ -277,23 +335,35 @@ if [ "$ACTION" = activate ] && [ "${#ERRORS[@]}" -eq 0 ]; then
       error "could not allocate exact backlog preimage"
     elif ! cp "$LIVE_BACKLOG" "$BACKUP"; then
       error "could not preserve exact backlog preimage"
-    elif ! awk -v rows="$ROWS" '
-      BEGIN { activation_seen=0; activation_block=0; activation_line=""; inserted=0; moved=0 }
-      $0 ~ /^- \[ \] omp-p1-activation-a7([[:space:]-]|$)/ {
+    elif ! awk -v rows="$ROWS" -v activation_id="$ACTIVATION_TASK_ID" -v prerequisite_id="$ACTIVATION_PREREQUISITE" -v activation_date="$ACTIVATION_DATE" '
+      BEGIN { activation_seen=0; activation_block=0; activation_record=""; pending_blank=""; inserted=0; moved=0 }
+      $0 ~ "^- \\[ \\] " activation_id "([[:space:]-]|$)" {
         sub(/^- \[ \]/, "- [x]")
-        sub(/[[:space:]]+blocked-by:[[:space:]]*omp-corrected-plan-redteam-o8/, "")
-        sub(/\(since [^)]+\)/, "(done 2026-07-28)")
+        sub("[[:space:]]+blocked-by:[[:space:]]*" prerequisite_id, "")
+        sub(/\(since [^)]+\)/, "(done " activation_date ")")
         activation_seen++
-        activation_line=$0
+        activation_record=$0 "\n"
         activation_block=1
         next
       }
+      activation_block {
+        if ($0 ~ /^[[:space:]]/) {
+          activation_record=activation_record pending_blank $0 "\n"
+          pending_blank=""
+          next
+        }
+        if ($0 == "") {
+          pending_blank=pending_blank "\n"
+          next
+        }
+        activation_block=0
+        pending_blank=""
+      }
       $0 == "## Done" {
-        if (activation_block) activation_block=0
         print
-        if (activation_line != "") {
-          print activation_line
-          activation_line=""
+        if (activation_record != "") {
+          printf "%s", activation_record
+          activation_record=""
           moved=1
         }
         next
@@ -308,15 +378,15 @@ if [ "$ACTION" = activate ] && [ "${#ERRORS[@]}" -eq 0 ]; then
         next
       }
       { print }
-      END { if (activation_seen != 1 || inserted != 1 || moved != 1) exit 2 }
+      END { if (activation_seen != 1 || inserted != 1 || moved != 1 || activation_record != "") exit 2 }
     ' "$LIVE_BACKLOG" >"$NEW_BACKLOG"; then
       error "live backlog postimage did not contain exactly one completed activation record and queue insertion"
     elif ! "$TASKS_AXI" list --file "$NEW_BACKLOG" >/dev/null 2>&1; then
       error "Tasks Axi rejected the proposed atomic backlog publication"
     elif ! POSTIMAGE_LIST=$($TASKS_AXI list --file "$NEW_BACKLOG" 2>/dev/null); then
       error "Tasks Axi could not inspect the activation postimage"
-    elif ! printf '%s\n' "$POSTIMAGE_LIST" | grep -Fq 'omp-p1-activation-a7,done,'; then
-      error "proposed backlog postimage did not complete omp-p1-activation-a7: $POSTIMAGE_LIST"
+    elif ! printf '%s\n' "$POSTIMAGE_LIST" | grep -Fq "${ACTIVATION_TASK_ID},done,"; then
+      error "proposed backlog postimage did not complete $ACTIVATION_TASK_ID: $POSTIMAGE_LIST"
     elif ! READY_OUTPUT=$($TASKS_AXI ready --file "$NEW_BACKLOG" 2>/dev/null); then
       error "Tasks Axi could not compute readiness for the proposed backlog postimage"
     else
@@ -336,9 +406,9 @@ if [ "$ACTION" = activate ] && [ "${#ERRORS[@]}" -eq 0 ]; then
         error "could not allocate activation receipt postimage"
       elif [ "$FAIL_STAGE" = receipt-write ]; then
         error "fault injection refused at receipt-write stage"
-      elif ! jq -n --arg schema 'omp-activation-receipt.v1' --arg preimage "$EXPECTED_LIVE_SHA256" --arg postimage "$POST_LIVE_SHA256" --arg branch "$REPO_BRANCH" --arg commit "$REPO_COMMIT" --arg report "$REPORT_SHA256" --arg completed 'omp-p1-activation-a7' --argjson task_ids "$TASK_IDS_JSON" '{schema:$schema,action:"activate",preimage_sha256:$preimage,postimage_sha256:$postimage,repo_branch:$branch,repo_commit:$commit,report_sha256:$report,completed_activation_task_id:$completed,activation_completed:true,task_ids:$task_ids}' >"$NEW_RECEIPT"; then
+      elif ! jq -n --arg schema 'omp-activation-receipt.v1' --arg preimage "$EXPECTED_LIVE_SHA256" --arg postimage "$POST_LIVE_SHA256" --arg branch "$REPO_BRANCH" --arg commit "$REPO_COMMIT" --arg report "$REPORT_SHA256" --arg completed "$ACTIVATION_TASK_ID" --argjson task_ids "$TASK_IDS_JSON" '{schema:$schema,action:"activate",preimage_sha256:$preimage,postimage_sha256:$postimage,repo_branch:$branch,repo_commit:$commit,report_sha256:$report,completed_activation_task_id:$completed,activation_completed:true,task_ids:$task_ids}' >"$NEW_RECEIPT"; then
         error "could not write activation receipt postimage"
-      elif ! jq -e '.schema == "omp-activation-receipt.v1" and .activation_completed == true and .completed_activation_task_id == "omp-p1-activation-a7" and (.task_ids | length) == 3' "$NEW_RECEIPT" >/dev/null 2>&1; then
+      elif ! jq -e --arg activation_id "$ACTIVATION_TASK_ID" --argjson expected_task_ids "$TASK_IDS_JSON" '.schema == "omp-activation-receipt.v1" and .activation_completed == true and .completed_activation_task_id == $activation_id and .task_ids == $expected_task_ids' "$NEW_RECEIPT" >/dev/null 2>&1; then
         error "activation receipt postimage failed schema validation"
       elif [ "$FAIL_STAGE" = backlog-move ]; then
         error "fault injection refused at backlog-move stage"

@@ -69,8 +69,17 @@ SH
   pass "omp-plan-check: Tasks Axi resolves from PATH"
 }
 
+test_plan_tmpdir_failure_refuses() {
+  local out status=0
+  out=$(TMPDIR="$TMP_ROOT/missing-plan-tmp" "$CHECK" --json) || status=$?
+  expect_code 1 "$status" "plan-check temporary-root failure should refuse"
+  assert_contains "$out" 'could not allocate plan-check temporary workspace' "plan-check temporary-root failure was not reported"
+  pass "omp-plan-check: temporary-root failure is fail-safe"
+}
+
 test_current_manifest_passes
 test_unknown_dependency_refuses
 test_cycle_refuses
 test_forward_dependency_passes
 test_tasks_axi_resolves_from_path
+test_plan_tmpdir_failure_refuses
