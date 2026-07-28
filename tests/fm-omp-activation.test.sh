@@ -28,25 +28,26 @@ setup_fixture() {
   local blocker_state=${1:-resolved}
   local repo="$TMP_ROOT/repo"
   rm -rf "$TMP_ROOT"
-  mkdir -p "$TMP_ROOT/live" "$TMP_ROOT/records" "$TMP_ROOT/repo" "$TMP_ROOT/data/omp-final-corrected-plan-redteam-o9" "$TMP_ROOT/data/omp-corrected-plan-redteam-o8"
+  mkdir -p "$TMP_ROOT/live" "$TMP_ROOT/records" "$TMP_ROOT/repo" "$TMP_ROOT/state" "$TMP_ROOT/data/omp-final-authority-redteam-o10" "$TMP_ROOT/data/omp-corrected-plan-redteam-o8" "$TMP_ROOT/data/omp-final-corrected-plan-redteam-o9"
   fm_git_init_commit "$repo"
-  printf '# OMP report\n\n## Executive disposition\n\nPASS\n\n## Plan-blocking findings\n\nNone.\n' >"$TMP_ROOT/data/omp-final-corrected-plan-redteam-o9/report.md"
+  printf '# OMP report\n\n## Executive disposition\n\nPASS\n\n## Plan-blocking findings\n\nNone.\n' >"$TMP_ROOT/data/omp-final-authority-redteam-o10/report.md"
   printf '# Historical O8 report\n\n## Executive disposition\n\nBLOCK\n' >"$TMP_ROOT/data/omp-corrected-plan-redteam-o8/report.md"
   cp "$ROOT/.agents/tasks/backlog.md" "$TMP_ROOT/tracked-backlog.md"
   if [ "$blocker_state" = resolved ]; then
     printf '%s\n' \
       '# Backlog' '' '## In flight' '' '## Queued' \
-      '- [ ] omp-p1-activation-a7 - Activate OMP Phase 1 only after corrected-plan PASS (repo: AgentThemis) (kind: ops) (priority: 0) (since 2026-07-27) blocked-by: omp-final-corrected-plan-redteam-o9' \
+      '- [ ] omp-p1-activation-a7 - Activate OMP Phase 1 only after final authority PASS (repo: AgentThemis) (kind: ops) (priority: 0) (since 2026-07-27) blocked-by: omp-final-authority-redteam-o10' \
       '  Captain implementation authorization is recorded on 2026-07-27.' \
       '  The activation gate preserves its refusal contract.' \
       '  Evidence: omp-evidence-omp-p1-activation-a7; rollback: omp-rollback-omp-p1-activation-a7.' '' \
       '## Done' \
-      '- [x] omp-final-corrected-plan-redteam-o9 - Final corrected-plan Red Team PASS (repo: AgentThemis) (kind: scout) (priority: 0) (since 2026-07-27)' >"$TMP_ROOT/live/backlog.md"
+      '- [x] omp-final-authority-redteam-o10 - Final authority Red Team PASS (repo: AgentThemis) (kind: scout) (priority: 0) (since 2026-07-27)' >"$TMP_ROOT/live/backlog.md"
   else
     printf '%s\n' \
       '# Backlog' '' '## In flight' '' '## Queued' \
-      '- [ ] omp-final-corrected-plan-redteam-o9 - Final corrected-plan Red Team PASS (repo: AgentThemis) (kind: scout) (priority: 0) (since 2026-07-27)' \
-      '- [ ] omp-p1-activation-a7 - Activate OMP Phase 1 only after corrected-plan PASS (repo: AgentThemis) (kind: ops) (priority: 0) (since 2026-07-27) blocked-by: omp-final-corrected-plan-redteam-o9' \
+      '- [ ] omp-final-corrected-plan-redteam-o9 - Historical O9 BLOCK (repo: AgentThemis) (kind: scout) (priority: 0) (since 2026-07-27)' \
+      '- [ ] omp-final-authority-redteam-o10 - Final authority Red Team PASS (repo: AgentThemis) (kind: scout) (priority: 0) (since 2026-07-27) blocked-by: omp-final-corrected-plan-redteam-o9' \
+      '- [ ] omp-p1-activation-a7 - Activate OMP Phase 1 only after final authority PASS (repo: AgentThemis) (kind: ops) (priority: 0) (since 2026-07-27) blocked-by: omp-final-authority-redteam-o10' \
       '  Captain implementation authorization is recorded on 2026-07-27.' \
       '  The activation gate preserves its refusal contract.' \
       '  Evidence: omp-evidence-omp-p1-activation-a7; rollback: omp-rollback-omp-p1-activation-a7.' '' '## Done' >"$TMP_ROOT/live/backlog.md"
@@ -54,7 +55,7 @@ setup_fixture() {
   jq -n --arg id 'captain-omp-implementation-authorization-2026-07-27' '{schema:"omp-captain-authorization.v1",records:[{id:$id,status:"authorized"}]}' >"$TMP_ROOT/records/authorization.json"
   jq -n '{schema:"omp-decision-inventory.v1",open_keys:[]}' >"$TMP_ROOT/records/decisions.json"
   jq -n '{schema:"omp-stop-ledger.v1",open_stop_ids:[]}' >"$TMP_ROOT/records/stops.json"
-  REPORT_HASH=$(test_sha256 "$TMP_ROOT/data/omp-final-corrected-plan-redteam-o9/report.md")
+  REPORT_HASH=$(test_sha256 "$TMP_ROOT/data/omp-final-authority-redteam-o10/report.md")
   TRACKED_HASH=$(test_sha256 "$TMP_ROOT/tracked-backlog.md")
   LIVE_HASH=$(test_sha256 "$TMP_ROOT/live/backlog.md")
   BRANCH=$(git -C "$repo" branch --show-current)
@@ -72,7 +73,8 @@ invoke() {
   fi
   local command=(
     "$ACTIVATION" "$action" --json \
-    --report "$TMP_ROOT/data/omp-final-corrected-plan-redteam-o9/report.md" \
+    --test-only \
+    --report "$TMP_ROOT/data/omp-final-authority-redteam-o10/report.md" \
     --manifest "$ACTIVATION_MANIFEST" \
     --roadmap "$ROOT/.agents/tasks/roadmap.md" \
     --tracked-backlog "$TMP_ROOT/tracked-backlog.md" \
@@ -84,9 +86,9 @@ invoke() {
     --preflight "$TMP_ROOT/records/preflight.json" "$@"
   )
   if [ -n "$stage" ]; then
-    FM_HOME="$TMP_ROOT" FM_OMP_ACTIVATION_FAIL_STAGE="$stage" "${command[@]}"
+    FM_HOME="$TMP_ROOT" FM_OMP_TEST_MODE=1 FM_OMP_ACTIVATION_FAIL_STAGE="$stage" "${command[@]}"
   else
-    FM_HOME="$TMP_ROOT" "${command[@]}"
+    FM_HOME="$TMP_ROOT" FM_OMP_TEST_MODE=1 "${command[@]}"
   fi
 }
 
@@ -98,7 +100,7 @@ test_default_refuses_current_block() {
   local out status=0
   mkdir -p "$TMP_ROOT"
   printf '# OMP report\n\n## Executive disposition\n\nBLOCK\n' >"$TMP_ROOT/block-report.md"
-  out=$($ACTIVATION --check --json --report "$TMP_ROOT/block-report.md") || status=$?
+  out=$(FM_OMP_TEST_MODE=1 $ACTIVATION --check --json --test-only --report "$TMP_ROOT/block-report.md") || status=$?
   expect_code 1 "$status" "current BLOCK report should refuse activation"
   assert_contains "$out" 'report disposition is BLOCK' "BLOCK report refusal was not reported"
   pass "omp-activation: historical BLOCK remains refused"
@@ -179,7 +181,7 @@ test_empty_and_mismatched_preflight_bindings_refuse() {
 test_report_hash_refuses() {
   local out status=0
   setup_fixture
-  printf '# OMP report\n\n## Executive disposition\n\nBLOCK\n' >"$TMP_ROOT/data/omp-final-corrected-plan-redteam-o9/report.md"
+  printf '# OMP report\n\n## Executive disposition\n\nBLOCK\n' >"$TMP_ROOT/data/omp-final-authority-redteam-o10/report.md"
   out=$(invoke --check) || status=$?
   expect_code 1 "$status" "stale report should refuse activation"
   assert_contains "$out" 'report disposition is BLOCK' "stale report disposition was not reported"
@@ -190,7 +192,7 @@ test_report_hash_refuses() {
 test_plan_blocking_finding_refuses() {
   local out status=0
   setup_fixture
-  printf '# OMP report\n\n## Executive disposition\n\nPASS\n\n## Plan-blocking findings\n\n- S1 transaction defect\n' >"$TMP_ROOT/data/omp-final-corrected-plan-redteam-o9/report.md"
+  printf '# OMP report\n\n## Executive disposition\n\nPASS\n\n## Plan-blocking findings\n\n- S1 transaction defect\n' >"$TMP_ROOT/data/omp-final-authority-redteam-o10/report.md"
   out=$(invoke --check) || status=$?
   expect_code 1 "$status" "a plan-blocking finding should refuse activation"
   assert_contains "$out" 'report must declare no plan-blocking findings' "plan-blocking finding was not refused"
@@ -376,7 +378,7 @@ test_manifest_drives_publication_set() {
 test_activation_dependency_closure_refuses() {
   local manifest="$TMP_ROOT/manifest.json" out status=0
   setup_fixture
-  jq '.tasks[5].depends_on = ["omp-p1-identity-ancestry"]' "$ROOT/.agents/tasks/omp-manifest.json" >"$manifest"
+  jq '.tasks[6].depends_on = ["omp-p1-identity-ancestry"]' "$ROOT/.agents/tasks/omp-manifest.json" >"$manifest"
   ACTIVATION_MANIFEST="$manifest"
   out=$(invoke --check) || status=$?
   ACTIVATION_MANIFEST="$ROOT/.agents/tasks/omp-manifest.json"
@@ -391,7 +393,7 @@ test_historical_o8_cannot_authorize() {
   out=$(invoke --check "" --report "$TMP_ROOT/data/omp-corrected-plan-redteam-o8/report.md") || status=$?
   expect_code 1 "$status" "historical O8 BLOCK report should not authorize activation"
   assert_contains "$out" 'report disposition is BLOCK' "historical O8 BLOCK was not refused"
-  assert_contains "$out" 'activation report path does not match the O9 manifest path' "historical O8 report path was accepted"
+  assert_contains "$out" 'activation report path does not match the O10 manifest path' "historical O8 report path was accepted"
   pass "omp-activation: historical O8 BLOCK cannot authorize"
 }
 
@@ -403,8 +405,8 @@ test_o9_is_sole_pass_gate() {
   out=$(invoke --check) || status=$?
   ACTIVATION_MANIFEST="$ROOT/.agents/tasks/omp-manifest.json"
   expect_code 1 "$status" "manifest/report identity drift should refuse activation"
-  assert_contains "$out" 'activation report task must be omp-final-corrected-plan-redteam-o9' "O9 report task drift was not refused"
-  pass "omp-activation: O9 is the sole report identity gate"
+  assert_contains "$out" 'activation report task must be omp-final-authority-redteam-o10' "O10 report task drift was not refused"
+  pass "omp-activation: O10 is the sole report identity gate"
 }
 
 test_repeat_check_and_activate_are_single_unit_safe() {

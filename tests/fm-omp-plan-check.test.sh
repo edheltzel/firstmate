@@ -13,7 +13,7 @@ test_current_manifest_passes() {
   out=$($CHECK --json) || status=$?
   expect_code 0 "$status" "current OMP manifest should pass its non-mutating validator"
   assert_contains "$out" '"status": "PASS"' "current OMP manifest did not return machine-readable PASS"
-  assert_contains "$out" '"task_count": 28' "current OMP manifest task count drifted"
+  assert_contains "$out" '"task_count": 29' "current OMP manifest task count drifted"
   pass "omp-plan-check: current manifest, roadmap, plan, and tracked backlog pass"
 }
 
@@ -39,15 +39,15 @@ test_cycle_refuses() {
   pass "omp-plan-check: dependency cycle is refused"
 }
 
-test_forward_dependency_passes() {
+test_forward_dependency_projection_refuses() {
   local forward="$TMP_ROOT/forward-dependency.json" out status=0
   mkdir -p "$TMP_ROOT"
   jq '.tasks = [.tasks[0], .tasks[2], .tasks[1]] + .tasks[3:]' \
     "$ROOT/.agents/tasks/omp-manifest.json" >"$forward"
   out=$($CHECK --json --manifest "$forward") || status=$?
-  expect_code 0 "$status" "a dependency on a later manifest row should remain valid"
-  assert_contains "$out" '"status": "PASS"' "forward dependency was rejected by manifest order"
-  pass "omp-plan-check: forward dependency is order-independent"
+  expect_code 1 "$status" "unpublished task-contract reorder should refuse"
+  assert_contains "$out" 'canonical OMP task semantic parity check did not pass' "unpublished task-contract reorder was not refused"
+  pass "omp-plan-check: task-contract order drift is refused until projections are republished"
 }
 
 test_duplicate_stop_refuses() {
@@ -92,8 +92,8 @@ test_report_identity_refuses() {
   jq '.activation_report_task_id = "omp-corrected-plan-redteam-o8"' "$ROOT/.agents/tasks/omp-manifest.json" >"$bad"
   out=$($CHECK --json --manifest "$bad") || status=$?
   expect_code 1 "$status" "activation report identity drift should block the plan"
-  assert_contains "$out" 'manifest activation report identity is not the O9 contract' "activation report identity refusal was not reported"
-  pass "omp-plan-check: O9 report identity is exact"
+  assert_contains "$out" 'manifest activation report identity is not the O10 contract' "activation report identity refusal was not reported"
+  pass "omp-plan-check: O10 report identity is exact"
 }
 
 test_o7_completion_state_parity_refuses() {
@@ -143,7 +143,7 @@ test_plan_tmpdir_failure_refuses() {
 test_current_manifest_passes
 test_unknown_dependency_refuses
 test_cycle_refuses
-test_forward_dependency_passes
+test_forward_dependency_projection_refuses
 test_duplicate_stop_refuses
 test_duplicate_dependency_edge_refuses
 test_duplicate_validation_refuses

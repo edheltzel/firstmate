@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Gate and atomically publish the first corrected OMP phase as one authoritative backlog postimage.
-# Usage: bin/fm-omp-activation.sh [--check|--activate] [--json] [--report PATH] [--manifest PATH] [--roadmap PATH] [--tracked-backlog PATH] [--live-backlog PATH] [--repo-root PATH] [--authorization PATH] [--decisions PATH] [--stops PATH] [--preflight PATH]
+# Usage: bin/fm-omp-activation.sh [--check|--activate] [--json] [--test-only] [--report PATH] [--manifest PATH] [--roadmap PATH] [--tracked-backlog PATH] [--live-backlog PATH] [--repo-root PATH] [--authorization PATH] [--decisions PATH] [--stops PATH] [--preflight PATH]
 
 set -u
 
 ROOT=$(cd -- "$(dirname -- "$0")/.." && pwd)
 FM_HOME_ROOT=${FM_HOME:-$ROOT}
-REPORT=${FM_OMP_REPORT:-$FM_HOME_ROOT/data/omp-final-corrected-plan-redteam-o9/report.md}
+REPORT=${FM_OMP_REPORT:-$FM_HOME_ROOT/data/omp-final-authority-redteam-o10/report.md}
 MANIFEST="$ROOT/.agents/tasks/omp-manifest.json"
+RUNTIME_PIN="$ROOT/.agents/tasks/omp-runtime-pin.json"
 ROADMAP="$ROOT/.agents/tasks/roadmap.md"
 TRACKED_BACKLOG="$ROOT/.agents/tasks/backlog.md"
 LIVE_BACKLOG="$FM_HOME_ROOT/data/backlog.md"
@@ -28,6 +29,9 @@ FAIL_STAGE=${FM_OMP_ACTIVATION_FAIL_STAGE:-}
 ACTIVATION_DATE=${FM_OMP_ACTIVATION_DATE:-$(date -u +%F)}
 ACTION=check
 JSON_OUTPUT=0
+TEST_ONLY=0
+ACTIVATION_LOCK="$FM_HOME_ROOT/state/.omp-activation.lock"
+LOCK_HELD=0
 
 usage() {
   sed -n '2,3p' "$0"
@@ -38,6 +42,7 @@ while [ "$#" -gt 0 ]; do
     --check) ACTION=check ;;
     --activate) ACTION=activate ;;
     --json) JSON_OUTPUT=1 ;;
+    --test-only) TEST_ONLY=1 ;;
     --report) shift; REPORT=${1-} ;;
     --manifest) shift; MANIFEST=${1-} ;;
     --roadmap) shift; ROADMAP=${1-} ;;
@@ -53,6 +58,11 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+
+if [ "$TEST_ONLY" -eq 1 ] && [ "${FM_OMP_TEST_MODE:-0}" != 1 ]; then
+  printf 'test-only activation mode requires FM_OMP_TEST_MODE=1\n' >&2
+  exit 2
+fi
 
 ERRORS=()
 ACTIVATION_IDS=()
@@ -70,7 +80,58 @@ if ! TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fm-omp-activation.XXXXXX" 2>/dev/null)
   fi
   exit 1
 fi
-trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
+cleanup_activation_lock() {
+  if [ "$LOCK_HELD" -eq 1 ] && [ -f "$ACTIVATION_LOCK/owner" ] && [ "$(sed -n 's/^pid=//p' "$ACTIVATION_LOCK/owner" | head -n 1)" = "$$" ]; then
+    rmdir "$ACTIVATION_LOCK" 2>/dev/null || true
+  fi
+}
+trap 'cleanup_activation_lock; rm -rf "$TMP_DIR"' EXIT HUP INT TERM
+
+if [ "$TEST_ONLY" -eq 0 ]; then
+  if [ "$REPORT" != "$FM_HOME_ROOT/data/omp-final-authority-redteam-o10/report.md" ] ||
+    [ "$MANIFEST" != "$ROOT/.agents/tasks/omp-manifest.json" ] ||
+    [ "$RUNTIME_PIN" != "$ROOT/.agents/tasks/omp-runtime-pin.json" ] ||
+    [ "$ROADMAP" != "$ROOT/.agents/tasks/roadmap.md" ] ||
+    [ "$TRACKED_BACKLOG" != "$ROOT/.agents/tasks/backlog.md" ] ||
+    [ "$LIVE_BACKLOG" != "$FM_HOME_ROOT/data/backlog.md" ] ||
+    [ "$REPO_ROOT" != "$ROOT" ] ||
+    [ "$AUTHORIZATION" != "$FM_HOME_ROOT/data/omp-captain-authorization.json" ] ||
+    [ "$DECISIONS" != "$FM_HOME_ROOT/data/omp-decision-inventory.json" ] ||
+    [ "$STOPS" != "$FM_HOME_ROOT/data/omp-stop-ledger.json" ] ||
+    [ "$PREFLIGHT" != "$FM_HOME_ROOT/data/omp-activation-preflight.json" ]; then
+    error "production activation inputs must be canonical; use explicit test-only mode for fixtures"
+  fi
+fi
+
+acquire_activation_lock() {
+  mkdir -p "$(dirname "$ACTIVATION_LOCK")" 2>/dev/null || {
+    error "activation lock parent is unavailable: $(dirname "$ACTIVATION_LOCK")"
+    return
+  }
+  if mkdir "$ACTIVATION_LOCK" 2>/dev/null; then
+    printf 'pid=%s\nbranch=%s\ncommit=%s\n' "$$" "$(git -C "$REPO_ROOT" branch --show-current 2>/dev/null || true)" "$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)" >"$ACTIVATION_LOCK/owner"
+    LOCK_HELD=1
+    return
+  fi
+  local owner_pid
+  owner_pid=$(sed -n 's/^pid=//p' "$ACTIVATION_LOCK/owner" 2>/dev/null | head -n 1 || true)
+  if printf '%s\n' "$owner_pid" | grep -Eq '^[0-9]+$' && [ "$owner_pid" != "$$" ] && ! kill -0 "$owner_pid" 2>/dev/null; then
+    mv "$ACTIVATION_LOCK" "$ACTIVATION_LOCK.stale.$owner_pid" 2>/dev/null || {
+      error "activation lock is held and stale-lock quarantine failed"
+      return
+    }
+    if mkdir "$ACTIVATION_LOCK" 2>/dev/null; then
+      printf 'pid=%s\nbranch=%s\ncommit=%s\n' "$$" "$(git -C "$REPO_ROOT" branch --show-current 2>/dev/null || true)" "$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)" >"$ACTIVATION_LOCK/owner"
+      LOCK_HELD=1
+      return
+    fi
+  fi
+  error "activation lock is already held; refusing concurrent publication"
+}
+
+if [ "$ACTION" = activate ]; then
+  acquire_activation_lock
+fi
 
 if ! printf '%s\n' "$ACTIVATION_DATE" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
   error "activation date must match YYYY-MM-DD: $ACTIVATION_DATE"
@@ -126,13 +187,11 @@ is_activation_task() {
 REPORT_DISPOSITION=
 if [ -f "$REPORT" ]; then
   REPORT_DISPOSITION=$(awk '
-    /^##[[:space:]]+Executive disposition/ { in_disposition=1; next }
-    in_disposition && /(CONDITIONAL PASS|PASS|BLOCK)/ {
-      if ($0 ~ /CONDITIONAL PASS/) { print "CONDITIONAL PASS"; exit }
-      if ($0 ~ /BLOCK/) { print "BLOCK"; exit }
-      if ($0 ~ /PASS/) { print "PASS"; exit }
-    }
-  ' "$REPORT")
+    /^##[[:space:]]+Executive disposition[[:space:]]*$/ { section=1; headings++; next }
+    /^##[[:space:]]/ { section=0; next }
+    section && /^(PASS|BLOCK|CONDITIONAL PASS)$/ { status=$0; statuses++ }
+    END { if (headings != 1 || statuses != 1) exit 1; print status }
+  ' "$REPORT" 2>/dev/null || true)
   if [ -z "$REPORT_DISPOSITION" ]; then
     error "report has no exact Executive disposition"
   elif [ "$REPORT_DISPOSITION" != "PASS" ]; then
@@ -145,11 +204,17 @@ fi
 REPORT_PLAN_BLOCKERS=
 if [ -f "$REPORT" ]; then
   REPORT_PLAN_BLOCKERS=$(awk '
-    /^##[[:space:]]+Plan-blocking findings[[:space:]]*$/ { in_blockers=1; next }
-    in_blockers && /^##[[:space:]]/ { exit }
-    in_blockers && /^[[:space:]]*(None|none)\.?[[:space:]]*$/ { print "none"; exit }
-    in_blockers && NF { print "finding"; exit }
-  ' "$REPORT")
+    /^##[[:space:]]+Plan-blocking findings[[:space:]]*$/ { in_blockers=1; headings++; next }
+    in_blockers && /^##[[:space:]]/ { in_blockers=0; next }
+    in_blockers && NF {
+      line=$0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      body = body (body == "" ? "" : "\n") line
+      lines++
+    }
+    END { if (headings != 1 || lines != 1 || body != "None.") exit 1; print "none" }
+  ' "$REPORT" 2>/dev/null || true)
   if [ "$REPORT_PLAN_BLOCKERS" != none ]; then
     error "report must declare no plan-blocking findings under the exact heading"
   fi
@@ -166,6 +231,13 @@ PLAN_CHECK_JSON=$(
 )
 if [ "$(printf '%s' "$PLAN_CHECK_JSON" | jq -r '.status // "BLOCK"' 2>/dev/null || printf BLOCK)" != PASS ]; then
   error "machine-readable OMP plan check did not pass"
+fi
+
+RUNTIME_PIN_JSON=$(
+  "$ROOT/bin/fm-omp-runtime-pin-check.sh" --json --pin "$RUNTIME_PIN" 2>/dev/null || true
+)
+if [ "$(printf '%s' "$RUNTIME_PIN_JSON" | jq -r '.status // "BLOCK"' 2>/dev/null || printf BLOCK)" != PASS ]; then
+  error "installed OMP runtime does not match the versioned pre-activation pin"
 fi
 
 require_file "$MANIFEST"
@@ -232,15 +304,15 @@ if [ -f "$MANIFEST" ] && jq empty "$MANIFEST" >/dev/null 2>&1; then
 fi
 
 if [ -f "$MANIFEST" ] && jq empty "$MANIFEST" >/dev/null 2>&1; then
-  if [ "$ACTIVATION_REPORT_TASK_ID" != "omp-final-corrected-plan-redteam-o9" ]; then
-    error "activation report task must be omp-final-corrected-plan-redteam-o9"
+  if [ "$ACTIVATION_REPORT_TASK_ID" != "omp-final-authority-redteam-o10" ]; then
+    error "activation report task must be omp-final-authority-redteam-o10"
   fi
-  if [ "$ACTIVATION_REPORT_PATH" != "data/omp-final-corrected-plan-redteam-o9/report.md" ]; then
-    error "activation report path must be data/omp-final-corrected-plan-redteam-o9/report.md"
+  if [ "$ACTIVATION_REPORT_PATH" != "data/omp-final-authority-redteam-o10/report.md" ]; then
+    error "activation report path must be data/omp-final-authority-redteam-o10/report.md"
   fi
   EXPECTED_REPORT_PATH="$FM_HOME_ROOT/$ACTIVATION_REPORT_PATH"
   if [ "$REPORT" != "$EXPECTED_REPORT_PATH" ]; then
-    error "activation report path does not match the O9 manifest path: $REPORT"
+    error "activation report path does not match the O10 manifest path: $REPORT"
   fi
   if ! jq -e --arg id "$ACTIVATION_REPORT_TASK_ID" --arg path "$ACTIVATION_REPORT_PATH" '.tasks | map(select(.id == $id and .report_path == $path)) | length == 1' "$MANIFEST" >/dev/null 2>&1; then
     error "activation report task and manifest path are not paired"
@@ -270,6 +342,7 @@ validate_receipt_file() {
     and .completed_activation_task_id == $activation_id
     and .activation_date == $activation_date
     and .support_fence == $support_fence
+    and .task_ids == $task_ids
     and .task_records == $task_records
   ' "$receipt_path" >/dev/null 2>&1
 }
@@ -299,6 +372,11 @@ fi
 if [ -f "$DECISIONS" ]; then
   if ! jq -e '.schema == "omp-decision-inventory.v1" and ((.open_keys // []) | length) == 0' "$DECISIONS" >/dev/null 2>&1; then
     error "decision-hold inventory is not clean"
+  fi
+fi
+if [ "$TEST_ONLY" -eq 0 ]; then
+  if [ ! -x "$ROOT/bin/fm-decision-hold.sh" ] || ! FM_HOME="$FM_HOME_ROOT" "$ROOT/bin/fm-decision-hold.sh" verify "$ACTIVATION_REPORT_TASK_ID" >/dev/null 2>&1; then
+    error "decision-hold verification did not pass for the O10 authority task"
   fi
 fi
 
@@ -574,6 +652,8 @@ if [ "$ACTION" = activate ] && [ "${#ERRORS[@]}" -eq 0 ]; then
         error "fault injection refused at postimage-validate stage"
       elif [ "$FAIL_STAGE" = pre-publication ]; then
         error "fault injection refused at pre-publication stage"
+      elif [ -n "$EXPECTED_LIVE_SHA256" ] && [ "$(sha256 "$LIVE_BACKLOG")" != "$EXPECTED_LIVE_SHA256" ]; then
+        error "live backlog changed during activation; refusing atomic rename"
       elif ! mv -f -- "$NEW_BACKLOG" "$LIVE_BACKLOG"; then
         error "could not publish the authoritative backlog postimage"
       else

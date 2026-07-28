@@ -11,7 +11,13 @@ TMP_ROOT=$(fm_test_tmproot fm-omp-publication-check)
 write_state() {
   local path=$1 state=$2
   mkdir -p "$TMP_ROOT"
-  jq -n --arg state "$state" '{schema:"omp-publication-state.v1",state:$state,support_fence:"experimental tmux worker; unverified; no primary, secondmate, recovery, or Herdr support",changed_paths:["state/{task}.pr-poll"]}' >"$path"
+  local inventory_ids
+  inventory_ids=$(jq -c '[.artifacts[].id]' "$ROOT/.agents/tasks/omp-publication-manifest.json")
+  if [ "$state" = pre ]; then
+    jq -n --arg state "$state" --argjson inventory_ids "$inventory_ids" '{schema:"omp-publication-state.v2",state:$state,support_fence:"experimental tmux worker; unverified; no primary, secondmate, recovery, or Herdr support",inventory_ids:$inventory_ids,changed_paths:[],pre_paths:["state/{task}.pr-poll"],post_paths:["state/{task}.pr-poll"]}' >"$path"
+  else
+    jq -n --arg state "$state" --argjson inventory_ids "$inventory_ids" '{schema:"omp-publication-state.v2",state:$state,support_fence:"experimental tmux worker; unverified; no primary, secondmate, recovery, or Herdr support",inventory_ids:$inventory_ids,changed_paths:["state/{task}.pr-poll"],pre_paths:["state/{task}.pr-poll"],post_paths:["state/{task}.pr-poll"]}' >"$path"
+  fi
 }
 
 test_inventory_passes() {
@@ -65,7 +71,7 @@ test_duplicate_machine_inventory_refuses() {
   status=0
   out=$($CHECK --json --manifest "$manifest") || status=$?
   expect_code 1 "$status" "duplicate tracked path should block"
-  assert_contains "$out" 'duplicate tracked path: bin/fm-session-lock-lib.sh' "duplicate tracked path refusal was not reported"
+  assert_contains "$out" 'duplicate tracked path:' "duplicate tracked path refusal was not reported"
   jq '.artifacts[1].paths += [.artifacts[1].paths[0]]' "$ROOT/.agents/tasks/omp-publication-manifest.json" >"$manifest"
   status=0
   out=$($CHECK --json --manifest "$manifest") || status=$?
@@ -87,7 +93,7 @@ test_duplicate_machine_inventory_refuses() {
 test_unknown_changed_path_refuses() {
   local state="$TMP_ROOT/unknown-path.json" out status=0
   mkdir -p "$TMP_ROOT"
-  jq -n '{schema:"omp-publication-state.v1",state:"post",support_fence:"experimental tmux worker; unverified; no primary, secondmate, recovery, or Herdr support",changed_paths:["state/not-in-inventory"]}' >"$state"
+  jq -n --argjson inventory_ids "$(jq -c '[.artifacts[].id]' "$ROOT/.agents/tasks/omp-publication-manifest.json")" '{schema:"omp-publication-state.v2",state:"post",support_fence:"experimental tmux worker; unverified; no primary, secondmate, recovery, or Herdr support",inventory_ids:$inventory_ids,changed_paths:["state/not-in-inventory"],pre_paths:["state/{task}.pr-poll"],post_paths:["state/{task}.pr-poll"]}' >"$state"
   out=$($CHECK --json --simulate "$state") || status=$?
   expect_code 1 "$status" "unknown changed publication path should block"
   assert_contains "$out" 'outside the publication inventory' "unknown changed path refusal was not reported"
@@ -96,6 +102,26 @@ test_unknown_changed_path_refuses() {
   expect_code 1 "$status" "substring-collision changed publication path should block"
   assert_contains "$out" 'outside the publication inventory: state/{task}.pr-pol' "substring-collision changed path refusal was not reported"
   pass "omp-publication-check: unknown changed path is refused"
+}
+
+test_false_pass_shapes_refuse() {
+  local state="$TMP_ROOT/false-pass.json" out status=0
+  write_state "$state" post
+  jq '.changed_paths += [.changed_paths[0]]' "$state" >"$TMP_ROOT/duplicate.json"
+  out=$($CHECK --json --simulate "$TMP_ROOT/duplicate.json") || status=$?
+  expect_code 1 "$status" "duplicate changed paths should block"
+  assert_contains "$out" 'changed path list contains duplicates' "duplicate changed paths were accepted"
+  jq '.post_paths = []' "$state" >"$TMP_ROOT/empty-post.json"
+  status=0
+  out=$($CHECK --json --simulate "$TMP_ROOT/empty-post.json") || status=$?
+  expect_code 1 "$status" "empty post image should block"
+  assert_contains "$out" 'post image is empty' "empty post image was accepted"
+  jq '.inventory_ids = .inventory_ids[0:1]' "$state" >"$TMP_ROOT/missing-group.json"
+  status=0
+  out=$($CHECK --json --simulate "$TMP_ROOT/missing-group.json") || status=$?
+  expect_code 1 "$status" "partial inventory IDs should block"
+  assert_contains "$out" 'inventory ID set is incomplete' "partial inventory IDs were accepted"
+  pass "omp-publication-check: duplicate, empty, and partial states are refused"
 }
 
 test_source_owner_token_drift_refuses() {
@@ -150,6 +176,7 @@ test_pre_and_post_state_pass
 test_missing_tracked_path_refuses
 test_duplicate_machine_inventory_refuses
 test_unknown_changed_path_refuses
+test_false_pass_shapes_refuse
 test_source_owner_token_drift_refuses
 test_stale_inventory_id_refuses
 test_duplicate_documentation_row_refuses

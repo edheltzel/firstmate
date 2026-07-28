@@ -75,8 +75,8 @@ if [ "$MANIFEST_VALID" -eq 1 ]; then
   if ! jq -e '.schema == "omp-task-manifest.v1" and .version == 1 and .dependency_mode == "exact-task-ids"' "$MANIFEST" >/dev/null 2>&1; then
     error "manifest schema, version, or dependency mode is invalid"
   fi
-  if ! jq -e '. as $root | ($root.activation_report_task_id == "omp-final-corrected-plan-redteam-o9" and $root.activation_report_path == "data/omp-final-corrected-plan-redteam-o9/report.md" and ([$root.tasks[] | select(.id == $root.activation_report_task_id)] | length) == 1)' "$MANIFEST" >/dev/null 2>&1; then
-    error "manifest activation report identity is not the O9 contract"
+  if ! jq -e '. as $root | ($root.activation_report_task_id == "omp-final-authority-redteam-o10" and $root.activation_report_path == "data/omp-final-authority-redteam-o10/report.md" and ([$root.tasks[] | select(.id == $root.activation_report_task_id)] | length) == 1)' "$MANIFEST" >/dev/null 2>&1; then
+    error "manifest activation report identity is not the O10 contract"
   fi
 
   TASK_COUNT=$(jq '.tasks | length' "$MANIFEST")
@@ -216,6 +216,13 @@ if [ "$MANIFEST_VALID" -eq 1 ]; then
       error "manifest validation ID is absent from plan: $validation"
     fi
   done < <(jq -r '.tasks[].validation_ids[]' "$MANIFEST" | sort -u)
+fi
+
+PARITY_JSON=$(
+  "$ROOT/bin/fm-omp-task-parity-check.sh" --json --manifest "$MANIFEST" --plan "$PLAN" --roadmap "$ROADMAP" --backlog "$BACKLOG" 2>/dev/null || true
+)
+if [ "$(printf '%s' "$PARITY_JSON" | jq -r '.status // "BLOCK"' 2>/dev/null || printf BLOCK)" != PASS ]; then
+  error "canonical OMP task semantic parity check did not pass"
 fi
 
 if command -v "$TASKS_AXI" >/dev/null 2>&1; then

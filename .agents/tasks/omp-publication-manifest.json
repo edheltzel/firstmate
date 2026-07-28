@@ -3,114 +3,746 @@
   "version": 1,
   "source_document": "docs/omp-publication-inventory.md",
   "tracked_paths": [
-    "bin/fm-session-lock-lib.sh",
-    "bin/fm-lock.sh",
-    "tests/fm-session-lock.test.sh",
-    "bin/fm-backend.sh",
-    "bin/backends/tmux.sh",
+    ".agents/plans/omp-harness-integration-plan.md",
+    ".agents/tasks/backlog.md",
+    ".agents/tasks/omp-manifest.json",
+    ".agents/tasks/omp-runtime-pin.json",
+    ".agents/tasks/roadmap.md",
     "bin/backends/herdr.sh",
+    "bin/backends/tmux.sh",
+    "bin/fm-backend.sh",
+    "bin/fm-bearings-snapshot.sh",
+    "bin/fm-check-register.sh",
+    "bin/fm-continuity-command-policy.mjs",
+    "bin/fm-continuity-pretool-check.sh",
     "bin/fm-crew-state.sh",
-    "bin/fm-spawn.sh",
-    "bin/fm-teardown.sh",
+    "bin/fm-fleet-snapshot.sh",
+    "bin/fm-lock.sh",
+    "bin/fm-omp-activation.sh",
+    "bin/fm-omp-monitor-check.sh",
+    "bin/fm-omp-plan-check.sh",
+    "bin/fm-omp-publication-check.sh",
+    "bin/fm-omp-runtime-pin-check.sh",
+    "bin/fm-omp-task-parity-check.sh",
+    "bin/fm-pr-check-migrate.sh",
     "bin/fm-pr-check.sh",
     "bin/fm-pr-lib.sh",
-    "bin/fm-check-register.sh",
-    "bin/fm-pr-check-migrate.sh",
-    "bin/fm-omp-activation.sh",
-    "bin/fm-omp-publication-check.sh",
+    "bin/fm-session-lock-lib.sh",
+    "bin/fm-spawn.sh",
+    "bin/fm-teardown.sh",
+    "bin/fm-turnend-guard.sh",
+    "bin/fm-wake-drain.sh",
+    "bin/fm-wake-lib.sh",
+    "bin/fm-watch-arm.sh",
+    "bin/fm-watch-checkpoint.sh",
+    "bin/fm-watch.sh",
+    "docs/omp-publication-inventory.md",
+    "tests/fm-bearings-snapshot.test.sh",
+    "tests/fm-continuity-pretool-check.test.sh",
+    "tests/fm-fleet-snapshot-view.test.sh",
+    "tests/fm-omp-activation.test.sh",
+    "tests/fm-omp-monitor-check.test.sh",
+    "tests/fm-omp-plan-check.test.sh",
     "tests/fm-omp-publication-check.test.sh",
-    "docs/omp-publication-inventory.md"
+    "tests/fm-omp-runtime-pin-check.test.sh",
+    "tests/fm-omp-task-parity-check.test.sh",
+    "tests/fm-session-lock.test.sh",
+    "tests/fm-turnend-guard.test.sh",
+    "tests/fm-wake-queue.test.sh",
+    "tests/fm-watch-checkpoint.test.sh",
+    "tests/fm-watch-triage.test.sh",
+    "tests/fm-watcher-lock.test.sh"
   ],
   "artifacts": [
     {
       "id": "shared-lock-identity",
-      "paths": ["bin/fm-session-lock-lib.sh", "bin/fm-lock.sh", "tests/fm-session-lock.test.sh"],
-      "creator": [{"path": "bin/fm-session-lock-lib.sh", "tokens": ["FM_HARNESS_RE"]}],
-      "cleanup": [{"path": "bin/fm-lock.sh", "tokens": ["fm_lock_release"]}],
+      "paths": [
+        "bin/fm-session-lock-lib.sh",
+        "bin/fm-lock.sh",
+        "tests/fm-session-lock.test.sh"
+      ],
+      "creator": [
+        {
+          "path": "bin/fm-session-lock-lib.sh",
+          "tokens": [
+            "FM_HARNESS_RE"
+          ]
+        }
+      ],
+      "cleanup": [
+        {
+          "path": "bin/fm-lock.sh",
+          "tokens": [
+            "fm_lock_release"
+          ]
+        }
+      ],
       "rollback_owner": "omp-p2-identity-adapter",
       "evidence_schema": "omp-evidence.v1",
-      "rollback_schema": "omp-rollback.v1"
+      "rollback_schema": "omp-rollback.v1",
+      "task_id": "omp-p2-identity-adapter",
+      "owner": "omp-p2-identity-adapter",
+      "validation_ids": [
+        "V26"
+      ],
+      "evidence_id": "omp-evidence-omp-p2-identity-adapter",
+      "rollback_id": "omp-rollback-omp-p2-identity-adapter"
     },
     {
       "id": "backend-liveness",
-      "paths": ["bin/fm-backend.sh", "bin/backends/tmux.sh", "bin/backends/herdr.sh", "bin/fm-crew-state.sh"],
-      "creator": [{"path": "bin/fm-backend.sh", "tokens": ["fm_backend_agent_alive"]}],
-      "cleanup": [{"path": "bin/fm-teardown.sh", "tokens": ["teardown"]}],
+      "paths": [
+        "bin/fm-backend.sh",
+        "bin/backends/tmux.sh",
+        "bin/backends/herdr.sh",
+        "bin/fm-crew-state.sh"
+      ],
+      "creator": [
+        {
+          "path": "bin/fm-backend.sh",
+          "tokens": [
+            "fm_backend_agent_alive"
+          ]
+        }
+      ],
+      "cleanup": [
+        {
+          "path": "bin/fm-teardown.sh",
+          "tokens": [
+            "teardown"
+          ]
+        }
+      ],
       "rollback_owner": "omp-p7-recovery",
       "evidence_schema": "omp-evidence.v1",
-      "rollback_schema": "omp-rollback.v1"
+      "rollback_schema": "omp-rollback.v1",
+      "task_id": "omp-p7-recovery",
+      "owner": "omp-p7-recovery",
+      "validation_ids": [
+        "V26"
+      ],
+      "evidence_id": "omp-evidence-omp-p7-recovery",
+      "rollback_id": "omp-rollback-omp-p7-recovery"
     },
     {
       "id": "pi-worker-hooks",
-      "paths": ["state/{task}.pi-ext", "projects/{project}/.pi/settings.json", "projects/{project}/.pi/extensions/"],
-      "creator": [{"path": "bin/fm-spawn.sh", "tokens": ["__PIEXT__"]}],
-      "cleanup": [{"path": "bin/fm-teardown.sh", "tokens": ["pi-ext.ts"]}],
+      "paths": [
+        "state/{task}.pi-ext",
+        "projects/{project}/.pi/settings.json",
+        "projects/{project}/.pi/extensions/"
+      ],
+      "creator": [
+        {
+          "path": "bin/fm-spawn.sh",
+          "tokens": [
+            "__PIEXT__"
+          ]
+        }
+      ],
+      "cleanup": [
+        {
+          "path": "bin/fm-teardown.sh",
+          "tokens": [
+            "pi-ext.ts"
+          ]
+        }
+      ],
       "rollback_owner": "omp-p8-policy-publication",
       "evidence_schema": "omp-evidence.v1",
-      "rollback_schema": "omp-rollback.v1"
+      "rollback_schema": "omp-rollback.v1",
+      "task_id": "omp-p8-policy-publication",
+      "owner": "omp-p8-policy-publication",
+      "validation_ids": [
+        "V26"
+      ],
+      "evidence_id": "omp-evidence-omp-p8-policy-publication",
+      "rollback_id": "omp-rollback-omp-p8-policy-publication"
     },
     {
       "id": "grok-authentication",
-      "paths": ["state/{task}.grok-token", "state/{task}.grok-token.pointer", "projects/{project}/.grok/"],
-      "creator": [{"path": "bin/fm-spawn.sh", "tokens": ["grok-turnend-token"]}],
-      "cleanup": [{"path": "bin/fm-teardown.sh", "tokens": ["grok-turnend-token"]}],
+      "paths": [
+        "state/{task}.grok-token",
+        "state/{task}.grok-token.pointer",
+        "projects/{project}/.grok/"
+      ],
+      "creator": [
+        {
+          "path": "bin/fm-spawn.sh",
+          "tokens": [
+            "grok-turnend-token"
+          ]
+        }
+      ],
+      "cleanup": [
+        {
+          "path": "bin/fm-teardown.sh",
+          "tokens": [
+            "grok-turnend-token"
+          ]
+        }
+      ],
       "rollback_owner": "omp-p8-policy-publication",
       "evidence_schema": "omp-evidence.v1",
-      "rollback_schema": "omp-rollback.v1"
+      "rollback_schema": "omp-rollback.v1",
+      "task_id": "omp-p8-policy-publication",
+      "owner": "omp-p8-policy-publication",
+      "validation_ids": [
+        "V26"
+      ],
+      "evidence_id": "omp-evidence-omp-p8-policy-publication",
+      "rollback_id": "omp-rollback-omp-p8-policy-publication"
     },
     {
       "id": "global-worktree-hooks",
-      "paths": ["~/.config/grok/hooks/", "projects/{project}/.claude/settings.local.json", "projects/{project}/.opencode/plugins/"],
-      "creator": [{"path": "bin/fm-spawn.sh", "tokens": ["GROK_HOOKS_DIR"]}],
-      "cleanup": [{"path": "bin/fm-teardown.sh", "tokens": ["hooks_dir"]}],
+      "paths": [
+        "~/.config/grok/hooks/",
+        "projects/{project}/.claude/settings.local.json",
+        "projects/{project}/.opencode/plugins/"
+      ],
+      "creator": [
+        {
+          "path": "bin/fm-spawn.sh",
+          "tokens": [
+            "GROK_HOOKS_DIR"
+          ]
+        }
+      ],
+      "cleanup": [
+        {
+          "path": "bin/fm-teardown.sh",
+          "tokens": [
+            "hooks_dir"
+          ]
+        }
+      ],
       "rollback_owner": "omp-p8-policy-publication",
       "evidence_schema": "omp-evidence.v1",
-      "rollback_schema": "omp-rollback.v1"
+      "rollback_schema": "omp-rollback.v1",
+      "task_id": "omp-p8-policy-publication",
+      "owner": "omp-p8-policy-publication",
+      "validation_ids": [
+        "V26"
+      ],
+      "evidence_id": "omp-evidence-omp-p8-policy-publication",
+      "rollback_id": "omp-rollback-omp-p8-policy-publication"
     },
     {
       "id": "pr-check-publication",
-      "paths": ["state/{task}.check.sh", "state/{task}.check-trust", "state/{task}.pr-poll", "state/{task}.pr-poll-registration", "state/{task}.pr-publication", "state/{task}.pr-binding", "state/.pr-check-quarantine/", "state/.pr-check-migration.log"],
-      "creator": [{"path": "bin/fm-pr-check.sh", "tokens": ["fm_pr_poll_prepare"]}, {"path": "bin/fm-check-register.sh", "tokens": ["check-trust"]}, {"path": "bin/fm-pr-check-migrate.sh", "tokens": ["LOG=\"$STATE/.pr-check-migration.log\"", "record_diagnostic"]}],
-      "cleanup": [{"path": "bin/fm-teardown.sh", "tokens": ["pr-poll"]}],
+      "paths": [
+        "state/{task}.check.sh",
+        "state/{task}.check-trust",
+        "state/{task}.pr-poll",
+        "state/{task}.pr-poll-registration",
+        "state/{task}.pr-publication",
+        "state/{task}.pr-binding",
+        "state/.pr-check-quarantine/",
+        "state/.pr-check-migration.log"
+      ],
+      "creator": [
+        {
+          "path": "bin/fm-pr-check.sh",
+          "tokens": [
+            "fm_pr_poll_prepare"
+          ]
+        },
+        {
+          "path": "bin/fm-check-register.sh",
+          "tokens": [
+            "check-trust"
+          ]
+        },
+        {
+          "path": "bin/fm-pr-check-migrate.sh",
+          "tokens": [
+            "LOG=\"$STATE/.pr-check-migration.log\"",
+            "record_diagnostic"
+          ]
+        }
+      ],
+      "cleanup": [
+        {
+          "path": "bin/fm-teardown.sh",
+          "tokens": [
+            "pr-poll"
+          ]
+        }
+      ],
       "rollback_owner": "omp-p8-policy-publication",
       "evidence_schema": "omp-evidence.v1",
-      "rollback_schema": "omp-rollback.v1"
+      "rollback_schema": "omp-rollback.v1",
+      "task_id": "omp-p8-policy-publication",
+      "owner": "omp-p8-policy-publication",
+      "validation_ids": [
+        "V26"
+      ],
+      "evidence_id": "omp-evidence-omp-p8-policy-publication",
+      "rollback_id": "omp-rollback-omp-p8-policy-publication"
     },
     {
       "id": "herdr-presentation-journal",
-      "paths": ["state/{task}.herdr-presentation"],
-      "creator": [{"path": "bin/backends/herdr.sh", "tokens": [".herdr-presentation"]}],
-      "cleanup": [{"path": "bin/fm-teardown.sh", "tokens": ["HERDR_PRESENTATION_JOURNAL"]}],
+      "paths": [
+        "state/{task}.herdr-presentation"
+      ],
+      "creator": [
+        {
+          "path": "bin/backends/herdr.sh",
+          "tokens": [
+            ".herdr-presentation"
+          ]
+        }
+      ],
+      "cleanup": [
+        {
+          "path": "bin/fm-teardown.sh",
+          "tokens": [
+            "HERDR_PRESENTATION_JOURNAL"
+          ]
+        }
+      ],
       "rollback_owner": "omp-p5-herdr-parity",
       "evidence_schema": "omp-evidence.v1",
-      "rollback_schema": "omp-rollback.v1"
+      "rollback_schema": "omp-rollback.v1",
+      "task_id": "omp-p5-herdr-parity",
+      "owner": "omp-p5-herdr-parity",
+      "validation_ids": [
+        "V26"
+      ],
+      "evidence_id": "omp-evidence-omp-p5-herdr-parity",
+      "rollback_id": "omp-rollback-omp-p5-herdr-parity"
     },
     {
       "id": "transition-and-task-temp",
-      "paths": ["state/{task}.backend-transition", "state/{task}.task-temp", "state/{task}.turn-ended", "state/{task}.grok-turnend-token"],
-      "creator": [{"path": "bin/fm-spawn.sh", "tokens": ["GOTMPDIR", ".turn-ended"]}],
-      "cleanup": [{"path": "bin/fm-teardown.sh", "tokens": ["turn-ended"]}],
+      "paths": [
+        "state/{task}.backend-transition",
+        "state/{task}.task-temp",
+        "state/{task}.turn-ended",
+        "state/{task}.grok-turnend-token"
+      ],
+      "creator": [
+        {
+          "path": "bin/fm-spawn.sh",
+          "tokens": [
+            "GOTMPDIR",
+            ".turn-ended"
+          ]
+        }
+      ],
+      "cleanup": [
+        {
+          "path": "bin/fm-teardown.sh",
+          "tokens": [
+            "turn-ended"
+          ]
+        }
+      ],
       "rollback_owner": "omp-p3-cleanup-live",
       "evidence_schema": "omp-evidence.v1",
-      "rollback_schema": "omp-rollback.v1"
+      "rollback_schema": "omp-rollback.v1",
+      "task_id": "omp-p3-cleanup-live",
+      "owner": "omp-p3-cleanup-live",
+      "validation_ids": [
+        "V26"
+      ],
+      "evidence_id": "omp-evidence-omp-p3-cleanup-live",
+      "rollback_id": "omp-rollback-omp-p3-cleanup-live"
     },
     {
       "id": "omp-evidence-and-rollback",
-      "paths": ["data/omp-evidence/{task_id}.json", "data/omp-rollback/{task_id}.json"],
-      "creator": [{"path": "bin/fm-omp-activation.sh", "tokens": ["omp-evidence"]}],
-      "cleanup": [{"path": "bin/fm-omp-activation.sh", "tokens": ["omp-rollback"]}],
-      "rollback_owner": "task owner from omp-manifest.json",
+      "paths": [
+        "data/omp-evidence/{task_id}.json",
+        "data/omp-rollback/{task_id}.json"
+      ],
+      "creator": [
+        {
+          "path": "bin/fm-omp-activation.sh",
+          "tokens": [
+            "omp-evidence"
+          ]
+        }
+      ],
+      "cleanup": [
+        {
+          "path": "bin/fm-omp-activation.sh",
+          "tokens": [
+            "omp-rollback"
+          ]
+        }
+      ],
+      "rollback_owner": "omp-p8-policy-publication",
+      "evidence_schema": "omp-evidence.v1",
+      "rollback_schema": "omp-rollback.v1",
+      "task_id": "omp-p8-policy-publication",
+      "owner": "omp-p8-policy-publication",
+      "validation_ids": [
+        "V29"
+      ],
+      "evidence_id": "omp-evidence-omp-p8-policy-publication",
+      "rollback_id": "omp-rollback-omp-p8-policy-publication"
+    },
+    {
+      "id": "omp-activation-records",
+      "paths": [
+        "data/omp-activation-preflight.json",
+        "data/backlog.md"
+      ],
+      "creator": [
+        {
+          "path": "bin/fm-omp-activation.sh",
+          "tokens": [
+            "omp-activation-preflight",
+            "omp-activation-receipt.v1",
+            "authoritative backlog"
+          ]
+        }
+      ],
+      "cleanup": [
+        {
+          "path": "bin/fm-omp-activation.sh",
+          "tokens": [
+            "activation receipt",
+            "authoritative backlog"
+          ]
+        }
+      ],
+      "rollback_owner": "omp-p1-activation-a7",
+      "evidence_schema": "omp-activation-preflight.v1",
+      "rollback_schema": "omp-activation-receipt.v1",
+      "task_id": "omp-p1-activation-a7",
+      "owner": "omp-p1-activation-a7",
+      "validation_ids": [
+        "V29"
+      ],
+      "evidence_id": "omp-evidence-omp-p1-activation-a7",
+      "rollback_id": "omp-rollback-omp-p1-activation-a7"
+    },
+    {
+      "id": "omp-contract-and-monitoring",
+      "task_id": "omp-p6-supervision-continuity",
+      "validation_ids": [
+        "V18",
+        "V26",
+        "V28"
+      ],
+      "evidence_id": "omp-evidence-omp-p6-supervision-continuity",
+      "rollback_id": "omp-rollback-omp-p6-supervision-continuity",
+      "owner": "omp-p6-supervision-continuity",
+      "paths": [
+        "bin/fm-wake-lib.sh",
+        "bin/fm-wake-drain.sh",
+        "bin/fm-watch-arm.sh",
+        "bin/fm-watch-checkpoint.sh",
+        "bin/fm-watch.sh",
+        "bin/fm-continuity-pretool-check.sh",
+        "bin/fm-continuity-command-policy.mjs",
+        "bin/fm-turnend-guard.sh",
+        "bin/fm-fleet-snapshot.sh",
+        "bin/fm-bearings-snapshot.sh",
+        "tests/fm-continuity-pretool-check.test.sh",
+        "tests/fm-turnend-guard.test.sh",
+        "tests/fm-watcher-lock.test.sh",
+        "tests/fm-watch-checkpoint.test.sh",
+        "tests/fm-watch-triage.test.sh",
+        "tests/fm-bearings-snapshot.test.sh",
+        "tests/fm-fleet-snapshot-view.test.sh",
+        "tests/fm-wake-queue.test.sh",
+        "bin/fm-omp-plan-check.sh",
+        "tests/fm-omp-plan-check.test.sh",
+        "bin/fm-omp-runtime-pin-check.sh",
+        "tests/fm-omp-runtime-pin-check.test.sh",
+        "bin/fm-omp-task-parity-check.sh",
+        "tests/fm-omp-task-parity-check.test.sh",
+        "tests/fm-omp-activation.test.sh",
+        "bin/fm-omp-monitor-check.sh",
+        "tests/fm-omp-monitor-check.test.sh",
+        ".agents/tasks/omp-manifest.json",
+        ".agents/tasks/omp-runtime-pin.json",
+        ".agents/plans/omp-harness-integration-plan.md",
+        ".agents/tasks/roadmap.md",
+        ".agents/tasks/backlog.md"
+      ],
+      "creator": [
+        {
+          "path": "bin/fm-omp-plan-check.sh",
+          "tokens": [
+            "omp-plan-check"
+          ]
+        },
+        {
+          "path": "bin/fm-omp-runtime-pin-check.sh",
+          "tokens": [
+            "omp-runtime-pin-check"
+          ]
+        },
+        {
+          "path": "bin/fm-omp-task-parity-check.sh",
+          "tokens": [
+            "omp-task-parity-check"
+          ]
+        },
+        {
+          "path": "bin/fm-omp-monitor-check.sh",
+          "tokens": [
+            "omp-monitor-check.v1"
+          ]
+        },
+        {
+          "path": "bin/fm-wake-lib.sh",
+          "tokens": [
+            "fm_wake_append"
+          ]
+        },
+        {
+          "path": "bin/fm-continuity-pretool-check.sh",
+          "tokens": [
+            "watcher-continuity"
+          ]
+        },
+        {
+          "path": "bin/fm-turnend-guard.sh",
+          "tokens": [
+            "turn-end"
+          ]
+        },
+        {
+          "path": "bin/fm-fleet-snapshot.sh",
+          "tokens": [
+            "generated"
+          ]
+        },
+        {
+          "path": "bin/fm-bearings-snapshot.sh",
+          "tokens": [
+            "generated"
+          ]
+        },
+        {
+          "path": ".agents/tasks/omp-manifest.json",
+          "tokens": [
+            "omp-task-manifest.v1"
+          ]
+        },
+        {
+          "path": ".agents/tasks/omp-runtime-pin.json",
+          "tokens": [
+            "omp-runtime-pin.v1"
+          ]
+        },
+        {
+          "path": ".agents/plans/omp-harness-integration-plan.md",
+          "tokens": [
+            "omp-task-contract-v1"
+          ]
+        },
+        {
+          "path": ".agents/tasks/roadmap.md",
+          "tokens": [
+            "omp-task-contract-v1"
+          ]
+        },
+        {
+          "path": ".agents/tasks/backlog.md",
+          "tokens": [
+            "omp-task-contract-v1"
+          ]
+        }
+      ],
+      "cleanup": [
+        {
+          "path": "bin/fm-omp-plan-check.sh",
+          "tokens": [
+            "task semantic parity"
+          ]
+        },
+        {
+          "path": "bin/fm-omp-runtime-pin-check.sh",
+          "tokens": [
+            "runtime pin"
+          ]
+        },
+        {
+          "path": "bin/fm-omp-task-parity-check.sh",
+          "tokens": [
+            "task semantic parity"
+          ]
+        },
+        {
+          "path": "bin/fm-omp-monitor-check.sh",
+          "tokens": [
+            "monitoring projection"
+          ]
+        },
+        {
+          "path": "bin/fm-wake-lib.sh",
+          "tokens": [
+            "fm_wake_restore_queue"
+          ]
+        },
+        {
+          "path": "bin/fm-continuity-pretool-check.sh",
+          "tokens": [
+            "teardown"
+          ]
+        },
+        {
+          "path": "bin/fm-turnend-guard.sh",
+          "tokens": [
+            "turn-end"
+          ]
+        },
+        {
+          "path": "bin/fm-fleet-snapshot.sh",
+          "tokens": [
+            "snapshot"
+          ]
+        },
+        {
+          "path": "bin/fm-bearings-snapshot.sh",
+          "tokens": [
+            "snapshot"
+          ]
+        },
+        {
+          "path": ".agents/tasks/omp-manifest.json",
+          "tokens": [
+            "omp-task-manifest.v1"
+          ]
+        },
+        {
+          "path": ".agents/tasks/omp-runtime-pin.json",
+          "tokens": [
+            "omp-runtime-pin.v1"
+          ]
+        },
+        {
+          "path": ".agents/plans/omp-harness-integration-plan.md",
+          "tokens": [
+            "omp-task-contract-end"
+          ]
+        },
+        {
+          "path": ".agents/tasks/roadmap.md",
+          "tokens": [
+            "omp-task-contract-end"
+          ]
+        },
+        {
+          "path": ".agents/tasks/backlog.md",
+          "tokens": [
+            "omp-task-contract-end"
+          ]
+        }
+      ],
+      "rollback_owner": "omp-p6-supervision-continuity",
       "evidence_schema": "omp-evidence.v1",
       "rollback_schema": "omp-rollback.v1"
     },
     {
-      "id": "omp-activation-records",
-      "paths": ["data/omp-activation-preflight.json", "data/backlog.md"],
-      "creator": [{"path": "bin/fm-omp-activation.sh", "tokens": ["omp-activation-preflight", "omp-activation-receipt.v1", "authoritative backlog"]}],
-      "cleanup": [{"path": "bin/fm-omp-activation.sh", "tokens": ["activation receipt", "authoritative backlog"]}],
-      "rollback_owner": "omp-p1-activation-a7",
-      "evidence_schema": "omp-activation-preflight.v1",
-      "rollback_schema": "omp-activation-receipt.v1"
+      "id": "omp-native-watcher-continuity",
+      "task_id": "omp-p6-supervision-continuity",
+      "validation_ids": [
+        "V18",
+        "V21",
+        "V26",
+        "V28"
+      ],
+      "evidence_id": "omp-evidence-omp-p6-supervision-continuity",
+      "rollback_id": "omp-rollback-omp-p6-supervision-continuity",
+      "owner": "omp-p6-supervision-continuity",
+      "future": true,
+      "paths": [
+        "bin/fm-omp-watcher.sh",
+        "bin/fm-omp-continuity.sh",
+        "tests/fm-omp-watcher.test.sh",
+        "tests/fm-omp-continuity.test.sh",
+        "docs/omp-watcher-continuity.md",
+        "state/{task}.omp-watcher.json",
+        "state/{task}.omp-lock",
+        "state/{task}.omp-wake",
+        "state/{task}.omp-turn-end",
+        "state/{task}.omp-successor",
+        "state/{task}.omp-retry",
+        "state/{task}.omp-generated-hook"
+      ],
+      "creator": [
+        {
+          "path": "bin/fm-omp-watcher.sh",
+          "tokens": [
+            "omp-omp-watcher.v1"
+          ]
+        }
+      ],
+      "cleanup": [
+        {
+          "path": "bin/fm-omp-continuity.sh",
+          "tokens": [
+            "omp-omp-continuity.v1"
+          ]
+        }
+      ],
+      "rollback_owner": "omp-p6-supervision-continuity",
+      "evidence_schema": "omp-evidence.v1",
+      "rollback_schema": "omp-rollback.v1"
+    }
+  ],
+  "future_paths": [
+    {
+      "path": "bin/fm-omp-watcher.sh",
+      "owner": "omp-p6-supervision-continuity",
+      "schema": "omp-omp-watcher.v1"
+    },
+    {
+      "path": "bin/fm-omp-continuity.sh",
+      "owner": "omp-p6-supervision-continuity",
+      "schema": "omp-omp-continuity.v1"
+    },
+    {
+      "path": "tests/fm-omp-watcher.test.sh",
+      "owner": "omp-p6-supervision-continuity",
+      "schema": "omp-omp-watcher-test.v1"
+    },
+    {
+      "path": "tests/fm-omp-continuity.test.sh",
+      "owner": "omp-p6-supervision-continuity",
+      "schema": "omp-omp-continuity-test.v1"
+    },
+    {
+      "path": "docs/omp-watcher-continuity.md",
+      "owner": "omp-p6-supervision-continuity",
+      "schema": "omp-omp-watcher-doc.v1"
+    },
+    {
+      "path": "state/{task}.omp-watcher.json",
+      "owner": "omp-p6-supervision-continuity",
+      "schema": "omp-omp-watcher-state.v1"
+    },
+    {
+      "path": "state/{task}.omp-lock",
+      "owner": "omp-p6-supervision-continuity",
+      "schema": "omp-omp-lock.v1"
+    },
+    {
+      "path": "state/{task}.omp-wake",
+      "owner": "omp-p6-supervision-continuity",
+      "schema": "omp-omp-wake.v1"
+    },
+    {
+      "path": "state/{task}.omp-turn-end",
+      "owner": "omp-p6-supervision-continuity",
+      "schema": "omp-omp-turn-end.v1"
+    },
+    {
+      "path": "state/{task}.omp-successor",
+      "owner": "omp-p6-supervision-continuity",
+      "schema": "omp-omp-successor.v1"
+    },
+    {
+      "path": "state/{task}.omp-retry",
+      "owner": "omp-p6-supervision-continuity",
+      "schema": "omp-omp-retry.v1"
+    },
+    {
+      "path": "state/{task}.omp-generated-hook",
+      "owner": "omp-p6-supervision-continuity",
+      "schema": "omp-omp-generated-hook.v1"
     }
   ]
 }
