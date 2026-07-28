@@ -106,8 +106,33 @@ assert_meta_profile() {
   assert_grep "effort=$effort" "$meta" "meta missing effort=$effort"
 }
 
+assert_worker_git_identity() {
+  local config=$1
+  [ -f "$config" ] || fail "worker Git identity config is missing: $config"
+  [ "$(GIT_CONFIG_GLOBAL="$config" git config user.name)" = "Atlas" ] \
+    || fail "worker Git name did not resolve to Atlas"
+  [ "$(GIT_CONFIG_GLOBAL="$config" git config user.email)" = "atlas@rainyday.media" ] \
+    || fail "worker Git email did not resolve to atlas@rainyday.media"
+  [ "$(GIT_CONFIG_GLOBAL="$config" git config --type bool commit.gpgSign)" = "false" ] \
+    || fail "worker Git config did not disable commit signing"
+  ! grep -Eiq 'ATLAS_KEY_PAT|password|token' "$config" \
+    || fail "worker Git identity config contains credential material"
+}
+
+teardown_spawn_case() {
+  local home_dir=$1 id=$2 fakebin=$3 out status
+  set +e
+  out=$(FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home_dir" \
+    FM_STATE_OVERRIDE="$home_dir/state" FM_DATA_OVERRIDE="$home_dir/data" \
+    FM_CONFIG_OVERRIDE="$home_dir/config" PATH="$fakebin:$PATH" \
+    "$ROOT/bin/fm-teardown.sh" "$id" --force 2>&1)
+  status=$?
+  set +e
+  expect_code 0 "$status" "forced teardown should remove the task-local worker config"$'\n'"$out"
+}
+
 test_no_profile_keeps_claude_launch_unchanged() {
-  local rec id out status expected launch prefix
+  local rec id out status expected launch prefix worker_config
   id=profile-off-z1
   rec=$(make_spawn_case profile-off claude "$id")
   read_case_record "$rec"
@@ -119,9 +144,11 @@ test_no_profile_keeps_claude_launch_unchanged() {
   assert_meta_profile "$HOME_DIR/state/$id.meta" claude default default
 
   launch=$(cat "$LAUNCH_LOG")
-  prefix="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME='$HOME_DIR' "
+  worker_config="/tmp/fm-$id/gitconfig"
+  prefix="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME='$HOME_DIR' GIT_CONFIG_GLOBAL='$worker_config' "
   expected="${prefix}CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions \"\$(cat '$HOME_DIR/data/$id/brief.md')\""
   [ "$launch" = "$expected" ] || fail "no-profile claude launch changed"$'\n'"expected: $expected"$'\n'"actual:   $launch"
+  assert_worker_git_identity "$worker_config"
   pass "no --model/--effort records defaults and applies the ordinary-worker environment boundary"
 }
 
@@ -144,6 +171,8 @@ test_ship_and_scout_launches_scrub_selectors_and_retain_shared_home() {
     assert_contains "$launch" "$prefix'$HOME_DIR' " "$kind launch did not retain the resolved shared FM_HOME"
     assert_contains "$launch" "FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE=" \
       "$kind launch did not scrub all five selector overrides"
+    assert_contains "$launch" "GIT_CONFIG_GLOBAL='/tmp/fm-$id/gitconfig'" \
+      "$kind launch did not receive the task-local worker Git identity"
     printf 'status for %s\n' "$id" > "$HOME_DIR/state/$id.status"
     printf 'report for %s\n' "$id" > "$HOME_DIR/data/$id/report.md"
     FM_HOME="$HOME_DIR" bash -c 'test -r "$FM_HOME/data/$1/brief.md" && test -r "$FM_HOME/state/$1.status" && test -r "$FM_HOME/data/$1/report.md"' \
@@ -167,7 +196,80 @@ test_secondmate_launch_keeps_home_relocation_and_selector_scrub() {
   launch=$(cat "$LAUNCH_LOG")
   assert_contains "$launch" "FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME='$sm_real' " \
     "secondmate launch did not retain its isolated home and selector scrub"
+  assert_contains "$launch" "GIT_CONFIG_GLOBAL='/tmp/fm-$id/gitconfig'" \
+    "secondmate launch did not receive the task-local worker Git identity"
+  assert_worker_git_identity "/tmp/fm-$id/gitconfig"
   pass "fm-spawn.sh: secondmate home and selector behavior remains unchanged"
+}
+
+test_worker_git_identity_records_atlas_commit_and_cleans_task_config() {
+  local rec id out status worker_config global_before global_after author gpg_header
+  id=git-identity-real-z19
+  rec=$(make_spawn_case git-identity-real claude "$id")
+  read_case_record "$rec"
+  global_before=$(git config --global --show-origin --list 2>/dev/null || true)
+  [ "$(git config --global user.name)" = "Ed Heltzel" ] \
+    || fail "primary Git name changed before worker launch"
+  [ "$(git config --global user.email)" = "402910+edheltzel@users.noreply.github.com" ] \
+    || fail "primary Git email changed before worker launch"
+  [ "$(git config --global --type bool commit.gpgSign)" = "true" ] \
+    || fail "primary Git signing policy changed before worker launch"
+
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 0 "$status" "real isolated worker launch should succeed"
+  worker_config="/tmp/fm-$id/gitconfig"
+  assert_worker_git_identity "$worker_config"
+
+  printf '%s\n' 'worker identity commit' > "$WT_DIR/worker-identity.txt"
+  git -C "$WT_DIR" add worker-identity.txt
+  GIT_CONFIG_GLOBAL="$worker_config" git -C "$WT_DIR" commit -qm 'worker identity commit'
+  author=$(GIT_CONFIG_GLOBAL="$worker_config" git -C "$WT_DIR" show -s --format='%an <%ae>|%cn <%ce>' HEAD)
+  [ "$author" = "Atlas <atlas@rainyday.media>|Atlas <atlas@rainyday.media>" ] \
+    || fail "isolated worker commit did not record Atlas author and committer: $author"
+  gpg_header=$(git -C "$WT_DIR" cat-file commit HEAD | grep '^gpgsig ' || true)
+  [ -z "$gpg_header" ] || fail "isolated worker commit unexpectedly contains a gpgsig header"
+
+  teardown_spawn_case "$HOME_DIR" "$id" "$FAKEBIN_DIR"
+  [ ! -e "$worker_config" ] || fail "ordinary teardown left the task-local worker Git identity"
+  [ ! -e "$WT_DIR/.fm-worker-gitconfig" ] || fail "worker identity material leaked into the project worktree"
+  global_after=$(git config --global --show-origin --list 2>/dev/null || true)
+  [ "$global_before" = "$global_after" ] || fail "worker launch changed the primary global Git config"
+  pass "worker Git config records unsigned Atlas attribution, survives a real linked-worktree commit, and is cleaned with the task"
+}
+
+test_worker_git_identity_handles_alternate_and_absent_global_configs() {
+  local rec id out status worker_config alternate missing before after
+  alternate="$TMP_ROOT/alternate-global"
+  missing="$TMP_ROOT/missing-global"
+  printf '%b' '[user]\n\tname = Alternate Host\n\temail = alternate@example.invalid\n[commit]\n\tgpgSign = true\n' > "$alternate"
+  before=$(git config --global --show-origin --list 2>/dev/null || true)
+
+  id=git-identity-alternate-z20
+  rec=$(make_spawn_case git-identity-alternate claude "$id")
+  read_case_record "$rec"
+  out=$(GIT_CONFIG_GLOBAL="$alternate" run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 0 "$status" "alternate host global config launch should succeed"
+  worker_config="/tmp/fm-$id/gitconfig"
+  assert_worker_git_identity "$worker_config"
+  assert_contains "$(cat "$worker_config")" "path = $alternate" \
+    "worker config did not layer over the alternate host global config"
+  teardown_spawn_case "$HOME_DIR" "$id" "$FAKEBIN_DIR"
+
+  id=git-identity-missing-z21
+  rec=$(make_spawn_case git-identity-missing claude "$id")
+  read_case_record "$rec"
+  out=$(GIT_CONFIG_GLOBAL="$missing" run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 0 "$status" "absent host global config launch should fail safe"
+  worker_config="/tmp/fm-$id/gitconfig"
+  assert_worker_git_identity "$worker_config"
+  teardown_spawn_case "$HOME_DIR" "$id" "$FAKEBIN_DIR"
+
+  after=$(git config --global --show-origin --list 2>/dev/null || true)
+  [ "$before" = "$after" ] || fail "alternate or absent host config handling changed the shared global config"
+  pass "alternate and absent host global configs remain read-only and fail safe for worker identity setup"
 }
 
 test_active_dispatch_profile_requires_explicit_harness_for_ship() {
@@ -251,7 +353,7 @@ test_active_dispatch_profile_allows_raw_launch_command() {
   assert_contains "$out" "spawned $id harness=custom-agent" "spawn did not report raw command harness"
   assert_meta_profile "$HOME_DIR/state/$id.meta" custom-agent default default
   launch=$(cat "$LAUNCH_LOG")
-  [ "$launch" = "FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME='$HOME_DIR' custom-agent --flag" ] \
+  [ "$launch" = "FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME='$HOME_DIR' GIT_CONFIG_GLOBAL='/tmp/fm-$id/gitconfig' custom-agent --flag" ] \
     || fail "raw launch command changed"$'\n'"actual: $launch"
   pass "active crew-dispatch profile allows the raw launch-command escape hatch"
 }
@@ -435,6 +537,8 @@ test_active_dispatch_profile_does_not_block_secondmate_launch() {
 test_no_profile_keeps_claude_launch_unchanged
 test_ship_and_scout_launches_scrub_selectors_and_retain_shared_home
 test_secondmate_launch_keeps_home_relocation_and_selector_scrub
+test_worker_git_identity_records_atlas_commit_and_cleans_task_config
+test_worker_git_identity_handles_alternate_and_absent_global_configs
 test_active_dispatch_profile_requires_explicit_harness_for_ship
 test_active_dispatch_profile_requires_explicit_harness_for_scout
 test_active_dispatch_profile_allows_explicit_harness

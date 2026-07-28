@@ -157,6 +157,9 @@ When it is unset, most scripts use the repo root as the home; when it is set, sc
 When `FM_HOME` is unset, it also behaves as the old whole-root override.
 `bin/fm-send.sh` is intentionally stricter than that general fallback: it requires `FM_HOME` to be set before resolving a target, so operator steers cannot silently resolve against the wrong home.
 `FM_STATE_OVERRIDE`, `FM_DATA_OVERRIDE`, `FM_PROJECTS_OVERRIDE`, and `FM_CONFIG_OVERRIDE` override individual operational directories for tests and specialized harness setup.
+Firstmate-launched workers receive a task-local `GIT_CONFIG_GLOBAL` file under their recorded task temp root, layered over the effective host global config and overriding only `user.name=Atlas`, `user.email=atlas@rainyday.media`, and `commit.gpgSign=false`.
+The primary/manual checkout keeps the captain's effective Git identity and signing policy because the worker file is selected only in the launch environment and is removed by ordinary task teardown.
+This worker attribution boundary changes commit metadata only, does not grant GitHub authentication or publication authority, and does not rewrite inherited `GIT_CONFIG_COUNT` state or any shared Git config.
 For the herdr backend, `FM_HOME` also determines the workspace label used by the adapter.
 For the zellij backend, `FM_HOME` does not split containers, but it determines the readable home prefix embedded in visible tab titles; use `FM_ZELLIJ_SESSION` when a separate zellij session is needed.
 The full zellij home label also includes a short hash of the resolved `FM_ROOT` path.
