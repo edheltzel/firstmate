@@ -13,7 +13,7 @@ test_current_manifest_passes() {
   out=$($CHECK --json) || status=$?
   expect_code 0 "$status" "current OMP manifest should pass its non-mutating validator"
   assert_contains "$out" '"status": "PASS"' "current OMP manifest did not return machine-readable PASS"
-  assert_contains "$out" '"task_count": 27' "current OMP manifest task count drifted"
+  assert_contains "$out" '"task_count": 28' "current OMP manifest task count drifted"
   pass "omp-plan-check: current manifest, roadmap, plan, and tracked backlog pass"
 }
 
@@ -50,6 +50,52 @@ test_forward_dependency_passes() {
   pass "omp-plan-check: forward dependency is order-independent"
 }
 
+test_duplicate_stop_refuses() {
+  local bad="$TMP_ROOT/duplicate-stop.json" out status=0
+  mkdir -p "$TMP_ROOT"
+  jq '.stop_ids += [.stop_ids[0]]' "$ROOT/.agents/tasks/omp-manifest.json" >"$bad"
+  out=$($CHECK --json --manifest "$bad") || status=$?
+  expect_code 1 "$status" "duplicate STOP identifier should block the plan"
+  assert_contains "$out" 'duplicate STOP identifier' "duplicate STOP refusal was not reported"
+  pass "omp-plan-check: duplicate STOP identifiers are refused"
+}
+
+test_duplicate_dependency_edge_refuses() {
+  local bad="$TMP_ROOT/duplicate-dependency.json" out status=0
+  jq '.tasks[1].depends_on += [.tasks[1].depends_on[0]]' "$ROOT/.agents/tasks/omp-manifest.json" >"$bad"
+  out=$($CHECK --json --manifest "$bad") || status=$?
+  expect_code 1 "$status" "duplicate dependency edge should block the plan"
+  assert_contains "$out" 'duplicate dependency edge' "duplicate dependency refusal was not reported"
+  pass "omp-plan-check: duplicate dependency edges are refused"
+}
+
+test_duplicate_validation_refuses() {
+  local bad="$TMP_ROOT/duplicate-validation.json" out status=0
+  jq '.tasks[0].validation_ids += [.tasks[0].validation_ids[0]]' "$ROOT/.agents/tasks/omp-manifest.json" >"$bad"
+  out=$($CHECK --json --manifest "$bad") || status=$?
+  expect_code 1 "$status" "duplicate validation identifier should block the plan"
+  assert_contains "$out" 'duplicate per-task validation identifier' "duplicate validation refusal was not reported"
+  pass "omp-plan-check: duplicate per-task validation identifiers are refused"
+}
+
+test_duplicate_evidence_refuses() {
+  local bad="$TMP_ROOT/duplicate-evidence.json" out status=0
+  jq '.tasks[0].evidence_ids += [.tasks[0].evidence_ids[0]]' "$ROOT/.agents/tasks/omp-manifest.json" >"$bad"
+  out=$($CHECK --json --manifest "$bad") || status=$?
+  expect_code 1 "$status" "duplicate evidence identifier should block the plan"
+  assert_contains "$out" 'duplicate per-task evidence identifier' "duplicate evidence refusal was not reported"
+  pass "omp-plan-check: duplicate per-task evidence identifiers are refused"
+}
+
+test_report_identity_refuses() {
+  local bad="$TMP_ROOT/identity-drift.json" out status=0
+  jq '.activation_report_task_id = "omp-corrected-plan-redteam-o8"' "$ROOT/.agents/tasks/omp-manifest.json" >"$bad"
+  out=$($CHECK --json --manifest "$bad") || status=$?
+  expect_code 1 "$status" "activation report identity drift should block the plan"
+  assert_contains "$out" 'manifest activation report identity is not the O9 contract' "activation report identity refusal was not reported"
+  pass "omp-plan-check: O9 report identity is exact"
+}
+
 test_tasks_axi_resolves_from_path() {
   local fakebin="$TMP_ROOT/fakebin" fake_axi out status=0
   mkdir -p "$fakebin"
@@ -81,5 +127,10 @@ test_current_manifest_passes
 test_unknown_dependency_refuses
 test_cycle_refuses
 test_forward_dependency_passes
+test_duplicate_stop_refuses
+test_duplicate_dependency_edge_refuses
+test_duplicate_validation_refuses
+test_duplicate_evidence_refuses
+test_report_identity_refuses
 test_tasks_axi_resolves_from_path
 test_plan_tmpdir_failure_refuses

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Gate and atomically publish the first corrected OMP phase; check mode never writes project or backlog files.
-# Usage: bin/fm-omp-activation.sh [--check|--activate] [--json] [--report PATH] [--manifest PATH] [--roadmap PATH] [--tracked-backlog PATH] [--live-backlog PATH] [--repo-root PATH] [--authorization PATH] [--decisions PATH] [--stops PATH] [--preflight PATH] [--receipt PATH]
+# Gate and atomically publish the first corrected OMP phase as one authoritative backlog postimage.
+# Usage: bin/fm-omp-activation.sh [--check|--activate] [--json] [--report PATH] [--manifest PATH] [--roadmap PATH] [--tracked-backlog PATH] [--live-backlog PATH] [--repo-root PATH] [--authorization PATH] [--decisions PATH] [--stops PATH] [--preflight PATH]
 
 set -u
 
 ROOT=$(cd -- "$(dirname -- "$0")/.." && pwd)
 FM_HOME_ROOT=${FM_HOME:-$ROOT}
-REPORT=${FM_OMP_REPORT:-$FM_HOME_ROOT/data/omp-corrected-plan-redteam-o8/report.md}
+REPORT=${FM_OMP_REPORT:-$FM_HOME_ROOT/data/omp-final-corrected-plan-redteam-o9/report.md}
 MANIFEST="$ROOT/.agents/tasks/omp-manifest.json"
 ROADMAP="$ROOT/.agents/tasks/roadmap.md"
 TRACKED_BACKLOG="$ROOT/.agents/tasks/backlog.md"
@@ -16,7 +16,6 @@ AUTHORIZATION="$FM_HOME_ROOT/data/omp-captain-authorization.json"
 DECISIONS="$FM_HOME_ROOT/data/omp-decision-inventory.json"
 STOPS="$FM_HOME_ROOT/data/omp-stop-ledger.json"
 PREFLIGHT="$FM_HOME_ROOT/data/omp-activation-preflight.json"
-RECEIPT="$FM_HOME_ROOT/data/omp-activation-receipt.json"
 TASKS_AXI=${TASKS_AXI:-}
 if [ -z "$TASKS_AXI" ]; then
   TASKS_AXI=$(command -v tasks-axi 2>/dev/null || true)
@@ -49,7 +48,6 @@ while [ "$#" -gt 0 ]; do
     --decisions) shift; DECISIONS=${1-} ;;
     --stops) shift; STOPS=${1-} ;;
     --preflight) shift; PREFLIGHT=${1-} ;;
-    --receipt) shift; RECEIPT=${1-} ;;
     --help|-h) usage; exit 0 ;;
     *) printf 'unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
@@ -99,6 +97,18 @@ sha256() {
   esac
 }
 
+sha256_stdin() {
+  case "$SHA256_TOOL" in
+    */shasum|shasum) "$SHA256_TOOL" -a 256 | awk '{print $1}' ;;
+    */sha256sum|sha256sum) "$SHA256_TOOL" | awk '{print $1}' ;;
+    *) return 1 ;;
+  esac
+}
+
+postimage_hash() {
+  sed -E 's/("postimage_sha256":")[0-9a-fA-F]{64}/\1<self>/' "$1" | sha256_stdin
+}
+
 contains_task() {
   local task_id=$1
   local path=$2
@@ -132,6 +142,19 @@ else
   error "missing corrected-plan report: $REPORT"
 fi
 
+REPORT_PLAN_BLOCKERS=
+if [ -f "$REPORT" ]; then
+  REPORT_PLAN_BLOCKERS=$(awk '
+    /^##[[:space:]]+Plan-blocking findings[[:space:]]*$/ { in_blockers=1; next }
+    in_blockers && /^##[[:space:]]/ { exit }
+    in_blockers && /^[[:space:]]*(None|none)\.?[[:space:]]*$/ { print "none"; exit }
+    in_blockers && NF { print "finding"; exit }
+  ' "$REPORT")
+  if [ "$REPORT_PLAN_BLOCKERS" != none ]; then
+    error "report must declare no plan-blocking findings under the exact heading"
+  fi
+fi
+
 if [ -f "$REPORT" ]; then
   REPORT_SHA256=$(sha256 "$REPORT")
 else
@@ -156,10 +179,20 @@ require_file "$PREFLIGHT"
 AUTHORIZATION_ID=
 ACTIVATION_TASK_ID=
 ACTIVATION_PREREQUISITE=
+ACTIVATION_REPORT_TASK_ID=
+ACTIVATION_REPORT_PATH=
+SUPPORT_FENCE=
+TASK_RECORDS_JSON='[]'
+TASK_IDS_JSON='[]'
 if [ -f "$MANIFEST" ] && jq empty "$MANIFEST" >/dev/null 2>&1; then
   AUTHORIZATION_ID=$(jq -r '.captain_authorization_id // empty' "$MANIFEST")
   ACTIVATION_TASK_ID=$(jq -r '.activation_task_id // empty' "$MANIFEST")
   ACTIVATION_PREREQUISITE=$(jq -r --arg activation_id "$ACTIVATION_TASK_ID" '.tasks[] | select(.id == $activation_id) | .depends_on[0] // empty' "$MANIFEST")
+  ACTIVATION_REPORT_TASK_ID=$(jq -r '.activation_report_task_id // empty' "$MANIFEST")
+  ACTIVATION_REPORT_PATH=$(jq -r '.activation_report_path // empty' "$MANIFEST")
+  SUPPORT_FENCE=$(jq -r '.support_fence // empty' "$MANIFEST")
+  TASK_RECORDS_JSON=$(jq -c '[.activation_task_ids[] as $id | .tasks[] | select(.id == $id) | {id:.id,depends_on:.depends_on,evidence_ids:.evidence_ids,rollback_id:.rollback_id}]' "$MANIFEST")
+  TASK_IDS_JSON=$(jq -c '.activation_task_ids' "$MANIFEST")
   while IFS= read -r id; do
     [ -n "$id" ] || continue
     ACTIVATION_IDS+=("$id")
@@ -195,6 +228,65 @@ if [ -f "$MANIFEST" ] && jq empty "$MANIFEST" >/dev/null 2>&1; then
       then true else false end
   ' "$MANIFEST" >/dev/null 2>&1; then
     error "activation task manifest rows are not closed over the activation record"
+  fi
+fi
+
+if [ -f "$MANIFEST" ] && jq empty "$MANIFEST" >/dev/null 2>&1; then
+  if [ "$ACTIVATION_REPORT_TASK_ID" != "omp-final-corrected-plan-redteam-o9" ]; then
+    error "activation report task must be omp-final-corrected-plan-redteam-o9"
+  fi
+  if [ "$ACTIVATION_REPORT_PATH" != "data/omp-final-corrected-plan-redteam-o9/report.md" ]; then
+    error "activation report path must be data/omp-final-corrected-plan-redteam-o9/report.md"
+  fi
+  EXPECTED_REPORT_PATH="$FM_HOME_ROOT/$ACTIVATION_REPORT_PATH"
+  if [ "$REPORT" != "$EXPECTED_REPORT_PATH" ]; then
+    error "activation report path does not match the O9 manifest path: $REPORT"
+  fi
+  if ! jq -e --arg id "$ACTIVATION_REPORT_TASK_ID" --arg path "$ACTIVATION_REPORT_PATH" '.tasks | map(select(.id == $id and .report_path == $path)) | length == 1' "$MANIFEST" >/dev/null 2>&1; then
+    error "activation report task and manifest path are not paired"
+  fi
+  for parity_file in "$ROOT/.agents/plans/omp-harness-integration-plan.md" "$ROADMAP" "$TRACKED_BACKLOG"; do
+    if [ -f "$parity_file" ] && { ! grep -Fq "$ACTIVATION_REPORT_TASK_ID" "$parity_file" || ! grep -Fq "$ACTIVATION_REPORT_PATH" "$parity_file"; }; then
+      error "activation report task/path parity is missing from $parity_file"
+    fi
+  done
+fi
+
+validate_receipt_file() {
+  local receipt_path=$1 expected_postimage=$2
+  jq -e --arg expected_postimage "$expected_postimage" --arg expected_preimage "$EXPECTED_LIVE_SHA256" --arg report_task_id "$ACTIVATION_REPORT_TASK_ID" --arg report_path "$ACTIVATION_REPORT_PATH" --arg report_sha256 "$REPORT_SHA256" --arg authorization_id "$AUTHORIZATION_ID" --arg activation_id "$ACTIVATION_TASK_ID" --arg activation_date "$ACTIVATION_DATE" --arg support_fence "$SUPPORT_FENCE" --arg branch "$REPO_BRANCH" --arg commit "$REPO_COMMIT" --argjson task_ids "$TASK_IDS_JSON" --argjson task_records "$TASK_RECORDS_JSON" '
+    .schema == "omp-activation-receipt.v1"
+    and .action == "activate"
+    and .activation_completed == true
+    and (.preimage_sha256 | test("^[0-9a-fA-F]{64}$"))
+    and (($expected_preimage == "") or .preimage_sha256 == $expected_preimage)
+    and .postimage_sha256 == $expected_postimage
+    and .repo_branch == $branch
+    and .repo_commit == $commit
+    and .report_task_id == $report_task_id
+    and .report_path == $report_path
+    and .report_sha256 == $report_sha256
+    and .authorization_id == $authorization_id
+    and .completed_activation_task_id == $activation_id
+    and .activation_date == $activation_date
+    and .support_fence == $support_fence
+    and .task_records == $task_records
+  ' "$receipt_path" >/dev/null 2>&1
+}
+
+ALREADY_ACTIVATED=0
+AUTHORITATIVE_RECEIPT="$TMP_DIR/authoritative-receipt.json"
+if [ -f "$LIVE_BACKLOG" ]; then
+  AUTHORITATIVE_RECEIPT_LINE_COUNT=$(grep -Ec '^  Activation receipt: ' "$LIVE_BACKLOG" || true)
+  if [ "$AUTHORITATIVE_RECEIPT_LINE_COUNT" -gt 1 ]; then
+    error "live backlog contains multiple authoritative activation receipts"
+  elif [ "$AUTHORITATIVE_RECEIPT_LINE_COUNT" -eq 1 ]; then
+    sed -n 's/^  Activation receipt: //p' "$LIVE_BACKLOG" >"$AUTHORITATIVE_RECEIPT"
+    if jq empty "$AUTHORITATIVE_RECEIPT" >/dev/null 2>&1; then
+      ALREADY_ACTIVATED=1
+    else
+      error "embedded activation receipt is not valid JSON"
+    fi
   fi
 fi
 
@@ -234,7 +326,7 @@ EXPECTED_TRACKED_SHA256=
 EXPECTED_LIVE_SHA256=
 EXPECTED_BRANCH=
 EXPECTED_COMMIT=
-if [ -f "$PREFLIGHT" ]; then
+if [ "$ALREADY_ACTIVATED" -eq 0 ] && [ -f "$PREFLIGHT" ]; then
   if ! jq -e '.schema == "omp-activation-preflight.v1"' "$PREFLIGHT" >/dev/null 2>&1; then
     error "activation preflight has the wrong schema"
   fi
@@ -269,6 +361,16 @@ if [ -f "$PREFLIGHT" ]; then
   fi
 fi
 
+if [ "$ALREADY_ACTIVATED" -eq 1 ]; then
+  AUTHORITATIVE_POSTIMAGE_SHA256=$(postimage_hash "$LIVE_BACKLOG" || true)
+  if [ -z "$AUTHORITATIVE_POSTIMAGE_SHA256" ] || ! validate_receipt_file "$AUTHORITATIVE_RECEIPT" "$AUTHORITATIVE_POSTIMAGE_SHA256"; then
+    error "authoritative activation receipt does not match the completed backlog postimage"
+  fi
+  if [ "$ACTION" = activate ]; then
+    error "authoritative activation record is already complete; refusing duplicate publication"
+  fi
+fi
+
 if [ -f "$ROOT/bin/fm-harness.sh" ]; then
   if grep -Eq '(^|[^[:alnum:]_-])omp([^[:alnum:]_-]|$)' "$ROOT/bin/fm-harness.sh"; then
     error "OMP appears in the verified harness allowlist"
@@ -276,18 +378,29 @@ if [ -f "$ROOT/bin/fm-harness.sh" ]; then
 fi
 
 if [ -f "$MANIFEST" ]; then
-  if [ -z "${ACTIVATION_TASK_ID}" ] || ! grep -Eq "^- \[ \] ${ACTIVATION_TASK_ID}([[:space:]-]|$)" "$LIVE_BACKLOG"; then
-    error "activation record ${ACTIVATION_TASK_ID:-<missing>} is not queued in the live backlog"
-  elif ! PREIMAGE_READY_OUTPUT=$("$TASKS_AXI" ready --file "$LIVE_BACKLOG" 2>/dev/null); then
-    error "Tasks Axi could not compute readiness for the activation preimage"
-  elif ! printf '%s\n' "$PREIMAGE_READY_OUTPUT" | grep -Eq "(^|[[:space:],])${ACTIVATION_TASK_ID}(,|$)"; then
-    error "activation record $ACTIVATION_TASK_ID is not ready in the live backlog preimage"
-  fi
-  for activation_id in "${ACTIVATION_IDS[@]}"; do
-    if contains_task "$activation_id" "$TRACKED_BACKLOG" || contains_task "$activation_id" "$LIVE_BACKLOG"; then
-      error "activation-published P1 row already exists in a live or tracked backlog: $activation_id"
+  if [ "$ALREADY_ACTIVATED" -eq 0 ]; then
+    if [ -z "${ACTIVATION_TASK_ID}" ] || ! grep -Eq "^- \[ \] ${ACTIVATION_TASK_ID}([[:space:]-]|$)" "$LIVE_BACKLOG"; then
+      error "activation record ${ACTIVATION_TASK_ID:-<missing>} is not queued in the live backlog"
+    elif ! PREIMAGE_READY_OUTPUT=$("$TASKS_AXI" ready --file "$LIVE_BACKLOG" 2>/dev/null); then
+      error "Tasks Axi could not compute readiness for the activation preimage"
+    elif ! printf '%s\n' "$PREIMAGE_READY_OUTPUT" | grep -Eq "(^|[[:space:],])${ACTIVATION_TASK_ID}(,|$)"; then
+      error "activation record $ACTIVATION_TASK_ID is not ready in the live backlog preimage"
     fi
-  done
+    for activation_id in "${ACTIVATION_IDS[@]}"; do
+      if contains_task "$activation_id" "$TRACKED_BACKLOG" || contains_task "$activation_id" "$LIVE_BACKLOG"; then
+        error "activation-published P1 row already exists in a live or tracked backlog: $activation_id"
+      fi
+    done
+  else
+    for activation_id in "${ACTIVATION_IDS[@]}"; do
+      if ! contains_task "$activation_id" "$LIVE_BACKLOG"; then
+        error "authoritative activation postimage is missing published task: $activation_id"
+      fi
+      if contains_task "$activation_id" "$TRACKED_BACKLOG"; then
+        error "tracked backlog contains an activation-published P1 row: $activation_id"
+      fi
+    done
+  fi
   while IFS= read -r future_id; do
     [ -n "$future_id" ] || continue
     if ! is_activation_task "$future_id" && { contains_task "$future_id" "$TRACKED_BACKLOG" || contains_task "$future_id" "$LIVE_BACKLOG"; }; then
@@ -297,17 +410,13 @@ if [ -f "$MANIFEST" ]; then
 fi
 
 if [ "$ACTION" = activate ] && [ "${#ERRORS[@]}" -eq 0 ]; then
-  if [ -e "$RECEIPT" ] || [ -L "$RECEIPT" ]; then
-    error "activation receipt already exists; refusing a second publication"
-  else
-    ROWS="$TMP_DIR/activation-rows.md"
-    NEW_BACKLOG=
-    BACKUP=
-    NEW_RECEIPT=
-    BACKLOG_PUBLISHED=0
-    RECEIPT_PUBLISHED=0
-    PUBLISHED_ROW_COUNT=0
-    : >"$ROWS"
+  ROWS="$TMP_DIR/activation-rows.md"
+  NEW_BACKLOG_TEMPLATE="$TMP_DIR/activation-backlog-template.md"
+  NEW_BACKLOG=
+  RECEIPT_TEMPLATE_FILE="$TMP_DIR/activation-receipt-template.json"
+  RECEIPT_FINAL_FILE="$TMP_DIR/activation-receipt-final.json"
+  PUBLISHED_ROW_COUNT=0
+  : >"$ROWS"
     while IFS=$'\t' read -r task_id title dependency evidence_id rollback_id; do
       [ -n "$task_id" ] || continue
       {
@@ -321,22 +430,32 @@ if [ "$ACTION" = activate ] && [ "${#ERRORS[@]}" -eq 0 ]; then
       error "manifest activation task rows did not produce the expected publication set"
     fi
 
+    if [ "${#ERRORS[@]}" -eq 0 ]; then
+      if [ "$FAIL_STAGE" = receipt-template ]; then
+        error "fault injection refused at receipt-template stage"
+      elif ! jq -cn --arg schema 'omp-activation-receipt.v1' --arg preimage "$EXPECTED_LIVE_SHA256" --arg postimage '<self>' --arg branch "$REPO_BRANCH" --arg commit "$REPO_COMMIT" --arg report_task_id "$ACTIVATION_REPORT_TASK_ID" --arg report_path "$ACTIVATION_REPORT_PATH" --arg report_sha256 "$REPORT_SHA256" --arg authorization_id "$AUTHORIZATION_ID" --arg completed "$ACTIVATION_TASK_ID" --arg activation_date "$ACTIVATION_DATE" --arg support_fence "$SUPPORT_FENCE" --argjson task_ids "$TASK_IDS_JSON" --argjson task_records "$TASK_RECORDS_JSON" '{schema:$schema,action:"activate",activation_completed:true,preimage_sha256:$preimage,postimage_sha256:$postimage,repo_branch:$branch,repo_commit:$commit,report_task_id:$report_task_id,report_path:$report_path,report_sha256:$report_sha256,authorization_id:$authorization_id,completed_activation_task_id:$completed,activation_date:$activation_date,support_fence:$support_fence,task_ids:$task_ids,task_records:$task_records}' >"$RECEIPT_TEMPLATE_FILE"; then
+        error "could not write activation receipt template"
+      elif ! validate_receipt_file "$RECEIPT_TEMPLATE_FILE" '<self>'; then
+        error "activation receipt template failed schema validation"
+      fi
+    fi
+
     LIVE_DIR=$(dirname -- "$LIVE_BACKLOG")
-    RECEIPT_DIR=$(dirname -- "$RECEIPT")
-    if [ ! -d "$LIVE_DIR" ]; then
+    if [ "${#ERRORS[@]}" -eq 0 ] && [ ! -d "$LIVE_DIR" ]; then
       error "live backlog directory is unavailable"
-    elif [ ! -d "$RECEIPT_DIR" ]; then
-      error "activation receipt directory is unavailable"
-    elif [ "$FAIL_STAGE" = receipt-dir ]; then
-      error "fault injection refused at receipt-directory stage"
-    elif ! NEW_BACKLOG=$(mktemp "$LIVE_DIR/.omp-activation-backlog.XXXXXX"); then
-      error "could not allocate atomic backlog postimage"
-    elif ! BACKUP=$(mktemp "$LIVE_DIR/.omp-activation-backup.XXXXXX"); then
-      error "could not allocate exact backlog preimage"
-    elif ! cp "$LIVE_BACKLOG" "$BACKUP"; then
-      error "could not preserve exact backlog preimage"
-    elif ! awk -v rows="$ROWS" -v activation_id="$ACTIVATION_TASK_ID" -v prerequisite_id="$ACTIVATION_PREREQUISITE" -v activation_date="$ACTIVATION_DATE" '
-      BEGIN { activation_seen=0; activation_block=0; activation_record=""; pending_blank=""; inserted=0; moved=0 }
+    elif [ "${#ERRORS[@]}" -eq 0 ] && [ "$FAIL_STAGE" = template ]; then
+      error "fault injection refused at template stage"
+    elif [ "${#ERRORS[@]}" -eq 0 ] && ! awk -v rows="$ROWS" -v receipt_file="$RECEIPT_TEMPLATE_FILE" -v activation_id="$ACTIVATION_TASK_ID" -v prerequisite_id="$ACTIVATION_PREREQUISITE" -v activation_date="$ACTIVATION_DATE" '
+      BEGIN {
+        activation_seen=0
+        activation_block=0
+        activation_record=""
+        pending_blank=""
+        inserted=0
+        moved=0
+        if ((getline receipt < receipt_file) <= 0) exit 3
+        close(receipt_file)
+      }
       $0 ~ "^- \\[ \\] " activation_id "([[:space:]-]|$)" {
         sub(/^- \[ \]/, "- [x]")
         sub("[[:space:]]+blocked-by:[[:space:]]*" prerequisite_id, "")
@@ -363,6 +482,7 @@ if [ "$ACTION" = activate ] && [ "${#ERRORS[@]}" -eq 0 ]; then
         print
         if (activation_record != "") {
           printf "%s", activation_record
+          print "  Activation receipt: " receipt
           activation_record=""
           moved=1
         }
@@ -379,15 +499,19 @@ if [ "$ACTION" = activate ] && [ "${#ERRORS[@]}" -eq 0 ]; then
       }
       { print }
       END { if (activation_seen != 1 || inserted != 1 || moved != 1 || activation_record != "") exit 2 }
-    ' "$LIVE_BACKLOG" >"$NEW_BACKLOG"; then
+    ' "$LIVE_BACKLOG" >"$NEW_BACKLOG_TEMPLATE"; then
       error "live backlog postimage did not contain exactly one completed activation record and queue insertion"
-    elif ! "$TASKS_AXI" list --file "$NEW_BACKLOG" >/dev/null 2>&1; then
+    elif ! "$TASKS_AXI" list --file "$NEW_BACKLOG_TEMPLATE" >/dev/null 2>&1; then
       error "Tasks Axi rejected the proposed atomic backlog publication"
-    elif ! POSTIMAGE_LIST=$($TASKS_AXI list --file "$NEW_BACKLOG" 2>/dev/null); then
+    elif ! POSTIMAGE_LIST=$($TASKS_AXI list --file "$NEW_BACKLOG_TEMPLATE" 2>/dev/null); then
       error "Tasks Axi could not inspect the activation postimage"
     elif ! printf '%s\n' "$POSTIMAGE_LIST" | grep -Fq "${ACTIVATION_TASK_ID},done,"; then
       error "proposed backlog postimage did not complete $ACTIVATION_TASK_ID: $POSTIMAGE_LIST"
-    elif ! READY_OUTPUT=$($TASKS_AXI ready --file "$NEW_BACKLOG" 2>/dev/null); then
+    elif [ "$(grep -Ec '^  Activation receipt: ' "$NEW_BACKLOG_TEMPLATE" || true)" -ne 1 ]; then
+      error "proposed backlog postimage does not contain exactly one activation receipt"
+    elif ! sed -n 's/^  Activation receipt: //p' "$NEW_BACKLOG_TEMPLATE" >"$TMP_DIR/receipt-from-template.json" || ! validate_receipt_file "$TMP_DIR/receipt-from-template.json" '<self>'; then
+      error "proposed backlog activation receipt failed schema validation"
+    elif ! READY_OUTPUT=$($TASKS_AXI ready --file "$NEW_BACKLOG_TEMPLATE" 2>/dev/null); then
       error "Tasks Axi could not compute readiness for the proposed backlog postimage"
     else
       for activation_id in "${ACTIVATION_IDS[@]}"; do
@@ -398,56 +522,77 @@ if [ "$ACTION" = activate ] && [ "${#ERRORS[@]}" -eq 0 ]; then
     fi
 
     if [ "${#ERRORS[@]}" -eq 0 ]; then
-      POST_LIVE_SHA256=$(sha256 "$NEW_BACKLOG") || error "could not hash atomic backlog postimage"
-      TASK_IDS_JSON=$(printf '%s\n' "${ACTIVATION_IDS[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')
-      if [ "$FAIL_STAGE" = receipt-temp ]; then
-        error "fault injection refused at receipt-temp stage"
-      elif ! NEW_RECEIPT=$(mktemp "$RECEIPT_DIR/.omp-activation-receipt.XXXXXX"); then
-        error "could not allocate activation receipt postimage"
-      elif [ "$FAIL_STAGE" = receipt-write ]; then
-        error "fault injection refused at receipt-write stage"
-      elif ! jq -n --arg schema 'omp-activation-receipt.v1' --arg preimage "$EXPECTED_LIVE_SHA256" --arg postimage "$POST_LIVE_SHA256" --arg branch "$REPO_BRANCH" --arg commit "$REPO_COMMIT" --arg report "$REPORT_SHA256" --arg completed "$ACTIVATION_TASK_ID" --argjson task_ids "$TASK_IDS_JSON" '{schema:$schema,action:"activate",preimage_sha256:$preimage,postimage_sha256:$postimage,repo_branch:$branch,repo_commit:$commit,report_sha256:$report,completed_activation_task_id:$completed,activation_completed:true,task_ids:$task_ids}' >"$NEW_RECEIPT"; then
+      if ! POST_LIVE_SHA256=$(postimage_hash "$NEW_BACKLOG_TEMPLATE"); then
+        error "could not hash atomic backlog postimage"
+      elif ! jq -c --arg postimage "$POST_LIVE_SHA256" '.postimage_sha256 = $postimage' "$RECEIPT_TEMPLATE_FILE" >"$RECEIPT_FINAL_FILE"; then
         error "could not write activation receipt postimage"
-      elif ! jq -e --arg activation_id "$ACTIVATION_TASK_ID" --argjson expected_task_ids "$TASK_IDS_JSON" '.schema == "omp-activation-receipt.v1" and .activation_completed == true and .completed_activation_task_id == $activation_id and .task_ids == $expected_task_ids' "$NEW_RECEIPT" >/dev/null 2>&1; then
+      elif ! validate_receipt_file "$RECEIPT_FINAL_FILE" "$POST_LIVE_SHA256"; then
         error "activation receipt postimage failed schema validation"
-      elif [ "$FAIL_STAGE" = backlog-move ]; then
-        error "fault injection refused at backlog-move stage"
-      elif ! mv -f -- "$NEW_BACKLOG" "$LIVE_BACKLOG"; then
-        error "could not publish backlog postimage"
+      elif ! NEW_BACKLOG=$(mktemp "$LIVE_DIR/.omp-activation-backlog.XXXXXX"); then
+        error "could not allocate atomic backlog postimage"
+      elif ! awk -v receipt_file="$RECEIPT_FINAL_FILE" '
+        BEGIN {
+          receipt_count=0
+          if ((getline receipt < receipt_file) <= 0) exit 2
+          close(receipt_file)
+        }
+        /^  Activation receipt: / {
+          print "  Activation receipt: " receipt
+          receipt_count++
+          next
+        }
+        { print }
+        END { if (receipt_count != 1) exit 3 }
+      ' "$NEW_BACKLOG_TEMPLATE" >"$NEW_BACKLOG"; then
+        error "could not embed the authoritative activation receipt"
+      elif ! "$TASKS_AXI" list --file "$NEW_BACKLOG" >/dev/null 2>&1; then
+        error "Tasks Axi rejected the complete activation postimage"
+      elif ! FINAL_POSTIMAGE_LIST=$("$TASKS_AXI" list --file "$NEW_BACKLOG" 2>/dev/null); then
+        error "Tasks Axi could not inspect the complete activation postimage"
+      elif ! printf '%s\n' "$FINAL_POSTIMAGE_LIST" | grep -Fq "${ACTIVATION_TASK_ID},done,"; then
+        error "complete backlog postimage did not complete $ACTIVATION_TASK_ID: $FINAL_POSTIMAGE_LIST"
+      elif ! FINAL_READY_OUTPUT=$("$TASKS_AXI" ready --file "$NEW_BACKLOG" 2>/dev/null); then
+        error "Tasks Axi could not compute readiness for the complete activation postimage"
       else
-        BACKLOG_PUBLISHED=1
-        if [ "$FAIL_STAGE" = receipt-move ]; then
-          error "fault injection refused at receipt-move stage"
-        elif ! mv -f -- "$NEW_RECEIPT" "$RECEIPT"; then
-          error "could not publish activation receipt"
-        else
-          RECEIPT_PUBLISHED=1
+        for activation_id in "${ACTIVATION_IDS[@]}"; do
+          if ! printf '%s\n' "$FINAL_READY_OUTPUT" | grep -Fq "$activation_id"; then
+            error "complete backlog postimage did not make activation task ready: $activation_id"
+          fi
+        done
+      fi
+    fi
+
+    if [ "${#ERRORS[@]}" -eq 0 ]; then
+      sed -n 's/^  Activation receipt: //p' "$NEW_BACKLOG" >"$TMP_DIR/receipt-from-postimage.json"
+      if [ "$(grep -Ec '^  Activation receipt: ' "$NEW_BACKLOG" || true)" -ne 1 ]; then
+        error "complete backlog postimage does not contain exactly one authoritative receipt"
+      elif ! validate_receipt_file "$TMP_DIR/receipt-from-postimage.json" "$POST_LIVE_SHA256"; then
+        error "embedded activation receipt does not validate against the complete postimage"
+      elif [ "$(postimage_hash "$NEW_BACKLOG")" != "$POST_LIVE_SHA256" ]; then
+        error "embedded postimage hash is not self-consistent"
+      elif [ "$FAIL_STAGE" = postimage-validate ]; then
+        error "fault injection refused at postimage-validate stage"
+      elif [ "$FAIL_STAGE" = pre-publication ]; then
+        error "fault injection refused at pre-publication stage"
+      elif ! mv -f -- "$NEW_BACKLOG" "$LIVE_BACKLOG"; then
+        error "could not publish the authoritative backlog postimage"
+      else
+        NEW_BACKLOG=
+        if [ "$FAIL_STAGE" = post-publication ]; then
+          error "fault injection refused immediately after the backlog rename"
         fi
       fi
     fi
 
-    if [ "${#ERRORS[@]}" -gt 0 ] && [ "$BACKLOG_PUBLISHED" -eq 1 ]; then
-      if ! mv -f -- "$BACKUP" "$LIVE_BACKLOG"; then
-        error "activation rollback could not restore the exact backlog preimage"
-      else
-        BACKUP=
-      fi
-      if [ "$RECEIPT_PUBLISHED" -eq 1 ] || [ -e "$RECEIPT" ] || [ -L "$RECEIPT" ]; then
-        if ! rm -f -- "$RECEIPT"; then
-          error "activation rollback could not remove the failed receipt"
-        fi
-      fi
-    fi
     [ -z "$NEW_BACKLOG" ] || [ ! -e "$NEW_BACKLOG" ] || rm -f -- "$NEW_BACKLOG" || error "activation cleanup could not remove backlog temporary file"
-    [ -z "$NEW_RECEIPT" ] || [ ! -e "$NEW_RECEIPT" ] || rm -f -- "$NEW_RECEIPT" || error "activation cleanup could not remove receipt temporary file"
-    [ -z "$BACKUP" ] || [ ! -e "$BACKUP" ] || rm -f -- "$BACKUP" || error "activation cleanup could not remove backlog preimage temporary file"
   fi
-fi
 
 if [ "$JSON_OUTPUT" -eq 1 ]; then
   if [ "${#ERRORS[@]}" -gt 0 ]; then
     ISSUES=$(printf '%s\n' "${ERRORS[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')
     jq -n --arg schema 'omp-activation-check.v1' --arg status 'BLOCK' --arg action "$ACTION" --argjson issues "$ISSUES" '{schema:$schema,status:$status,action:$action,issues:$issues}'
+  elif [ "$ALREADY_ACTIVATED" -eq 1 ]; then
+    jq -n --arg schema 'omp-activation-check.v1' --arg status 'PASS' --arg action "$ACTION" --argjson task_ids "$TASK_IDS_JSON" '{schema:$schema,status:$status,action:$action,already_activated:true,authoritative:true,published_task_ids:$task_ids}'
   elif [ "$ACTION" = activate ]; then
     jq -n --arg schema 'omp-activation-check.v1' --arg status 'PASS' --arg action "$ACTION" --argjson task_ids "$(printf '%s\n' "${ACTIVATION_IDS[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')" '{schema:$schema,status:$status,action:$action,published_task_ids:$task_ids}'
   else
@@ -457,6 +602,8 @@ else
   if [ "${#ERRORS[@]}" -gt 0 ]; then
     printf 'BLOCK\n'
     printf '%s\n' "${ERRORS[@]}" >&2
+  elif [ "$ALREADY_ACTIVATED" -eq 1 ]; then
+    printf 'PASS: authoritative activation postimage already published\n'
   elif [ "$ACTION" = activate ]; then
     printf 'PASS: activation publication committed atomically\n'
   else

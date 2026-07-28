@@ -75,6 +75,9 @@ if [ "$MANIFEST_VALID" -eq 1 ]; then
   if ! jq -e '.schema == "omp-task-manifest.v1" and .version == 1 and .dependency_mode == "exact-task-ids"' "$MANIFEST" >/dev/null 2>&1; then
     error "manifest schema, version, or dependency mode is invalid"
   fi
+  if ! jq -e '. as $root | ($root.activation_report_task_id == "omp-final-corrected-plan-redteam-o9" and $root.activation_report_path == "data/omp-final-corrected-plan-redteam-o9/report.md" and ([$root.tasks[] | select(.id == $root.activation_report_task_id)] | length) == 1)' "$MANIFEST" >/dev/null 2>&1; then
+    error "manifest activation report identity is not the O9 contract"
+  fi
 
   TASK_COUNT=$(jq '.tasks | length' "$MANIFEST")
   VALIDATION_COUNT=$(jq '[.tasks[].validation_ids[]] | unique | length' "$MANIFEST")
@@ -85,6 +88,18 @@ if [ "$MANIFEST_VALID" -eq 1 ]; then
   while IFS= read -r duplicate_id; do
     [ -n "$duplicate_id" ] && error "duplicate task id: $duplicate_id"
   done < <(jq -r '.tasks[].id' "$MANIFEST" | sort | uniq -d)
+  while IFS= read -r duplicate_id; do
+    [ -n "$duplicate_id" ] && error "duplicate STOP identifier: $duplicate_id"
+  done < <(jq -r '.stop_ids[]' "$MANIFEST" | sort | uniq -d)
+  while IFS= read -r duplicate_edge; do
+    [ -n "$duplicate_edge" ] && error "duplicate dependency edge: $duplicate_edge"
+  done < <(jq -r '.tasks[] | .id as $id | (.depends_on // [])[] | [$id, .] | @tsv' "$MANIFEST" | sort | uniq -d)
+  while IFS= read -r duplicate_identifier; do
+    [ -n "$duplicate_identifier" ] && error "duplicate per-task validation identifier: $duplicate_identifier"
+  done < <(jq -r '.tasks[] | .id as $id | (.validation_ids // [])[] | [$id, .] | @tsv' "$MANIFEST" | sort | uniq -d)
+  while IFS= read -r duplicate_identifier; do
+    [ -n "$duplicate_identifier" ] && error "duplicate per-task evidence identifier: $duplicate_identifier"
+  done < <(jq -r '.tasks[] | .id as $id | (.evidence_ids // [])[] | [$id, .] | @tsv' "$MANIFEST" | sort | uniq -d)
 
   while IFS= read -r issue; do
     [ -n "$issue" ] && error "$issue"
@@ -139,6 +154,14 @@ if [ "$MANIFEST_VALID" -eq 1 ]; then
   fi
   if ! jq -e '.support_fence == "experimental tmux worker; unverified; no primary, secondmate, recovery, or Herdr support"' "$MANIFEST" >/dev/null 2>&1; then
     error "support-state fence is not the required experimental-only label"
+  fi
+  ACTIVATION_REPORT_PATH=$(jq -r '.activation_report_path // empty' "$MANIFEST")
+  if [ -n "$ACTIVATION_REPORT_PATH" ]; then
+    for parity_file in "$PLAN" "$ROADMAP" "$BACKLOG"; do
+      if [ -f "$parity_file" ] && ! grep -Fq "$ACTIVATION_REPORT_PATH" "$parity_file"; then
+        error "activation report path is absent from parity file: $parity_file"
+      fi
+    done
   fi
 
   if [ -f "$ROADMAP" ]; then

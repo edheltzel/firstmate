@@ -105,9 +105,9 @@
     },
     {
       "id": "omp-activation-records",
-      "paths": ["data/omp-activation-preflight.json", "data/omp-activation-receipt.json"],
-      "creator": [{"path": "bin/fm-omp-activation.sh", "tokens": ["omp-activation-preflight", "omp-activation-receipt"]}],
-      "cleanup": [{"path": "bin/fm-omp-activation.sh", "tokens": ["activation receipt"]}],
+      "paths": ["data/omp-activation-preflight.json", "data/backlog.md"],
+      "creator": [{"path": "bin/fm-omp-activation.sh", "tokens": ["omp-activation-preflight", "omp-activation-receipt.v1", "authoritative backlog"]}],
+      "cleanup": [{"path": "bin/fm-omp-activation.sh", "tokens": ["activation receipt", "authoritative backlog"]}],
       "rollback_owner": "omp-p1-activation-a7",
       "evidence_schema": "omp-activation-preflight.v1",
       "rollback_schema": "omp-activation-receipt.v1"

@@ -19,15 +19,23 @@ No row grants runtime support or changes a verified allowlist.
 | `herdr-presentation-journal` | Herdr presentation journal | `state/{task}.herdr-presentation` | Herdr presentation owner | `bin/fm-teardown.sh` | `omp-p5-herdr-parity` | `omp-evidence.v1`, `omp-rollback.v1` |
 | `transition-and-task-temp` | Transition and task temporary state | `state/{task}.backend-transition`, `state/{task}.task-temp`, `state/{task}.turn-ended`, `state/{task}.grok-turnend-token` | task lifecycle owner | `bin/fm-teardown.sh` | `omp-p3-cleanup-live` | `omp-evidence.v1`, `omp-rollback.v1` |
 | `omp-evidence-and-rollback` | OMP evidence and rollback records | `data/omp-evidence/{task_id}.json`, `data/omp-rollback/{task_id}.json` | task owner from manifest | task owner from manifest | task owner from manifest | `omp-evidence.v1`, `omp-rollback.v1` |
-| `omp-activation-records` | Activation transaction records | `data/omp-activation-preflight.json`, `data/omp-activation-receipt.json` | `bin/fm-omp-activation.sh` | activation owner | activation owner | `omp-activation-preflight.v1`, `omp-activation-receipt.v1` |
+| `omp-activation-records` | Activation transaction records | `data/omp-activation-preflight.json`, `data/backlog.md` | `bin/fm-omp-activation.sh` | `omp-p1-activation-a7` | `omp-p1-activation-a7` | `omp-activation-preflight.v1`, `omp-activation-receipt.v1` |
 
 ## Atomic publication invariant
 
 Publication is one transaction owned by `bin/fm-omp-activation.sh --activate` for the first corrected phase and by the P8 publication task for later policy changes.
 
-The transaction must validate the complete preimage, write a same-directory temporary file, parse the proposed backlog with Tasks Axi, and replace the target with one atomic rename.
+The authoritative activation commit unit is one complete `data/backlog.md` postimage.
 
-An interruption may leave either the verified preimage or the verified postimage, but never a mixed publication state.
+The completed A7 record embeds the complete `omp-activation-receipt.v1` record, including preimage hash, normalized postimage hash, O9 report identity and hash, authorization identity, exact task and dependency records, activation date, and support fence.
+
+The postimage hash is computed from the postimage after replacing the receipt's 64-hex `postimage_sha256` value with the literal `<self>` placeholder, so the hash is not self-referential.
+
+The transaction must validate the complete postimage with Tasks Axi and the receipt schema before replacing `data/backlog.md` with one same-directory atomic rename.
+
+An interruption before the rename leaves the verified preimage unchanged, and an interruption immediately after the rename leaves the complete verified postimage authoritative.
+
+There is no separate activation receipt authority or receipt projection.
 
 `bin/fm-omp-publication-check.sh` is the executable V29 inventory and interruption validator.
 

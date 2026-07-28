@@ -14,7 +14,7 @@ execution: code
 
 This file is the single canonical owner for the OMP support contract, requirement ledger, architecture map, phases, validation matrix, hard stops, and Definition of Done.
 
-The current artifact state is `O6 BLOCK; corrected-plan Red Team required`.
+The current artifact state is `O8 historical BLOCK; O9 final corrected-plan validation required`.
 
 The current plan is not implementation authority.
 
@@ -22,9 +22,11 @@ No OMP runtime, dispatch, test, cleanup, supervision, recovery, or support-polic
 
 The final plan Red Team task `omp-final-plan-redteam-o6` returned `BLOCK` on 2026-07-27.
 
-The next validation task is `omp-corrected-plan-redteam-o8`, which may return `PASS`, `CONDITIONAL PASS`, or `BLOCK` after this correction lands.
+The promoted correction task `omp-corrected-plan-redteam-o8` is complete and preserves its historical `BLOCK` report.
 
-Implementation authority is blocked until `omp-corrected-plan-redteam-o8` returns `PASS` with no plan-blocking finding and its decision-hold inventory verifies clean.
+The next and only validation task before activation is `omp-final-corrected-plan-redteam-o9`, whose exact report path is `data/omp-final-corrected-plan-redteam-o9/report.md`.
+
+Implementation authority is blocked until `omp-final-corrected-plan-redteam-o9` returns `PASS` with no plan-blocking finding and its decision-hold inventory verifies clean.
 
 A `CONDITIONAL PASS` does not clear implementation authority until every condition is closed and revalidated.
 
@@ -44,7 +46,7 @@ The existing live activation identity is `omp-p1-activation-a7`.
 
 The activation task records the captain's implementation authorization dated 2026-07-27, but it must refuse to activate any P1-P8 task unless the corrected-plan Red Team returns `PASS` with no plan-blocking finding.
 
-The current next gate is `omp-corrected-plan-redteam-o8`, blocked by this correction task, while O6 remains a completed `BLOCK` result rather than an activation authorization.
+The current next gate is `omp-final-corrected-plan-redteam-o9`, blocked by the completed historical O8 correction task, while O8 remains a completed `BLOCK` result rather than an activation authorization.
 
 ## Support-state model
 
@@ -72,7 +74,7 @@ The current branch performs only plan and tracking work.
 
 Phase P0 produces the canonical plan and a Red Team-ready tracking manifest.
 
-The O6 Red Team must validate P0 before any future implementation task is activated.
+The independent O9 Red Team must validate the corrected P0 contract before any future implementation task is activated.
 
 The experimental worker sequence is P1 through P3.
 
@@ -182,13 +184,21 @@ Unknown must remain neither alive nor dead for respawn purposes until a proven O
 
 The captain's 2026-07-27 authorization is recorded on that task as permission to evaluate activation, not permission to bypass its checks.
 
-The gate must fail closed unless the corrected-plan Red Team report for `omp-corrected-plan-redteam-o8` has an exact `PASS` disposition, contains no plan-blocking finding, and has a verified decision-hold inventory.
+The gate must fail closed unless the final corrected-plan Red Team report for `omp-final-corrected-plan-redteam-o9` at `data/omp-final-corrected-plan-redteam-o9/report.md` has an exact `PASS` disposition, contains the exact heading `## Plan-blocking findings` followed by `None.`, and has a verified decision-hold inventory.
 
 `CONDITIONAL PASS`, a missing report, an unverified hold, a stale report path, a dirty tracked tree, an unexpected P1-P8 backlog row, or any STOP row keeps activation refused.
 
 The gate must verify that OMP remains absent from verified-harness allowlists, normal dispatch, primary supervision, secondmate routing, recovery classifiers, and Herdr support claims while it evaluates activation.
 
-The gate may add the manifest's first implementation rows only after all fail-closed checks pass and must record the exact task IDs, dependency edges, branch, commit, report path, report hash, and authorization identity in one operational transaction.
+The gate may add the manifest's first implementation rows only after all fail-closed checks pass and must record the exact task IDs, dependency edges, branch, commit, report path, report hash, authorization identity, activation date, and support fence in one authoritative `data/backlog.md` postimage.
+
+The completed A7 record embeds the complete `omp-activation-receipt.v1` record, and that embedded record is the only activation receipt authority.
+
+The receipt's `postimage_sha256` is calculated after replacing its 64-hex value with `<self>`, which makes the hash non-self-referential and reproducible.
+
+The postimage is validated by Tasks Axi and the receipt schema before one same-directory atomic rename of `data/backlog.md`.
+
+Interruption before the rename preserves the exact preimage, while interruption immediately after the rename leaves the complete postimage authoritative and requires no compensating second-file rollback.
 
 The roadmap is prose and must never be passed to `tasks-axi render`.
 
@@ -326,7 +336,7 @@ The preflight must bind `STOP-01`, `STOP-02`, `V03`, `V04`, the registration set
 
 All task IDs in this section are stable manifest IDs, not live backlog entries.
 
-They become executable Tasks Axi records only after `omp-corrected-plan-redteam-o8` passes, its decision-hold inventory verifies clean, and `omp-p1-activation-a7` completes its fail-closed checks.
+They become executable Tasks Axi records only after `omp-final-corrected-plan-redteam-o9` passes, its decision-hold inventory verifies clean, and `omp-p1-activation-a7` completes its fail-closed checks.
 
 The manifest state `planned` is not a captain hold.
 
@@ -341,8 +351,9 @@ There is no current captain choice in this revision.
 | P0 | Landed plan correction | `omp-o5-plan-traceability` | none | serialized | complete in commit set `967b1dc`, `a070dff`, `44a92ce`, `29511e5`, `cd3c826`, `da558ff` |
 | P0 | Independent second Red Team | `omp-final-plan-redteam-o6` | `omp-o5-plan-traceability` | serialized | complete 2026-07-27 with `BLOCK`; report path is `data/omp-final-plan-redteam-o6/report.md` |
 | P0 | Correct O6 plan-block corrections | `omp-plan-block-corrections-o7` | `omp-final-plan-redteam-o6` | serialized | current planning/tracking correction; no runtime or support change |
-| P0 | Corrected-plan Red Team | `omp-corrected-plan-redteam-o8` | `omp-plan-block-corrections-o7` | serialized | queued validation; `PASS` with no plan-blocking finding is required |
-| P1 | Fail-closed implementation activation | `omp-p1-activation-a7` | `omp-corrected-plan-redteam-o8` | serialized | activation gate only; captain authorization `captain-omp-implementation-authorization-2026-07-27` is a separate gate; no P1-P8 implementation record is active now |
+| P0 | Promoted O8 correction after historical BLOCK | `omp-corrected-plan-redteam-o8` | `omp-plan-block-corrections-o7` | serialized | complete 2026-07-28; preserved report is `BLOCK` |
+| P0 | Independent final corrected-plan validation | `omp-final-corrected-plan-redteam-o9` | `omp-corrected-plan-redteam-o8` | serialized | queued validation; `PASS` with no plan-blocking finding is required |
+| P1 | Fail-closed implementation activation | `omp-p1-activation-a7` | `omp-final-corrected-plan-redteam-o9` | serialized | activation gate only; captain authorization `captain-omp-implementation-authorization-2026-07-27` is a separate gate; no P1-P8 implementation record is active now |
 | P1 | Runtime identity ledger | `omp-p1-runtime-pin` | `omp-p1-activation-a7` | parallel with P1 peers under disjoint-resource proof | planned |
 | P1 | Discovery and flag safety ledger | `omp-p1-discovery-isolation` | `omp-p1-activation-a7` | parallel with P1 peers under disjoint-resource proof | planned |
 | P1 | Host ancestry identity ledger | `omp-p1-identity-ancestry` | `omp-p1-activation-a7` | parallel with P1 peers under disjoint-resource proof | planned |
@@ -384,15 +395,15 @@ Its rollback is documentation-only revert; it cannot change OMP runtime or suppo
 
 `omp-final-plan-redteam-o6` must attack every C01-C25 row, every phase dependency, every task, every evidence requirement, every gate, every rollback, every progress field, and every decision classification.
 
-O6 is serialized before the correction task, and O8 plus activation are serialized before any implementation task is added to the live backlog.
+O6 is serialized before the correction task, and O8, O9, and activation are serialized before any implementation task is added to the live backlog.
 
 The current O6 result is `BLOCK`, so this plan is not an implementation authority.
 
-`omp-plan-block-corrections-o7` owns the correction artifact, and `omp-corrected-plan-redteam-o8` owns the independent re-review of every O6 acceptance criterion.
+`omp-plan-block-corrections-o7` owns the correction artifact, `omp-corrected-plan-redteam-o8` owns the promoted correction after its historical BLOCK, and `omp-final-corrected-plan-redteam-o9` owns the independent final re-review of every O6 acceptance criterion.
 
 ### P1 - Evidence and launch boundary
 
-Prerequisite: O8 returns `PASS`, `omp-p1-activation-a7` completes, and the manifest is activated without adding OMP to verified policy.
+Prerequisite: O9 returns `PASS`, `omp-p1-activation-a7` completes, and the manifest is activated without adding OMP to verified policy.
 
 `omp-p1-runtime-pin` records the exact binary, package, version, Bun, hashes, dependency graph, command surface, RPC vector, date, output, and link commits.
 
@@ -626,8 +637,8 @@ Every task report must include the complete row for its task ID, with `not creat
 
 | Task IDs | Artifact, owner, process, and path inventory | Cleanup and rollback proof |
 | --- | --- | --- |
-| `omp-o5-plan-traceability`, `omp-final-plan-redteam-o6`, `omp-plan-block-corrections-o7`, `omp-corrected-plan-redteam-o8` | Owner: planning worker; processes: Markdown/link checker, `tasks-axi` 0.2.3 resolved from PATH, Git; paths: `.agents/plans/omp-harness-integration-plan.md`, `.agents/tasks/roadmap.md`, `.agents/tasks/backlog.md`, report paths under `data/`, and a unique disposable validation copy. | No runtime, backend, HOME, profile, cache, lock, wake, extension, hook, or Herdr artifacts are permitted; delete only the disposable copy, assert `git diff --exit-code`, and revert the focused documentation commit if the post-edit DOX or validation pass fails. |
-| `omp-p1-activation-a7` | Owner: activation gate; processes: Tasks Axi and the gate validator only; paths: `.agents/tasks/backlog.md`, `data/backlog.md`, corrected-plan report, decision-hold record, current branch/commit, and a unique activation evidence directory. | The default outcome is refusal; no P1-P8 row, runtime process, backend, HOME, profile/cache, package, lock, wake, extension, hook, or Herdr artifact may exist on refusal, and a failed staged activation is removed by restoring the preflight backlog bytes. |
+| `omp-o5-plan-traceability`, `omp-final-plan-redteam-o6`, `omp-plan-block-corrections-o7`, `omp-corrected-plan-redteam-o8`, `omp-final-corrected-plan-redteam-o9` | Owner: planning worker; processes: Markdown/link checker, `tasks-axi` 0.2.3 resolved from PATH, Git; paths: `.agents/plans/omp-harness-integration-plan.md`, `.agents/tasks/roadmap.md`, `.agents/tasks/backlog.md`, report paths under `data/`, and a unique disposable validation copy. | No runtime, backend, HOME, profile, cache, lock, wake, extension, hook, or Herdr artifacts are permitted; delete only the disposable copy, assert `git diff --exit-code`, and revert the focused documentation commit if the post-edit DOX or validation pass fails. |
+| `omp-p1-activation-a7` | Owner: activation gate; processes: Tasks Axi and the gate validator only; paths: `.agents/tasks/backlog.md`, `data/backlog.md`, corrected-plan report, decision-hold record, current branch/commit, and a unique activation evidence directory. | The default outcome is refusal; no P1-P8 row, runtime process, backend, HOME, profile/cache, package, lock, wake, extension, hook, or Herdr artifact may exist on refusal, and every pre-rename failure leaves the exact preflight backlog bytes unchanged. |
 | `omp-p1-runtime-pin`, `omp-p1-discovery-isolation`, `omp-p1-identity-ancestry` | Owner: respective P1 evidence task; processes: pinned OMP, Bun helpers, hash/link/parser commands, and descendants; paths: task-unique `HOME`, all XDG roots, `TMPDIR`, `OMP_PROFILE`, session/socket/log/evidence/package roots, and read-only source copy. | The simultaneous realpath inventory must be empty across tasks; kill only recorded descendants, remove task-local state, profiles, caches, locks, wakes, sessions, sockets, logs, packages, and evidence, and leave the installed runtime and support policy untouched. |
 | `omp-p2-experimental-launch`, `omp-p2-identity-adapter`, `omp-p2-extension-handshake`, `omp-p2-thinking-state` | Owner: launcher, identity, handshake, and state tasks; processes: OMP host, shell descendants, helper and checker processes; paths: task `FM_HOME`, `state/<task-id>.*`, generated extension and hook, immutable extension/package root, profile/cache, lock, wake, tmux socket/session, log, and evidence. | Record process descendants before launch, run the real task cleanup path, verify no state or generated hook/extension remains, and restore pre-task identity/launch behavior without changing allowlists or support state. |
 | `omp-p3-rpc-lifecycle`, `omp-p3-continuation-followup`, `omp-p3-worker-live`, `omp-p3-cleanup-live`, `omp-p3-regression` | Owner: RPC, continuation, worker, cleanup, and regression tasks; processes: OMP RPC host, provider mock, shell/tool descendants, tmux backend, test runners, Bun/TypeScript validators; paths: task temp, state, profile/cache, immutable package, lock, wake, session/socket, generated extension/hook, worktree, logs, and evidence. | Every operation and abnormal path ends in one completion or typed failure before cleanup; inspect descendants and all roots after `bin/fm-teardown.sh`, preserve dirty/unlanded/refusal behavior, and revert only the focused implementation or test commit in a disposable proof. |
@@ -643,7 +654,7 @@ Every task has a stable evidence ID, rollback ID, evidence path, rollback path, 
 
 `bin/fm-omp-plan-check.sh` validates manifest uniqueness, dependency closure, cycle freedom, roadmap parity, plan cross-references, Tasks Axi parsing, and version-pinned non-mutating commands.
 
-`bin/fm-omp-activation.sh` is the non-mutating-by-default O8 PASS gate and the sole guarded atomic publication owner for the first corrected implementation phase.
+`bin/fm-omp-activation.sh` is the non-mutating-by-default O9 PASS gate and the sole guarded single-backlog atomic publication owner for the first corrected implementation phase.
 
 `bin/fm-omp-publication-check.sh` is the V29 inventory and interruption validator and refuses any mixed publication state.
 
@@ -653,12 +664,12 @@ Every task has a stable evidence ID, rollback ID, evidence path, rollback path, 
 | --- | --- | --- | --- | --- |
 | O8-S0-01 | Assign executable OMP identity, shared session-lock identity, backend liveness, environment adaptation, tests, and rollback ownership. | `omp-p1-identity-ancestry`, `omp-p2-identity-adapter`, `omp-p4-tmux-classifier`, `omp-p7-recovery` | `bin/fm-omp-plan-check.sh`; V03,V04,V26; `tests/fm-session-lock.test.sh` and the mapped backend tests | `omp-rollback-omp-p2-identity-adapter`; STOP-03 and STOP-06 keep support fenced. |
 | O8-S0-02 | Enumerate every discovery source and require immutable entry, transitive, dynamic, lazy, bundled, plugin, and inline closure. | `omp-p1-discovery-isolation`, `omp-p2-extension-handshake` | REQ-DISC-02, REQ-EXT-01, V02,V03,V04; `--plugin-dir`, package/config overrides, model/provider/search credentials, and inline autoresearch are explicit | `omp-rollback-omp-p1-discovery-isolation`; STOP-01 and STOP-02 refuse ready or brief delivery. |
-| O8-ACT-01 | Encode the already-authorized activation behind a mechanical O8 PASS, decision, clean-tree, preimage, support-fence, and no-premature-row gate. | `omp-p1-activation-a7` | `bin/fm-omp-activation.sh --check --json`; `omp-activation-check.v1`; every refusal condition is covered by `tests/fm-omp-activation.test.sh` | `omp-rollback-omp-p1-activation-a7`; default is refusal and `--activate` alone is never authority. |
-| O8-TRACK-01 | Replace prose dependency aliases with exact stable task IDs in a machine-readable graph and a parity-checked roadmap. | All task IDs in `.agents/tasks/omp-manifest.json` | `bin/fm-omp-plan-check.sh --json`; `omp-plan-check.v1`; Tasks Axi 0.2.3 list/show/ready | `omp-rollback-omp-corrected-plan-redteam-o8`; no future task row is executable before A7. |
+| O9-ACT-01 | Encode the already-authorized activation behind a mechanical O9 PASS, decision, clean-tree, preimage, support-fence, and no-premature-row gate. | `omp-p1-activation-a7` | `bin/fm-omp-activation.sh --check --json`; `omp-activation-check.v1`; every refusal condition is covered by `tests/fm-omp-activation.test.sh` | `omp-rollback-omp-p1-activation-a7`; default is refusal and `--activate` alone is never authority. |
+| O8-TRACK-01 | Replace prose dependency aliases with exact stable task IDs in a machine-readable graph and a parity-checked roadmap. | All task IDs in `.agents/tasks/omp-manifest.json` | `bin/fm-omp-plan-check.sh --json`; `omp-plan-check.v1`; Tasks Axi 0.2.3 list/show/ready | `omp-rollback-omp-corrected-plan-redteam-o8`; no future task row is executable before O9 and A7. |
 | O8-TRACK-02 | Give every task stable validation, evidence, rollback, path, schema, owner, and cross-reference fields. | All task IDs in `.agents/tasks/omp-manifest.json` | Manifest uniqueness and graph checks plus V01-V29, STOP-01 through STOP-12, and plan/roadmap parity | Per-task `omp-rollback-{task_id}` records; missing or ambiguous records block the phase. |
 | O8-PUB-01 | Enumerate exact P8 publication and cleanup surfaces and assign creation, cleanup, rollback, and evidence ownership. | `omp-p8-full-validation`, `omp-p8-policy-publication` | `docs/omp-publication-inventory.md`; `bin/fm-omp-publication-check.sh`; V29 and `omp-publication-check.v1` | Per-phase rollback inventories preserve the verified preimage and reject mixed publication state. |
 | O8-CRED-01 | Define allowed OMP credential names, source, lifetime, inheritance, redaction, no-log, cleanup, and refusal rules without values. | `omp-p1-discovery-isolation`, `omp-p2-identity-adapter` | REQ-CRED-01; V03,V04; plan environment boundary; names-only evidence | STOP-01, STOP-02, STOP-03, and `omp-rollback-omp-p2-identity-adapter` contain any credential ambiguity. |
-| O8-PROV-01 | Treat O7 branch text as historical and derive current branch and commit from live Git state. | `omp-corrected-plan-redteam-o8`, `omp-p1-activation-a7` | `git branch --show-current`, `git rev-parse HEAD`, and activation preflight fields | A stale or mismatched preimage refuses activation; no historical branch is authoritative. |
+| O8-PROV-01 | Treat O7 branch text as historical and derive current branch and commit from live Git state. | `omp-final-corrected-plan-redteam-o9`, `omp-p1-activation-a7` | `git branch --show-current`, `git rev-parse HEAD`, and activation preflight fields | A stale or mismatched preimage refuses activation; no historical branch is authoritative. |
 
 Future Herdr lab artifacts are named and scoped only by the task that owns them, and no ordinary Herdr session is a cleanup target.
 
@@ -693,7 +704,7 @@ No row marked incorporated means the runtime behavior has already passed.
 | C21 | incorporated | REQ-REG-01 | `.no-mistakes.yaml`, all tests, supported adapters; `omp-p3-regression`, `omp-p8-full-validation` | Complete loop plus continuity, supervision, Pi load/type, Grok cleanup, secondmate, and autodetection axes. | Any existing regression blocks P8; captain sees failing suite. |
 | C22 | incorporated | REQ-LIVE-01 | Evidence ledger; all phase tasks and `omp-p8-full-validation` | Every required live row has a command, output, status, and evidence link; skipped/mock/inferred rows fail. | Missing row blocks promotion; no human choice. |
 | C23 | incorporated | REQ-CLEAN-01, REQ-CLEAN-02 | Real teardown owner; `omp-p3-cleanup-live`, `omp-p7-cleanup-complete` | Generated worker extension, watcher, state, temp, process, backend, worktree, and refusal behavior. | Fixture-only cleanup is not pass; rollback preserves prior state. |
-| C24 | incorporated with stable conformance owner | REQ-SCOPE-01, REQ-MAP-01, REQ-DOC-01, REQ-MON-01 | `omp-plan-block-corrections-o7`, `omp-corrected-plan-redteam-o8`, and `omp-p8-policy-publication`; P2-P8 task chain | The conformance owner checks the full phase/task artifact inventory, current-code map, stale terminology/path scan, and live Status/Bearings projections before O8 and again before P8. | Schedule never weakens gates; progress reports the live-derived branch, scoped denominator, blocker, next gate, and explicit `needs:human` options. |
+| C24 | incorporated with stable conformance owner | REQ-SCOPE-01, REQ-MAP-01, REQ-DOC-01, REQ-MON-01 | `omp-plan-block-corrections-o7`, `omp-final-corrected-plan-redteam-o9`, and `omp-p8-policy-publication`; P2-P8 task chain | The conformance owner checks the full phase/task artifact inventory, current-code map, stale terminology/path scan, and live Status/Bearings projections before O9 and again before P8. | Schedule never weakens gates; progress reports the live-derived branch, scoped denominator, blocker, next gate, and explicit `needs:human` options. |
 | C25 | incorporated | REQ-LINK-01 | Evidence documentation; `omp-p1-runtime-pin`, `omp-p8-policy-publication` | Validate each package/source link at a pinned commit and classify only that link. | Unverified link blocks the affected claim, not unrelated evidence. |
 
 ## Convergent weakness traceability
@@ -737,9 +748,9 @@ Every row has a deterministic component and a required live component when the c
 | V23 | Existing harness, secondmate, backend, watcher, recovery, cleanup, Bun/TypeScript, and dependency regression | REQ-REG-01 | `omp-p3-regression`, `omp-p8-full-validation`; repository owner | All targeted suites, full `tests/*.test.sh` loop, pinned Bun syntax/type/import/load checks, and package/source hash checks. | Every existing test, applicable lint, OMP-native validation, and repository validation owner. |
 | V24 | Evidence redaction and link pinning | REQ-LINK-01, REQ-LIVE-01 | `omp-p1-runtime-pin`, `omp-p8-full-validation`; evidence owner | Redaction and URL parser. | Dated exact command/output artifact with credentials removed. |
 | V25 | Promotion wording and state transitions | REQ-SCOPE-01 | `omp-p4-tmux-provisional`, `omp-p8-policy-publication`; docs owner | Stale five-harness and state-label tests. | Review every user and agent surface before publication. |
-| V26 | Current-code owner and artifact-map completeness | REQ-MAP-01 | `omp-plan-block-corrections-o7`, `omp-corrected-plan-redteam-o8`, `omp-p8-policy-publication`; plan owner | `git ls-files`, exact owner table, and path checks cover secondmate positional parsing, raw launch, generated hook, send, continuity, every teardown list, package/type/load validation, and full regression. | Live-derived path inventory matches the current tree, missing or stale owner paths block O8 and P8, and the artifact/rollback rows exist for every task. |
-| V27 | Stale path and terminology closure | REQ-DOC-01 | `omp-plan-block-corrections-o7`, `omp-corrected-plan-redteam-o8`, `omp-p8-policy-publication`; documentation owner | `legacy_prefix=$(printf 't%s' 'h-'); legacy_role=$(printf 'Ar%s' 'chon'); rg -n "(^|[^[:alnum:]_])$legacy_prefix|persistent[[:space:]]+supervisor|$legacy_role" .agents/plans/omp-harness-integration-plan.md .agents/tasks/roadmap.md .agents/tasks/backlog.md` plus Markdown/link/path checks, with each intentional historical reference classified. | No stale current-surface reference remains, and any individually stale external link is pinned or labeled before publication. |
-| V28 | Live Status and Bearings monitoring projection | REQ-MON-01 | `omp-plan-block-corrections-o7`, `omp-corrected-plan-redteam-o8`, `omp-p8-policy-publication`; reporting owner | Fixture cases for manifest-only, active, blocked, and genuine decision records run through `bin/fm-fleet-snapshot.sh --json`, `bin/fm-bearings-snapshot.sh --json`, `tests/fm-status-report.test.sh`, and `tests/fm-bearings-snapshot.test.sh`. | Actual projections show phase, milestone, scoped completed/total, live Git branch, blockers with STOP/owner/containment, next gate, and `needs:human` options only for a genuine decision, without future rows inflating the denominator. |
+| V26 | Current-code owner and artifact-map completeness | REQ-MAP-01 | `omp-plan-block-corrections-o7`, `omp-final-corrected-plan-redteam-o9`, `omp-p8-policy-publication`; plan owner | `git ls-files`, exact owner table, and path checks cover secondmate positional parsing, raw launch, generated hook, send, continuity, every teardown list, package/type/load validation, and full regression. | Live-derived path inventory matches the current tree, missing or stale owner paths block O9 and P8, and the artifact/rollback rows exist for every task. |
+| V27 | Stale path and terminology closure | REQ-DOC-01 | `omp-plan-block-corrections-o7`, `omp-final-corrected-plan-redteam-o9`, `omp-p8-policy-publication`; documentation owner | `legacy_prefix=$(printf 't%s' 'h-'); legacy_role=$(printf 'Ar%s' 'chon'); rg -n "(^|[^[:alnum:]_])$legacy_prefix|persistent[[:space:]]+supervisor|$legacy_role" .agents/plans/omp-harness-integration-plan.md .agents/tasks/roadmap.md .agents/tasks/backlog.md` plus Markdown/link/path checks, with each intentional historical reference classified. | No stale current-surface reference remains, and any individually stale external link is pinned or labeled before publication. |
+| V28 | Live Status and Bearings monitoring projection | REQ-MON-01 | `omp-plan-block-corrections-o7`, `omp-final-corrected-plan-redteam-o9`, `omp-p8-policy-publication`; reporting owner | Fixture cases for manifest-only, active, blocked, and genuine decision records run through `bin/fm-fleet-snapshot.sh --json`, `bin/fm-bearings-snapshot.sh --json`, `tests/fm-status-report.test.sh`, and `tests/fm-bearings-snapshot.test.sh`. | Actual projections show phase, milestone, scoped completed/total, live Git branch, blockers with STOP/owner/containment, next gate, and `needs:human` options only for a genuine decision, without future rows inflating the denominator. |
 | V29 | Guarded P8 publication transaction and partial-failure recovery | REQ-SCOPE-01, REQ-DOC-01, REQ-REG-01 | `omp-p8-policy-publication`; publication owner | Disposable-clone simulation interrupts after each exact inventory group, runs invariant checks, performs one-commit publication, and proves a clean `git revert`. | Every partial state is refused, the complete publication has one commit or flag boundary, post-publication invariants pass, and the recoverable revert restores the prior support state and all artifact inventories. |
 
 ## Hard stops
@@ -778,10 +789,10 @@ The future requirement for a new explicit implementation authorization is a life
 | Mixed process identity | Child shells carry both markers while host does not. | Executable and argv ancestry, marker scrub, PID and lock-holder tests. | `omp-p1-identity-ancestry`; hard stop. |
 | Hidden lifecycle failure | Continuation cap and follow-up suppression can look normal. | Lower budget, eventual-start proof, typed failure, terminal events. | `omp-p3-continuation-followup`, `omp-p6-supervision-continuity`; hard stop. |
 | Backend ownership | Tmux marks Bun unknown and Herdr evidence is narrow. | Preserve unknown, prove both backends live, require sole-owner recovery. | P4, P5, P7; backend gate. |
-| Plan execution drift | A prose plan can omit a seam or activate tasks early. | Stable manifest, dependency graph, phase-scoped progress, O6 validation before activation. | `.agents/tasks/roadmap.md`; progress and blocker fields. |
-| Activation drift | O6 completion or captain authorization could be mistaken for implementation permission. | Existing `omp-p1-activation-a7` checks corrected-plan O8 `PASS`, no plan-blocking finding, verified hold, clean diff, and no premature P1-P8 row. | Activation gate; refusal is the safe result and reports the failing check. |
+| Plan execution drift | A prose plan can omit a seam or activate tasks early. | Stable manifest, dependency graph, phase-scoped progress, O9 validation before activation. | `.agents/tasks/roadmap.md`; progress and blocker fields. |
+| Activation drift | O8 completion or captain authorization could be mistaken for implementation permission. | Existing `omp-p1-activation-a7` checks corrected-plan O9 `PASS`, no plan-blocking finding, verified hold, clean diff, and no premature P1-P8 row. | Activation gate; refusal is the safe result and reports the failing check. |
 | Mutable extension trust | A canonical path and preflight hash can still be replaced before import. | Content-addressed read-only staging or OMP-side byte-bound loading, immediate pre-import hash proof, and startup registration handshake. | `omp-p1-discovery-isolation`, `omp-p2-extension-handshake`; STOP-01 and STOP-02. |
-| Monitoring drift | Prose progress can disagree with Status or Bearings output or use a historical branch. | V28 fixture projections and live Git branch derivation from `git symbolic-ref` or `git rev-parse`. | `omp-plan-block-corrections-o7`, `omp-corrected-plan-redteam-o8`; REQ-MON-01. |
+| Monitoring drift | Prose progress can disagree with Status or Bearings output or use a historical branch. | V28 fixture projections and live Git branch derivation from `git symbolic-ref` or `git rev-parse`. | `omp-plan-block-corrections-o7`, `omp-final-corrected-plan-redteam-o9`; REQ-MON-01. |
 
 ## Captain-facing tracking contract
 
@@ -799,9 +810,9 @@ The active branch is derived at read time from `git branch --show-current` or `g
 
 The O7 correction branch name is historical provenance only; future Status and Bearings records must derive the active value from live Git state.
 
-The next gate is `omp-corrected-plan-redteam-o8` with explicit `PASS` and no plan-blocking finding required.
+The next gate is `omp-final-corrected-plan-redteam-o9` with explicit `PASS` and no plan-blocking finding required.
 
-The current blocker is the O6 `BLOCK` result and its required plan corrections, not an implementation failure.
+The current blocker is the preserved O8 `BLOCK` result and the required independent O9 validation, not an implementation failure.
 
 The current `needs:human` list is empty because the captain authorization is already recorded and the remaining gate is evidence-based rather than a product choice.
 
@@ -809,7 +820,7 @@ When a genuine choice appears later, the task record must use a stable key, list
 
 No ordinary task receives a captain hold merely because it is future work.
 
-After O8 passes and activation completes, Tasks Axi `blocked-by` edges control readiness and only genuine decisions use structured holds.
+After O9 passes and activation completes, Tasks Axi `blocked-by` edges control readiness and only genuine decisions use structured holds.
 
 ## Verification and evidence handoff
 
@@ -835,9 +846,9 @@ No implementation code or implementation test is added in this task.
 
 The O6 Red Team task can reproduce every C01-C25 mapping through a requirement, owner, stable task, acceptance evidence, exit gate, containment action, and captain field.
 
-The `.agents/tasks` roadmap contains stable future IDs as prose, while the parseable backlog contains no executable P1-P8 implementation rows until O8 passes and activation completes.
+The `.agents/tasks` roadmap contains stable future IDs as prose, while the parseable backlog contains no executable P1-P8 implementation rows until O9 passes and activation completes.
 
-The live firstmate backlog contains no newly activated P1-P8 implementation task before O8 validation and activation.
+The live firstmate backlog contains no newly activated P1-P8 implementation task before O9 validation and activation.
 
 Markdown, link/path, non-mutating Tasks Axi list/show/ready, clean-diff, and documentation validation pass.
 
