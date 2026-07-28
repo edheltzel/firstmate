@@ -85,6 +85,15 @@ cleanup_activation_lock() {
     rmdir "$ACTIVATION_LOCK" 2>/dev/null || true
   fi
 }
+activation_test_pause() {
+  local stage=$1 ready resume
+  [ "$TEST_ONLY" -eq 1 ] || return 0
+  [ "${FM_OMP_ACTIVATION_PAUSE_STAGE:-}" = "$stage" ] || return 0
+  ready=${FM_OMP_ACTIVATION_PAUSE_READY_FILE:-$TMP_DIR/pause-ready}
+  resume=${FM_OMP_ACTIVATION_PAUSE_RESUME_FILE:-$TMP_DIR/pause-resume}
+  : >"$ready" || return 1
+  while [ ! -e "$resume" ]; do sleep 0.05; done
+}
 trap 'cleanup_activation_lock; rm -rf "$TMP_DIR"' EXIT HUP INT TERM
 
 if [ "$TEST_ONLY" -eq 0 ]; then
@@ -652,13 +661,21 @@ if [ "$ACTION" = activate ] && [ "${#ERRORS[@]}" -eq 0 ]; then
         error "fault injection refused at postimage-validate stage"
       elif [ "$FAIL_STAGE" = pre-publication ]; then
         error "fault injection refused at pre-publication stage"
+      elif ! sync; then
+        error "could not flush the prepared activation postimage before rename"
+      elif ! activation_test_pause before-rename; then
+        error "test pause before rename could not be established"
       elif [ -n "$EXPECTED_LIVE_SHA256" ] && [ "$(sha256 "$LIVE_BACKLOG")" != "$EXPECTED_LIVE_SHA256" ]; then
         error "live backlog changed during activation; refusing atomic rename"
       elif ! mv -f -- "$NEW_BACKLOG" "$LIVE_BACKLOG"; then
         error "could not publish the authoritative backlog postimage"
       else
         NEW_BACKLOG=
-        if [ "$FAIL_STAGE" = post-publication ]; then
+        if ! sync; then
+          error "could not flush the authoritative activation postimage after rename"
+        elif ! activation_test_pause after-rename; then
+          error "test pause after rename could not be established"
+        elif [ "$FAIL_STAGE" = post-publication ]; then
           error "fault injection refused immediately after the backlog rename"
         fi
       fi

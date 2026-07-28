@@ -505,13 +505,15 @@
         {
           "path": "bin/fm-fleet-snapshot.sh",
           "tokens": [
-            "generated"
+            "generated",
+            "omp-monitor-check.v1"
           ]
         },
         {
           "path": "bin/fm-bearings-snapshot.sh",
           "tokens": [
-            "generated"
+            "generated",
+            "omp-monitor-check.v1"
           ]
         },
         {

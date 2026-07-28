@@ -136,6 +136,12 @@ test_source_owner_token_drift_refuses() {
   out=$($CHECK --json --manifest "$manifest") || status=$?
   expect_code 1 "$status" "missing cleanup source token should block"
   assert_contains "$out" 'cleanup source token is missing' "missing cleanup token refusal was not reported"
+  jq '.artifacts[0].rollback_owner = "wrong-owner"' \
+    "$ROOT/.agents/tasks/omp-publication-manifest.json" >"$manifest"
+  status=0
+  out=$($CHECK --json --manifest "$manifest") || status=$?
+  expect_code 1 "$status" "rollback owner drift should block"
+  assert_contains "$out" 'publication artifact lacks paths, creator, cleanup, rollback owner, or schemas' "rollback owner drift was not reported"
   pass "omp-publication-check: creator and cleanup source drift are refused"
 }
 
@@ -148,6 +154,24 @@ test_stale_inventory_id_refuses() {
   expect_code 1 "$status" "stale documentation inventory row should block"
   assert_contains "$out" 'unregistered inventory ID' "stale inventory refusal was not reported"
   pass "omp-publication-check: stale documentation inventory is refused"
+}
+
+test_future_inventory_binding_refuses() {
+  local manifest="$TMP_ROOT/missing-future.json" inventory="$TMP_ROOT/duplicate-future.md" out status=0 row
+  jq '.future_paths = .future_paths[0:-1]' \
+    "$ROOT/.agents/tasks/omp-publication-manifest.json" >"$manifest"
+  out=$($CHECK --json --manifest "$manifest") || status=$?
+  expect_code 1 "$status" "missing future publication path should block"
+  assert_contains "$out" 'future-path set differs from manifest' "missing future path was not reported"
+  cp "$ROOT/docs/omp-publication-inventory.md" "$inventory"
+  # shellcheck disable=SC2016
+  row=$(grep -F 'omp-publication-future-path: `bin/fm-omp-watcher.sh`' "$inventory")
+  printf '%s\n' "$row" >>"$inventory"
+  status=0
+  out=$($CHECK --json --inventory "$inventory") || status=$?
+  expect_code 1 "$status" "duplicate future publication path should block"
+  assert_contains "$out" 'future-path rows are duplicated' "duplicate future path was not reported"
+  pass "omp-publication-check: future watcher/continuity path-owner-schema bindings are exact"
 }
 
 test_duplicate_documentation_row_refuses() {
@@ -179,5 +203,6 @@ test_unknown_changed_path_refuses
 test_false_pass_shapes_refuse
 test_source_owner_token_drift_refuses
 test_stale_inventory_id_refuses
+test_future_inventory_binding_refuses
 test_duplicate_documentation_row_refuses
 test_publication_tmpdir_failure_refuses

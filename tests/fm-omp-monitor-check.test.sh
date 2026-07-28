@@ -2,6 +2,7 @@
 # Fixture matrix for OMP Status/Bearings monitoring projection.
 set -u
 
+# shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 CHECK="$ROOT/bin/fm-omp-monitor-check.sh"
@@ -17,7 +18,7 @@ write_live() {
     else
       printf '%s\n' '- [x] omp-final-corrected-plan-redteam-o9 - historical review (repo: AgentThemis) (kind: scout) (priority: 0)'
     fi
-    if [ "$state" = done ]; then
+    if [ "$state" = "done" ]; then
       printf '%s\n' '- [x] omp-final-authority-redteam-o10 - final authority (repo: AgentThemis) (kind: scout) (priority: 0) (done 2026-07-28)'
     else
       printf '%s\n' '- [ ] omp-final-authority-redteam-o10 - final authority (repo: AgentThemis) (kind: scout) (priority: 0) blocked-by: omp-final-corrected-plan-redteam-o9'
@@ -40,7 +41,7 @@ test_current_contract_passes() {
 
 test_terminal_fixture_excludes_historical() {
   local out status=0
-  write_live done yes
+  write_live "done" yes
   out=$($CHECK --json --live-backlog "$TMP_ROOT/live.md" --repo-root "$ROOT") || status=$?
   expect_code 0 "$status" "terminal monitoring fixture should pass"
   assert_contains "$out" '"completed": 1' "terminal fixture did not count live completion"

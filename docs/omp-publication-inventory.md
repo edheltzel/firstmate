@@ -90,7 +90,7 @@ Publication is one transaction owned by `bin/fm-omp-activation.sh --activate` fo
 
 The authoritative activation commit unit is one complete `data/backlog.md` postimage.
 
-The completed A7 record embeds the complete `omp-activation-receipt.v1` record, including preimage hash, normalized postimage hash, O9 report identity and hash, authorization identity, exact task and dependency records, activation date, and support fence.
+The completed A7 record embeds the complete `omp-activation-receipt.v1` record, including preimage hash, normalized postimage hash, O10 report identity and hash, authorization identity, exact task and dependency records, activation date, and support fence.
 
 The postimage hash is computed from the postimage after replacing the receipt's 64-hex `postimage_sha256` value with the literal `<self>` placeholder, so the hash is not self-referential.
 

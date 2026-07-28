@@ -149,10 +149,29 @@ if [ -f "$MANIFEST" ] && jq empty "$MANIFEST" >/dev/null 2>&1; then
       require_inventory_token "$future_path"
     done < <(jq -r '.future_paths[].path' "$MANIFEST")
 
+    # shellcheck disable=SC2016
     DOCUMENT_TRACKED=$(grep -oE '^<!-- omp-publication-tracked-path: \`[^\`]+\` -->$' "$INVENTORY" | sed -E 's/^<!-- omp-publication-tracked-path: \`([^\`]+)\` -->$/\1/' | sort -u || true)
     MANIFEST_TRACKED=$(jq -r '.tracked_paths[]' "$MANIFEST" | sort -u)
+    # shellcheck disable=SC2016
+    DOCUMENT_TRACKED_RAW=$(grep -oE '^<!-- omp-publication-tracked-path: \`[^\`]+\` -->$' "$INVENTORY" | sed -E 's/^<!-- omp-publication-tracked-path: \`([^\`]+)\` -->$/\1/' || true)
+    DOCUMENT_TRACKED_ROW_COUNT=$(printf '%s\n' "$DOCUMENT_TRACKED_RAW" | sed '/^$/d' | wc -l | tr -d ' ')
+    DOCUMENT_TRACKED_UNIQUE_COUNT=$(printf '%s\n' "$DOCUMENT_TRACKED_RAW" | sed '/^$/d' | sort -u | wc -l | tr -d ' ')
+    [ "$DOCUMENT_TRACKED_ROW_COUNT" = "$DOCUMENT_TRACKED_UNIQUE_COUNT" ] || error "publication inventory tracked-path rows are duplicated"
     if [ "$DOCUMENT_TRACKED" != "$MANIFEST_TRACKED" ]; then
       error "publication inventory tracked-path set differs from manifest"
+    fi
+
+    # Future OMP-native surfaces are not files yet, so their exact path/owner/schema
+    # binding must be compared as structured comment rows rather than by existence.
+    # shellcheck disable=SC2016
+    DOCUMENT_FUTURE_RAW=$(grep -oE '^<!-- omp-publication-future-path: \`[^\`]+\` owner=[^ ]+ schema=[^ ]+ -->$' "$INVENTORY" | sed -E 's/^<!-- omp-publication-future-path: \`([^\`]+)\` owner=([^ ]+) schema=([^ ]+) -->$/\1\towner=\2\tschema=\3/' || true)
+    DOCUMENT_FUTURE=$(printf '%s\n' "$DOCUMENT_FUTURE_RAW" | sed '/^$/d' | sort -u)
+    MANIFEST_FUTURE=$(jq -r '.future_paths[] | "\(.path)\towner=\(.owner)\tschema=\(.schema)"' "$MANIFEST" | sort -u)
+    DOCUMENT_FUTURE_ROW_COUNT=$(printf '%s\n' "$DOCUMENT_FUTURE_RAW" | sed '/^$/d' | wc -l | tr -d ' ')
+    DOCUMENT_FUTURE_UNIQUE_COUNT=$(printf '%s\n' "$DOCUMENT_FUTURE_RAW" | sed '/^$/d' | sort -u | wc -l | tr -d ' ')
+    [ "$DOCUMENT_FUTURE_ROW_COUNT" = "$DOCUMENT_FUTURE_UNIQUE_COUNT" ] || error "publication inventory future-path rows are duplicated"
+    if [ "$DOCUMENT_FUTURE" != "$MANIFEST_FUTURE" ]; then
+      error "publication inventory future-path set differs from manifest"
     fi
 
     while IFS= read -r document_id; do
