@@ -475,6 +475,24 @@ test_kill_after_rename_preserves_postimage_and_restart_recognizes_receipt() {
   pass "omp-activation: kill-after-rename preserves and recognizes the durable receipt-bearing postimage"
 }
 
+test_final_rename_recheck_refuses_report_mutation() {
+  local ready="$TMP_ROOT/recheck.ready" resume="$TMP_ROOT/recheck.resume" log="$TMP_ROOT/recheck.log" pid out status=0 before after
+  setup_fixture
+  before=$(test_sha256 "$TMP_ROOT/live/backlog.md")
+  start_paused_activation before-rename "$ready" "$resume" "$log"
+  pid=$PAUSED_PID
+  wait_for_pause "$ready"
+  printf '# OMP report\n\n## Executive disposition\n\nBLOCK\n' >"$TMP_ROOT/data/omp-final-authority-redteam-o10/report.md"
+  : >"$resume"
+  wait "$pid" 2>/dev/null || true
+  out=$(cat "$log")
+  assert_contains "$out" 'report bytes changed before rename' "final report recheck did not refuse a mutated report"
+  after=$(test_sha256 "$TMP_ROOT/live/backlog.md")
+  [ "$before" = "$after" ] || fail "final report recheck changed the authoritative preimage"
+  [ -z "$(read_receipt)" ] || fail "final report recheck left an authoritative receipt"
+  pass "omp-activation: report and plan/runtime inputs are rechecked after the pause before rename"
+}
+
 test_manifest_drives_publication_set() {
   local manifest="$TMP_ROOT/manifest.json" out status=0 backlog
   setup_fixture
@@ -575,6 +593,7 @@ test_activation_lock_refuses_concurrent_and_recovers_stale
 test_real_subprocess_concurrency_refuses
 test_kill_before_rename_preserves_preimage_and_restart_recovers
 test_kill_after_rename_preserves_postimage_and_restart_recognizes_receipt
+test_final_rename_recheck_refuses_report_mutation
 test_manifest_drives_publication_set
 test_activation_dependency_closure_refuses
 test_historical_o8_cannot_authorize

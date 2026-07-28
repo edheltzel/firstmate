@@ -179,6 +179,64 @@ postimage_hash() {
   sed -E 's/("postimage_sha256":")[0-9a-fA-F]{64}/\1<self>/' "$1" | sha256_stdin
 }
 
+validate_final_rename_inputs() {
+  local ok=0 lock_pid lock_branch lock_commit final_report_disposition final_report_blockers final_plan_check final_pin_check
+  if [ "$LOCK_HELD" -ne 1 ] || [ ! -f "$ACTIVATION_LOCK/owner" ]; then
+    error "activation lock ownership was lost before rename"
+    ok=1
+  else
+    lock_pid=$(sed -n 's/^pid=//p' "$ACTIVATION_LOCK/owner" | head -n 1)
+    lock_branch=$(sed -n 's/^branch=//p' "$ACTIVATION_LOCK/owner" | head -n 1)
+    lock_commit=$(sed -n 's/^commit=//p' "$ACTIVATION_LOCK/owner" | head -n 1)
+    [ "$lock_pid" = "$$" ] || { error "activation lock owner changed before rename"; ok=1; }
+    [ "$lock_branch" = "$REPO_BRANCH" ] || { error "activation lock branch changed before rename"; ok=1; }
+    [ "$lock_commit" = "$REPO_COMMIT" ] || { error "activation lock commit changed before rename"; ok=1; }
+  fi
+  if [ ! -f "$REPORT" ] || [ "$(sha256 "$REPORT" 2>/dev/null || true)" != "$REPORT_SHA256" ]; then
+    error "report bytes changed before rename"
+    ok=1
+  fi
+  final_report_disposition=$(awk '
+    /^##[[:space:]]+Executive disposition[[:space:]]*$/ { section=1; headings++; next }
+    /^##[[:space:]]/ { section=0; next }
+    section && /^(PASS|BLOCK|CONDITIONAL PASS)$/ { status=$0; statuses++ }
+    END { if (headings != 1 || statuses != 1) exit 1; print status }
+  ' "$REPORT" 2>/dev/null || true)
+  [ "$final_report_disposition" = PASS ] || { error "report authority changed before rename"; ok=1; }
+  final_report_blockers=$(awk '
+    /^##[[:space:]]+Plan-blocking findings[[:space:]]*$/ { in_blockers=1; headings++; next }
+    in_blockers && /^##[[:space:]]/ { in_blockers=0; next }
+    in_blockers && NF {
+      line=$0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      body = body (body == "" ? "" : "\n") line
+      lines++
+    }
+    END { if (headings != 1 || lines != 1 || body != "None.") exit 1; print "none" }
+  ' "$REPORT" 2>/dev/null || true)
+  [ "$final_report_blockers" = none ] || { error "plan-blocking findings changed before rename"; ok=1; }
+  if [ "$(sha256 "$TRACKED_BACKLOG" 2>/dev/null || true)" != "$EXPECTED_TRACKED_SHA256" ]; then
+    error "tracked backlog bytes changed before rename"
+    ok=1
+  fi
+  final_plan_check=$(
+    "$ROOT/bin/fm-omp-plan-check.sh" --json --manifest "$MANIFEST" --plan "$ROOT/.agents/plans/omp-harness-integration-plan.md" --roadmap "$ROADMAP" --backlog "$TRACKED_BACKLOG" 2>/dev/null || true
+  )
+  [ "$(printf '%s' "$final_plan_check" | jq -r '.status // "BLOCK"' 2>/dev/null || printf BLOCK)" = PASS ] || {
+    error "OMP plan changed before rename"
+    ok=1
+  }
+  final_pin_check=$(
+    "$ROOT/bin/fm-omp-runtime-pin-check.sh" --json --pin "$RUNTIME_PIN" 2>/dev/null || true
+  )
+  [ "$(printf '%s' "$final_pin_check" | jq -r '.status // "BLOCK"' 2>/dev/null || printf BLOCK)" = PASS ] || {
+    error "installed OMP runtime changed before rename"
+    ok=1
+  }
+  return "$ok"
+}
+
 contains_task() {
   local task_id=$1
   local path=$2
@@ -661,10 +719,12 @@ if [ "$ACTION" = activate ] && [ "${#ERRORS[@]}" -eq 0 ]; then
         error "fault injection refused at postimage-validate stage"
       elif [ "$FAIL_STAGE" = pre-publication ]; then
         error "fault injection refused at pre-publication stage"
-      elif ! sync; then
-        error "could not flush the prepared activation postimage before rename"
       elif ! activation_test_pause before-rename; then
         error "test pause before rename could not be established"
+      elif ! validate_final_rename_inputs; then
+        :
+      elif ! sync; then
+        error "could not flush the prepared activation postimage before rename"
       elif [ -n "$EXPECTED_LIVE_SHA256" ] && [ "$(sha256 "$LIVE_BACKLOG")" != "$EXPECTED_LIVE_SHA256" ]; then
         error "live backlog changed during activation; refusing atomic rename"
       elif ! mv -f -- "$NEW_BACKLOG" "$LIVE_BACKLOG"; then
