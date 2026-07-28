@@ -60,6 +60,11 @@ PR_CHECK="$ROOT/bin/fm-pr-check.sh"
 TMP_ROOT=$(fm_test_tmproot fm-teardown-tests)
 REAL_GIT_FOR_TEST=$(command -v git)
 export REAL_GIT_FOR_TEST
+WORKER_SIGNING_KEY="${FM_TEST_WORKER_SIGNING_KEY:-${HOME:-}/.ssh/atlas_signing.pub}"
+WORKER_SIGNER_PRINCIPAL="${FM_TEST_WORKER_SIGNER_PRINCIPAL:-296298943+Atlas-Key@users.noreply.github.com}"
+WORKER_SIGNING_FINGERPRINT=$(ssh-keygen -lf "$WORKER_SIGNING_KEY" -E sha256 2>/dev/null \
+  | awk 'NF >= 2 { count++; value=$2 } END { if (count != 1) exit 1; print value }') \
+  || fail "configured test signing key is unavailable: $WORKER_SIGNING_KEY"
 
 # Build a fresh sandbox for one test case. Sets up:
 #   $CASE/state/        - firstmate state dir (with a fresh watcher beacon)
@@ -180,6 +185,18 @@ write_atlas_meta_and_binding() {
     'pr_repo=example/repo' \
     'pr_branch=fm/task-x1' \
     'pr_base=main' >> "$case_dir/state/task-x1.meta"
+  cat > "$case_dir/config/worker-git-identity" <<EOF
+[worker]
+ name = Atlas
+ email = atlas@rainyday.media
+ signingKey = $WORKER_SIGNING_KEY
+ fingerprint = $WORKER_SIGNING_FINGERPRINT
+ principal = $WORKER_SIGNER_PRINCIPAL
+[gpg]
+ format = ssh
+[commit]
+ gpgSign = true
+EOF
   umask 077
   printf '%s\n' \
     'version=1' \
@@ -203,7 +220,8 @@ wt_commit_atlas_file() {
   GIT_AUTHOR_NAME=Atlas GIT_AUTHOR_EMAIL=atlas@rainyday.media \
   GIT_COMMITTER_NAME=Atlas GIT_COMMITTER_EMAIL=atlas@rainyday.media \
     git -C "$case_dir/wt" -c user.email=atlas@rainyday.media -c user.name=Atlas \
-      -c commit.gpgsign=false commit -q -m "$msg"
+      -c gpg.format=ssh -c user.signingKey="$WORKER_SIGNING_KEY" \
+      -c commit.gpgsign=true commit -q -m "$msg"
 }
 
 add_atlas_broker_merged_for_head_with_one_transient_failure() {
