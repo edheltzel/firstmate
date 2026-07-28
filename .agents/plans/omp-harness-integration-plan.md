@@ -350,7 +350,7 @@ There is no current captain choice in this revision.
 | --- | --- | --- | --- | --- | --- |
 | P0 | Landed plan correction | `omp-o5-plan-traceability` | none | serialized | complete in commit set `967b1dc`, `a070dff`, `44a92ce`, `29511e5`, `cd3c826`, `da558ff` |
 | P0 | Independent second Red Team | `omp-final-plan-redteam-o6` | `omp-o5-plan-traceability` | serialized | complete 2026-07-27 with `BLOCK`; report path is `data/omp-final-plan-redteam-o6/report.md` |
-| P0 | Correct O6 plan-block corrections | `omp-plan-block-corrections-o7` | `omp-final-plan-redteam-o6` | serialized | current planning/tracking correction; no runtime or support change |
+| P0 | Correct O6 plan-block corrections | `omp-plan-block-corrections-o7` | `omp-final-plan-redteam-o6` | serialized | complete 2026-07-28; no runtime or support change |
 | P0 | Promoted O8 correction after historical BLOCK | `omp-corrected-plan-redteam-o8` | `omp-plan-block-corrections-o7` | serialized | complete 2026-07-28; preserved report is `BLOCK` |
 | P0 | Independent final corrected-plan validation | `omp-final-corrected-plan-redteam-o9` | `omp-corrected-plan-redteam-o8` | serialized | queued validation; `PASS` with no plan-blocking finding is required |
 | P1 | Fail-closed implementation activation | `omp-p1-activation-a7` | `omp-final-corrected-plan-redteam-o9` | serialized | activation gate only; captain authorization `captain-omp-implementation-authorization-2026-07-27` is a separate gate; no P1-P8 implementation record is active now |

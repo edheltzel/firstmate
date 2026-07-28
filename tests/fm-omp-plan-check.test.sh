@@ -96,6 +96,23 @@ test_report_identity_refuses() {
   pass "omp-plan-check: O9 report identity is exact"
 }
 
+test_o7_completion_state_parity_refuses() {
+  local bad_plan="$TMP_ROOT/o7-state-plan.md" bad_roadmap="$TMP_ROOT/o7-state-roadmap.md" out status=0
+  mkdir -p "$TMP_ROOT"
+  sed 's/complete 2026-07-28; no runtime or support change/current planning\/tracking correction/' \
+    "$ROOT/.agents/plans/omp-harness-integration-plan.md" >"$bad_plan"
+  out=$($CHECK --json --plan "$bad_plan") || status=$?
+  expect_code 1 "$status" "stale O7 plan state should block parity"
+  assert_contains "$out" 'O7 completion state is not current in parity file' "stale O7 plan state was not reported"
+  status=0
+  sed 's/complete 2026-07-28; no runtime or support change/current planning\/tracking correction/' \
+    "$ROOT/.agents/tasks/roadmap.md" >"$bad_roadmap"
+  out=$($CHECK --json --roadmap "$bad_roadmap") || status=$?
+  expect_code 1 "$status" "stale O7 roadmap state should block parity"
+  assert_contains "$out" 'O7 completion state is not current in parity file' "stale O7 roadmap state was not reported"
+  pass "omp-plan-check: O7 completion state parity is enforced"
+}
+
 test_tasks_axi_resolves_from_path() {
   local fakebin="$TMP_ROOT/fakebin" fake_axi out status=0
   mkdir -p "$fakebin"
@@ -132,5 +149,6 @@ test_duplicate_dependency_edge_refuses
 test_duplicate_validation_refuses
 test_duplicate_evidence_refuses
 test_report_identity_refuses
+test_o7_completion_state_parity_refuses
 test_tasks_axi_resolves_from_path
 test_plan_tmpdir_failure_refuses

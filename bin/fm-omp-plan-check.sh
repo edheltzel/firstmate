@@ -164,6 +164,16 @@ if [ "$MANIFEST_VALID" -eq 1 ]; then
     done
   fi
 
+  EXPECTED_O7_STATE='complete 2026-07-28; no runtime or support change'
+  for parity_file in "$PLAN" "$ROADMAP"; do
+    o7_row=$(grep -F '| P0 | Correct O6 plan-block corrections |' "$parity_file" | head -n 1 || true)
+    if [ -z "$o7_row" ]; then
+      error "O7 completion row is absent from parity file: $parity_file"
+    elif ! printf '%s\n' "$o7_row" | grep -Fq "| $EXPECTED_O7_STATE |"; then
+      error "O7 completion state is not current in parity file: $parity_file"
+    fi
+  done
+
   if [ -f "$ROADMAP" ]; then
     while IFS= read -r id; do
       [ -n "$id" ] || continue
