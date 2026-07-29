@@ -896,8 +896,8 @@ bin/fm-lint.sh
 ```
 
 `tests/fm-spawn-project-key.test.sh` reaches `fm-spawn`'s meta-write with a fake tmux pane and a real isolated worktree, so it proves the recorded delivery mode deterministically without the interactive `treehouse get` step.
-At the time of that verification, a Herdr pane could block on an SSH-key passphrase prompt before `treehouse get` settled.
-The 2026-07-29 SSH-agent forwarding contract below removes that environment limitation for Firstmate-created Herdr workers.
+At the time of that verification, a Herdr pane could block on an SSH-key passphrase prompt for a remoted repo, and separately did not settle the pane cwd for a scratch repo, before `treehouse get` settled.
+The 2026-07-29 SSH-agent forwarding contract below removes the passphrase-prompt blocker for Firstmate-created Herdr workers; the separate scratch-repo pane-cwd-settling limitation is not addressed by that fix and remains unrevalidated.
 The live Fleet-workspace behavior remains proven directly through the real Herdr server above, and the recorded-mode behavior through the deterministic meta-write test.
 
 ### 2026-07-29 Firstmate worker SSH-agent forwarding
