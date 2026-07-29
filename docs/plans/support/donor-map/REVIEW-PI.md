@@ -1,5 +1,7 @@
 # Independent review of `VALIDATION-ROUND2.md`
 
+Date: 2026-07-29.
+
 ## Bottom line
 
 The synthesis materially improves `CONSOLIDATION.md`, especially on C8, the verdict arithmetic, the conditional Reviewer role, R17, and the OMP-only final-gate text.
@@ -17,7 +19,7 @@ The relay cannot be audited as presented.
 Without the reports, prompts, model versions, or per-finding attribution, a reader cannot distinguish verifier consensus, a single verifier’s judgment, and the orchestrator’s synthesis.
 The standing caveat is honest, but it does not compensate for the missing chain of evidence.
 
-The synthesis also hardens several judgments:
+The preserved synthesis also hardens several judgments:
 
 - “C6 is the only genuine either/or” is categorical (`VALIDATION-ROUND2.md:24`), but the evidence reproduced there verifies a Treehouse interface fact, not the complete disposable-worktree design.
 - C1, C5, and C7 are declared “scope artifacts” without any local argument (`VALIDATION-ROUND2.md:30`). C8 is demonstrated; those three are not.
@@ -73,12 +75,12 @@ Removal-target validation is a distinct destructive-safety mechanism, and the co
 The conclusion survives; the supporting characterization should be narrowed.
 The further claim that reports 04 and 06 supply half the copies “purely” because of granularity (`VALIDATION-ROUND2.md:48`) is causal speculation, not a verified count.
 
-### 2.5 “Rebuild-heavy” phrase absence — literal fail
+### 2.5 “Rebuild-heavy” characterization — qualified
 
 The count claim is correct: the deduplicated ledger has 40 families, 18 with the exact verdict `rebuild`, and one with the exact verdict `copy` (`CONSOLIDATION.md:64-107`).
-The phrase-absence claim is literally false because `VALIDATION-ROUND2.md:50` itself contains “rebuild-heavy” and “Rebuild-heaviness.”
-A charitable version — “the phrase appears in no earlier file under `docs/plans/`” — is true, but that is not what the marked sentence says.
-This is enough to show that `[verified here]` cannot be read as a whole-sentence guarantee.
+The preserved validation's phrase-absence check is not a durable finding after reconciliation because the phrase was present in the preserved validation itself.
+The durable correction is that raw source-row totals are not rebuild-heavy, while a deduplicated family view may use that characterization only with an explicit definition.
+This is another reason `[verified here]` must be scoped to an exact clause rather than read as a whole-sentence guarantee.
 
 ### 2.6 Reviewer dispatch is conditional — pass
 
@@ -158,4 +160,10 @@ The synthesis misses several things a reader needs before acting:
 This is a useful adversarial correction, not a trustworthy final validation.
 Its sound core is substantial: C8 is manufactured, the source totals reproduce, the Reviewer role is dispatch-conditional, R17 was already present, and the OMP final-gate sentence is real drift.
 Its credibility convention fails because one marker is literally false and three more cover broader conclusions than the rechecked evidence supports.
-The next revision should attach the verifier chain, narrow every marker to an exact claim, replace count-only defects with named rows, and separate deterministic state classification from optional model-judgment review.
+The next revision should attach the verifier chain when available, narrow every marker to an exact claim, replace count-only defects with named rows, and separate deterministic state classification from optional model-judgment review.
+
+## Verification record
+
+The preserved `REVIEW-PI.md` input and its referenced validation input were read completely on 2026-07-29.
+Current target ownership was checked in `docs/plans/2026-07-26-001-feat-themis-fleet-orchestrator-plan.md:68-97`.
+Current implementation references were checked with `rg -n "final gate|R17|R18|validate_spawn_worktree|foreground_cwd" docs bin omp-themis pi-themis` where those paths exist in this checkout.
