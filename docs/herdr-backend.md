@@ -868,6 +868,7 @@ fm-lint.sh: ShellCheck 0.11.0 (pinned 0.11.0)
 ```
 
 Environment-only, unrelated to this change and confirmed pre-existing on the prior commit `a5b0cfa`: the fm-spawn-driven workspace-per-home E2E cannot complete because `treehouse get` times out in this environment, and two real-terminal `pane run` steps (the smoke's two-step `send_literal + send_key` and the prune-safety heartbeat) flake under the machine's `fish` login shell; the workspace-label assertions in those suites pass, and the send/capture functions are byte-identical to `main`.
+The `treehouse get` timeout here was the same SSH-passphrase-prompt blocker the "2026-07-29 Firstmate worker SSH-agent forwarding" section below now fixes for Firstmate-created Herdr workers; the two `fish`-login-shell `pane run` flakes are unrelated and remain unresolved.
 Old-named workspaces are left untouched; firstmate never force-deletes a stale `Atlas`/`Themis` worker workspace, and cleanup is a separate captain-approved action.
 
 ### 2026-07-20 canonical project-key identity (Fleet lookup keys on the registry KEY, defaults to the basename)
