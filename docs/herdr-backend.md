@@ -66,7 +66,7 @@ bash tests/fm-afk-launch.test.sh
 bash tests/fm-backend-herdr.test.sh
 ```
 
-The focused away-launch result included `herdr create: away launch routes through the centralized workspace helper` and the existing Herdr adapter tests covered live-socket forwarding plus missing and invalid socket omission.
+The focused away-launch result included `herdr create: live socket reaches centralized helper`, `herdr create: invalid socket preserves legacy creation without --env`, and `herdr create: missing socket preserves legacy creation without --env`, and the existing Herdr adapter tests covered live-socket forwarding plus missing and invalid socket omission.
 
 The required real lab verification was run without touching the default session:
 

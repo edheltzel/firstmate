@@ -294,7 +294,7 @@ unit_herdr_partial_create_recovery() {
 }
 
 unit_herdr_create_uses_central_helper() {
-  local st calls sock agent_out agent_pid invalid socket_case
+  local st calls call_content sock agent_out agent_pid invalid socket_case
   st=$(mktemp -d "${TMPDIR:-/tmp}/fm-afk-herdr-helper.XXXXXX")
   calls="$st/calls"
   sock="/tmp/fm-afk-herdr-ssh-$$-$RANDOM.sock"
@@ -319,12 +319,12 @@ unit_herdr_create_uses_central_helper() {
     }
     fm_backend_herdr_workspace_create fmtest /tmp/proj afk-central-helper
   ' _ "$LAUNCH" >/dev/null 2>&1 || true
-    calls=$(cat "$calls" 2>/dev/null || true)
+    call_content=$(cat "$calls" 2>/dev/null || true)
     case "$socket_case" in
       live)
-        if printf '%s' "$calls" | grep -Fq -- '--env SSH_AUTH_SOCK='; then pass "herdr create: live socket reaches centralized helper"; else fail "herdr create: live socket was not forwarded"; fi ;;
+        if printf '%s' "$call_content" | grep -Fq -- '--env SSH_AUTH_SOCK='; then pass "herdr create: live socket reaches centralized helper"; else fail "herdr create: live socket was not forwarded"; fi ;;
       invalid|missing)
-        if printf '%s' "$calls" | grep -Fq -- '--env'; then fail "herdr create: $socket_case socket added --env"; else pass "herdr create: $socket_case socket preserves legacy creation without --env"; fi ;;
+        if printf '%s' "$call_content" | grep -Fq -- '--env'; then fail "herdr create: $socket_case socket added --env"; else pass "herdr create: $socket_case socket preserves legacy creation without --env"; fi ;;
     esac
   done
   kill "$agent_pid" >/dev/null 2>&1 || true
