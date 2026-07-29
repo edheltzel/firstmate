@@ -894,9 +894,47 @@ bash tests/fm-spawn-project-key.test.sh     # fm-spawn meta records the resolved
 bin/fm-lint.sh
 ```
 
-`tests/fm-spawn-project-key.test.sh` reaches `fm-spawn`'s meta-write with a fake tmux pane and a real isolated worktree, so it proves the recorded delivery mode deterministically WITHOUT the interactive `treehouse get` step.
-That is deliberate: the full `fm-spawn --backend herdr` spawn still cannot reach the meta-write in this environment because interactive `treehouse get` in a spawned pane blocks on an SSH-key passphrase prompt for a remoted repo (and does not settle the pane cwd for a scratch repo) under the machine's `fish` login shell - the same pre-existing, change-independent limitation the `2026-07-20` section above records for the workspace-per-home E2E.
-The live Fleet-workspace behavior is instead proven directly through the real herdr server above, and the recorded-mode behavior through the deterministic meta-write test.
+`tests/fm-spawn-project-key.test.sh` reaches `fm-spawn`'s meta-write with a fake tmux pane and a real isolated worktree, so it proves the recorded delivery mode deterministically without the interactive `treehouse get` step.
+At the time of that verification, a Herdr pane could block on an SSH-key passphrase prompt before `treehouse get` settled.
+The 2026-07-29 SSH-agent forwarding contract below removes that environment limitation for Firstmate-created Herdr workers.
+The live Fleet-workspace behavior remains proven directly through the real Herdr server above, and the recorded-mode behavior through the deterministic meta-write test.
+
+### 2026-07-29 Firstmate worker SSH-agent forwarding
+
+The observed failure was not a general Herdr authentication defect.
+The primary Firstmate shell had a valid `SSH_AUTH_SOCK` with the required identity loaded, while Herdr's long-running server supplied newly created panes with a different reachable agent that did not carry that identity.
+The interactive Fish startup then ran `ssh-add --apple-use-keychain`, displayed a passphrase prompt, and consumed `fm-spawn`'s first `treehouse get` command as passphrase input.
+
+`fm_backend_herdr_workspace_create` and `fm_backend_herdr_tab_create` now add Herdr's supported `--env SSH_AUTH_SOCK=<socket>` argument when the current Firstmate process names a live Unix socket.
+They omit the argument without failing when the variable is absent or its path is not a live socket.
+Every ordinary worker and secondmate task tab routes through the tab helper, and both the reusable Fleet layout and the optional presentation layout route through the same two helpers.
+The environment propagation therefore cannot drift between flat and projected workers.
+Only the agent socket capability is forwarded.
+No private-key or passphrase material is copied, logged, or stored by Firstmate.
+A worker receiving that socket has the same SSH authentication capability as the primary process, which is the intentional security boundary selected for unattended worker launches.
+
+Live verification ran on 2026-07-29 with Herdr `0.7.5-preview.2026-07-21-0f10e1453a7f`, protocol 17, and macOS aarch64.
+The task used a named non-default session provisioned and removed only through `bin/fm-herdr-lab.sh`, with the running default session protected by the helper's tripwire.
+The real task tab received the exact primary socket, `ssh-add -l` succeeded inside it, and no passphrase prompt appeared.
+The exact outcome was:
+
+```text
+herdr_version=herdr 0.7.5-preview.2026-07-21-0f10e1453a7f
+protocol=17
+HERDR_SSH_FORWARD=success
+passphrase_prompt=absent
+lab_teardown=verified
+```
+
+The focused verification commands were:
+
+```sh
+bash tests/fm-backend-herdr.test.sh
+bin/fm-lint.sh
+```
+
+The unit suite covers live-socket forwarding for both create surfaces and omission for a missing or invalid socket.
+The existing layout, focus, metadata, projection, cleanup, and restored-husk cases remain green.
 
 ## Away-mode daemon: herdr supervisor-pane support
 

@@ -107,6 +107,34 @@ FM_BACKEND_HERDR_SECONDMATE_MARKER=".fm-secondmate-home"
 # No send, capture, kill, recovery, Treehouse, or ownership path reads it.
 FM_BACKEND_HERDR_PRESENTATION_JOURNAL_SUFFIX=".herdr-presentation"
 
+# Firstmate-launched Herdr terminals must reuse the primary shell's unlocked
+# SSH agent rather than Herdr's server-time environment. The server can retain
+# a different reachable agent socket whose agent has no identities; an
+# interactive Fish startup then blocks on a passphrase prompt and consumes the
+# first command fm-spawn sends. Herdr's create surfaces accept an explicit
+# --env KEY=VALUE, so inject only a currently-live Unix socket. The worker gets
+# agent access, never key or passphrase material. Missing or stale sockets are
+# omitted without changing pre-existing spawn behavior.
+fm_backend_herdr_workspace_create() {  # <session> <cwd> <label>
+  local session=$1 cwd=$2 label=$3
+  if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ]; then
+    fm_backend_herdr_cli "$session" workspace create --cwd "$cwd" --label "$label" \
+      --env "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" --no-focus
+  else
+    fm_backend_herdr_cli "$session" workspace create --cwd "$cwd" --label "$label" --no-focus
+  fi
+}
+
+fm_backend_herdr_tab_create() {  # <session> <workspace-id> <cwd> <label>
+  local session=$1 workspace_id=$2 cwd=$3 label=$4
+  if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ]; then
+    fm_backend_herdr_cli "$session" tab create --workspace "$workspace_id" --cwd "$cwd" --label "$label" \
+      --env "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" --no-focus
+  else
+    fm_backend_herdr_cli "$session" tab create --workspace "$workspace_id" --cwd "$cwd" --label "$label" --no-focus
+  fi
+}
+
 # fm_backend_herdr_workspace_label: the herdr workspace label for a spawn, the
 # SINGLE owner of the worker/secondmate workspace name (docs/herdr-backend.md
 # "Fleet workspaces"). Resolved from the spawn KIND and the project/home path,
@@ -906,7 +934,7 @@ fm_backend_herdr_workspace_ensure() {  # <session> <cwd> <label>
     printf '%s' "$wsid"
     return 0
   fi
-  out=$(fm_backend_herdr_cli "$session" workspace create --cwd "$cwd" --label "$label" --no-focus 2>/dev/null) || return 1
+  out=$(fm_backend_herdr_workspace_create "$session" "$cwd" "$label" 2>/dev/null) || return 1
   wsid=$(printf '%s' "$out" | jq -r '.result.workspace.workspace_id // empty' 2>/dev/null)
   [ -n "$wsid" ] || return 1
   FM_BACKEND_HERDR_WS_ID=$wsid
@@ -1115,7 +1143,7 @@ fm_backend_herdr_create_task() {  # <container> <label> <cwd> <seeded_default_ta
 $dup_tabs
 EOF
   fi
-  out=$(fm_backend_herdr_cli "$session" tab create --workspace "$wsid" --cwd "$cwd" --label "$label" --no-focus 2>/dev/null) || return 1
+  out=$(fm_backend_herdr_tab_create "$session" "$wsid" "$cwd" "$label" 2>/dev/null) || return 1
   tab_id=$(printf '%s' "$out" | jq -r '.result.tab.tab_id // empty' 2>/dev/null)
   pane_id=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id // empty' 2>/dev/null)
   if [ -z "$tab_id" ] || [ -z "$pane_id" ]; then
@@ -1185,7 +1213,7 @@ fm_backend_herdr_projection_create_task() {  # <cwd> <workspace-label> <task-lab
     echo "error: herdr presentation workspace create could not capture exact active workspace and tab; refusing a focus-unsafe projection" >&2
     return 1
   }
-  if out=$(fm_backend_herdr_cli "$session" workspace create --cwd "$cwd" --label "$workspace_label" --no-focus 2>/dev/null); then
+  if out=$(fm_backend_herdr_workspace_create "$session" "$cwd" "$workspace_label" 2>/dev/null); then
     :
   else
     fm_backend_herdr_projection_focus_restore "$session" "$focus_before" "workspace create" || true
@@ -1212,9 +1240,8 @@ fm_backend_herdr_projection_create_task() {  # <cwd> <workspace-label> <task-lab
     echo "error: herdr presentation task-tab create could not capture exact active workspace and tab; refusing a focus-unsafe projection" >&2
     return 1
   }
-  if out=$(fm_backend_herdr_cli "$session" tab create \
-    --workspace "$FM_BACKEND_HERDR_PROJECTION_WORKSPACE_ID" \
-    --cwd "$cwd" --label "$task_label" --no-focus 2>/dev/null); then
+  if out=$(fm_backend_herdr_tab_create \
+    "$session" "$FM_BACKEND_HERDR_PROJECTION_WORKSPACE_ID" "$cwd" "$task_label" 2>/dev/null); then
     :
   else
     fm_backend_herdr_projection_focus_restore "$session" "$focus_before" "task-tab create" || true
