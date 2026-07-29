@@ -269,7 +269,8 @@ unit_herdr_partial_create_recovery() {
   FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" FM_AFK_LAUNCH_ENTRY=/bin/true \
     FM_AFK_LAUNCH_LABEL=afk-exact-label RECORDED="$recorded" bash -c '
     . "$1"
-    fm_backend_source() { return 0; }
+    _FM_BACKEND_HERDR_SOURCED=1
+    fm_backend_herdr_workspace_create() { fm_backend_herdr_cli "$1" workspace create --cwd "$2" --label "$3" --no-focus; }
     fm_backend_herdr_server_ensure() { return 0; }
     fm_backend_herdr_cli() {
       if [ "$2 $3" = "workspace create" ]; then
@@ -292,12 +293,52 @@ unit_herdr_partial_create_recovery() {
   rm -rf "$st"
 }
 
+unit_herdr_create_uses_central_helper() {
+  local st calls sock agent_out agent_pid invalid socket_case
+  st=$(mktemp -d "${TMPDIR:-/tmp}/fm-afk-herdr-helper.XXXXXX")
+  calls="$st/calls"
+  sock="/tmp/fm-afk-herdr-ssh-$$-$RANDOM.sock"
+  agent_out=$(ssh-agent -a "$sock" -s) || { fail "herdr create: could not start disposable SSH agent"; rm -rf "$st"; return; }
+  agent_pid=$(printf '%s\n' "$agent_out" | sed -n 's/^SSH_AGENT_PID=\([0-9]*\);.*$/\1/p')
+  invalid="$st/not-a-socket"
+  : > "$invalid"
+  for socket_case in live invalid missing; do
+    : > "$calls"
+    case "$socket_case" in
+      live) socket_env="SSH_AUTH_SOCK=$sock" ;;
+      invalid) socket_env="SSH_AUTH_SOCK=$invalid" ;;
+      missing) socket_env="SSH_AUTH_SOCK=" ;;
+    esac
+    # shellcheck disable=SC2016
+    env "$socket_env" CALLS="$calls" bash -c '
+    . "$1"
+    . "$FM_ROOT/bin/backends/herdr.sh"
+    _FM_BACKEND_HERDR_SOURCED=1
+    fm_backend_herdr_cli() {
+      printf "%s\n" "$*" > "$CALLS"
+    }
+    fm_backend_herdr_workspace_create fmtest /tmp/proj afk-central-helper
+  ' _ "$LAUNCH" >/dev/null 2>&1 || true
+    calls=$(cat "$calls" 2>/dev/null || true)
+    case "$socket_case" in
+      live)
+        if printf '%s' "$calls" | grep -Fq -- '--env SSH_AUTH_SOCK='; then pass "herdr create: live socket reaches centralized helper"; else fail "herdr create: live socket was not forwarded"; fi ;;
+      invalid|missing)
+        if printf '%s' "$calls" | grep -Fq -- '--env'; then fail "herdr create: $socket_case socket added --env"; else pass "herdr create: $socket_case socket preserves legacy creation without --env"; fi ;;
+    esac
+  done
+  kill "$agent_pid" >/dev/null 2>&1 || true
+  rm -f "$sock"
+  rm -rf "$st"
+}
+
 unit_herdr_error_with_exact_ids_closes_exact() {
   local st
   st=$(mktemp -d "${TMPDIR:-/tmp}/fm-afk-herdr-error-exact.XXXXXX")
   FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" bash -c '
     . "$1"
-    fm_backend_source() { return 0; }
+    _FM_BACKEND_HERDR_SOURCED=1
+    fm_backend_herdr_workspace_create() { fm_backend_herdr_cli "$1" workspace create --cwd "$2" --label "$3" --no-focus; }
     fm_backend_herdr_server_ensure() { return 0; }
     fm_backend_herdr_cli() {
       if [ "$2 $3" = "workspace create" ]; then
@@ -324,7 +365,8 @@ unit_herdr_run_failure_preserves_unconfirmed_record() {
   st=$(mktemp -d "${TMPDIR:-/tmp}/fm-afk-herdr-run-fail.XXXXXX")
   FM_HOME="$st" FM_STATE_OVERRIDE="$st/state" bash -c '
     . "$1"
-    fm_backend_source() { return 0; }
+    _FM_BACKEND_HERDR_SOURCED=1
+    fm_backend_herdr_workspace_create() { fm_backend_herdr_cli "$1" workspace create --cwd "$2" --label "$3" --no-focus; }
     fm_backend_herdr_server_ensure() { return 0; }
     fm_backend_herdr_cli() {
       if [ "$2 $3" = "workspace create" ]; then
@@ -869,6 +911,7 @@ unit_concurrent_start_serialized
 unit_lock_initialization_grace
 unit_signal_exits_with_lock_cleanup
 unit_herdr_partial_create_recovery
+unit_herdr_create_uses_central_helper
 unit_herdr_error_with_exact_ids_closes_exact
 unit_herdr_run_failure_preserves_unconfirmed_record
 unit_record_failure_closes_terminal

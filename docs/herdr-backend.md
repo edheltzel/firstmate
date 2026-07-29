@@ -42,6 +42,44 @@ See "Optional disposable single-task presentation spaces" below before enabling 
 Verify it works by spawning a trivial task with `--backend herdr` and confirming the task's meta records `backend=herdr` plus `herdr_session=`, `herdr_workspace_id=`, `herdr_tab_id=`, and `herdr_pane_id=`.
 The selected Herdr workspace should show the new `fm-<id>` tab, and a metadata-capable installation should expose the Firstmate display fields described below.
 
+### Away-mode SSH-agent incident and fix (2026-07-29)
+
+On 2026-07-29, `bin/fm-afk-launch.sh start` created its non-visible away-mode workspace through a direct `workspace create` call that did not forward `SSH_AUTH_SOCK`.
+The new Fish shell inherited Herdr's identity-less agent, blocked in `ssh-add --apple-use-keychain`, and consumed the launcher's first `pane run` command before the away supervisor started.
+The launcher reported `daemon did not become ready` and rolled back.
+The fix routes away-mode workspace creation through `fm_backend_herdr_workspace_create`, the existing centralized helper that forwards only a live Unix socket and omits `--env` for missing or invalid sockets.
+No key, passphrase, or agent contents are copied, exposed, or logged.
+
+The installed runtime on this host was verified with:
+
+```sh
+herdr status --json | jq '{client,server}'
+herdr --version
+```
+
+The exact result was Herdr `0.7.5-preview.2026-07-21-0f10e1453a7f`, client and server protocol `17`, with the server running on the default session.
+
+The deterministic coverage was run with:
+
+```sh
+bash tests/fm-afk-launch.test.sh
+bash tests/fm-backend-herdr.test.sh
+```
+
+The focused away-launch result included `herdr create: away launch routes through the centralized workspace helper` and the existing Herdr adapter tests covered live-socket forwarding plus missing and invalid socket omission.
+
+The required real lab verification was run without touching the default session:
+
+```sh
+HERDR_LAB_HELPER='/Users/ed/Developer/Atlas/Themis/bin/fm-herdr-lab.sh'
+HERDR_LAB_SESSION=$("$HERDR_LAB_HELPER" name herdr-afk-ssh-agent-forwarding-h2)
+trap '"$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION"' EXIT
+"$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION"
+"$HERDR_LAB_HELPER" run "$HERDR_LAB_SESSION" status --json
+```
+
+The isolated lab result was Herdr protocol `17`, and the helper teardown verified the default-session fleet state was identical before provisioning and after cleanup.
+
 ## Automatic display metadata
 
 Immediately after Herdr returns the new task pane and workspace ids, `fm_backend_herdr_report_metadata` reads `herdr api schema --json` once and capability-gates `pane.report_metadata` and `workspace.report_metadata` independently.
