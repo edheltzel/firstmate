@@ -17,6 +17,9 @@ command -v jq >/dev/null 2>&1 || { echo "skip: jq not found (required by the her
 
 TMP_ROOT=$(fm_test_tmproot fm-backend-herdr-tests)
 export FM_BACKEND_HERDR_SUBMIT_MIN_SLEEP=0
+# Spawn-environment tests opt in explicitly. The rest of this suite must not
+# depend on whichever SSH agent launched the test process.
+unset SSH_AUTH_SOCK
 
 # make_herdr_fakebin: a `herdr` stub that logs every invocation (one line,
 # unit-separated args, to $FM_HERDR_LOG) and returns the canned response for
@@ -837,6 +840,52 @@ test_create_task_creates_with_no_focus_flag() {
   assert_contains "$(cat "$log")" $'\x1f''tab'$'\x1f''create'$'\x1f''--workspace'$'\x1f''w1'$'\x1f''--cwd'$'\x1f''/tmp/proj'$'\x1f''--label'$'\x1f''fm-newtask'$'\x1f''--no-focus' \
     "create_task's tab create did not pass --no-focus"
   pass "fm_backend_herdr_create_task: tab create passes --no-focus"
+}
+
+test_create_surfaces_forward_valid_ssh_agent_socket() (
+  local dir log resp fb sock agent_out agent_pid calls
+  dir="$TMP_ROOT/create-ssh-agent"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  # macOS limits Unix-domain socket paths to roughly 104 bytes, while TMP_ROOT
+  # is intentionally descriptive and can exceed that limit.
+  sock="/tmp/fm-herdr-ssh-$$-$RANDOM.sock"
+  agent_out=$(ssh-agent -a "$sock" -s) || fail "could not start a disposable ssh-agent for socket-forwarding coverage"
+  agent_pid=$(printf '%s\n' "$agent_out" | sed -n 's/^SSH_AGENT_PID=\([0-9]*\);.*$/\1/p')
+  [ -n "$agent_pid" ] && [ -S "$sock" ] || fail "disposable ssh-agent did not create a live Unix socket"
+  trap 'kill "$agent_pid" >/dev/null 2>&1 || true; rm -f "$sock"' EXIT
+  printf '{"result":{"workspace":{"workspace_id":"w1"}}}\n' > "$resp/1.out"
+  printf '{"result":{"tab":{"tab_id":"w1:t2"},"root_pane":{"pane_id":"w1:p2"}}}\n' > "$resp/2.out"
+  fb=$(make_herdr_fakebin "$dir")
+  PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" SSH_AUTH_SOCK="$sock" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_workspace_create fmtest /tmp/proj Demo-Fleet >/dev/null; fm_backend_herdr_tab_create fmtest w1 /tmp/proj fm-task >/dev/null' "$ROOT" \
+    || fail "workspace and tab creation should succeed with a valid SSH agent socket"
+  calls=$(cat "$log")
+  assert_contains "$calls" $'workspace\x1fcreate\x1f--cwd\x1f/tmp/proj\x1f--label\x1fDemo-Fleet\x1f--env\x1fSSH_AUTH_SOCK='"$sock"$'\x1f--no-focus' \
+    "workspace creation did not forward the live primary SSH agent socket"
+  assert_contains "$calls" $'tab\x1fcreate\x1f--workspace\x1fw1\x1f--cwd\x1f/tmp/proj\x1f--label\x1ffm-task\x1f--env\x1fSSH_AUTH_SOCK='"$sock"$'\x1f--no-focus' \
+    "task-tab creation did not forward the live primary SSH agent socket"
+  pass "herdr create surfaces: a live primary SSH agent socket is forwarded to workspaces and task tabs"
+)
+
+test_create_surfaces_omit_missing_or_invalid_ssh_agent_socket() {
+  local dir log resp fb invalid calls
+  dir="$TMP_ROOT/create-invalid-ssh-agent"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  invalid="$dir/not-a-socket"
+  : > "$invalid"
+  printf '{"result":{"workspace":{"workspace_id":"w1"}}}\n' > "$resp/1.out"
+  printf '{"result":{"tab":{"tab_id":"w1:t2"},"root_pane":{"pane_id":"w1:p2"}}}\n' > "$resp/2.out"
+  printf '{"result":{"workspace":{"workspace_id":"w2"}}}\n' > "$resp/3.out"
+  printf '{"result":{"tab":{"tab_id":"w2:t2"},"root_pane":{"pane_id":"w2:p2"}}}\n' > "$resp/4.out"
+  fb=$(make_herdr_fakebin "$dir")
+  PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" SSH_AUTH_SOCK="$invalid" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_workspace_create fmtest /tmp/proj Demo-Fleet >/dev/null; fm_backend_herdr_tab_create fmtest w1 /tmp/proj fm-task >/dev/null' "$ROOT" \
+    || fail "workspace and tab creation should preserve legacy behavior for an invalid SSH agent socket"
+  PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
+    bash -c 'unset SSH_AUTH_SOCK; . "$0/bin/backends/herdr.sh"; fm_backend_herdr_workspace_create fmtest /tmp/proj Demo-Fleet >/dev/null; fm_backend_herdr_tab_create fmtest w2 /tmp/proj fm-task >/dev/null' "$ROOT" \
+    || fail "workspace and tab creation should preserve legacy behavior without an SSH agent socket"
+  calls=$(cat "$log")
+  assert_not_contains "$calls" $'\x1f''--env'$'\x1f''SSH_AUTH_SOCK=' \
+    "an invalid SSH agent path must not be forwarded into Herdr panes"
+  pass "herdr create surfaces: missing or invalid SSH agent sockets are omitted without failing creation"
 }
 
 # --- Herdr presentation projection and project-scoped workspace tests --------
@@ -3041,6 +3090,8 @@ test_create_task_metadata_failure_does_not_fail_spawn
 test_create_task_skips_metadata_when_surfaces_are_absent
 test_create_task_metadata_preserves_existing_agent_identity
 test_create_task_creates_with_no_focus_flag
+test_create_surfaces_forward_valid_ssh_agent_socket
+test_create_surfaces_omit_missing_or_invalid_ssh_agent_socket
 test_workspace_find_matches_the_injected_label
 test_list_live_scoped_to_the_given_projects_workspace
 test_projection_journal_is_atomic_and_uses_128_bit_token
