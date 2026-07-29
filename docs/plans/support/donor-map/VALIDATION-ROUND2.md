@@ -15,13 +15,13 @@ Standing caveat: all four verifiers are Claude, while the consolidation was auth
 | Contradictions | Nine cross-report contradictions | C6 is a real interface boundary, C2 is clerical, C8 is scope-separated, and C9 has a narrower residue. C1, C3, C4, C5, and C7 need claim-level qualification rather than categorical disposition. |
 | Verdict ledger | 208 rows, 94/35/79 | **Exact** [verified here]. But unusable as a sizing basis, and its coverage claim is false for 22 rows. |
 | C9 review authority | Genuine conflict needing a decision | **Headline refuted.** Reviewer role is dispatch-conditional, not per-task. A narrow real residue survives in the RedTeam half. |
-| Plan gaps | 15 uncovered findings, 12 unsupported requirements | Direction 1 mostly right. Direction 2 framed wrong: **zero of twelve** are invented and unsupported. |
+| Plan gaps | 15 uncovered findings, 12 unsupported requirements | Direction 1 identifies plausible gaps. Direction 2 needs requirement-level provenance mapping rather than a zero-of-twelve conclusion. |
 
 The consolidation is a useful decision inventory but must not be read as an attestation because the verifier chain is unavailable and several claims require narrower scope.
 
 ---
 
-## 1. Contradictions: one of nine
+## 1. Contradictions and scope corrections
 
 C6 contains a genuine interface choice, but the complete disposable-worktree design remains undecided.
 

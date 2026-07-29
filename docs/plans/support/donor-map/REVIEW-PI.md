@@ -19,7 +19,7 @@ The relay cannot be audited as presented.
 Without the reports, prompts, model versions, or per-finding attribution, a reader cannot distinguish verifier consensus, a single verifier’s judgment, and the orchestrator’s synthesis.
 The standing caveat is honest, but it does not compensate for the missing chain of evidence.
 
-The synthesis also hardens several judgments:
+The preserved synthesis also hardens several judgments:
 
 - “C6 is the only genuine either/or” is categorical (`VALIDATION-ROUND2.md:24`), but the evidence reproduced there verifies a Treehouse interface fact, not the complete disposable-worktree design.
 - C1, C5, and C7 are declared “scope artifacts” without any local argument (`VALIDATION-ROUND2.md:30`). C8 is demonstrated; those three are not.
