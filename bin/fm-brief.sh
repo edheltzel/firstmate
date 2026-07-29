@@ -202,7 +202,7 @@ REPO=${POS[1]}
 # the SAME identity firstmate gave here, deterministically, without a second
 # manual pass. This is the single point where firstmate names the project's
 # registry key (which may differ from the clone-directory basename, e.g. the
-# firstmate repo registered as "Agent-Themis" at ".../Firstmate"), and fm-brief
+# firstmate repo registered as "AgentThemis" at ".../Themis"), and fm-brief
 # already uses it for the delivery-mode section below; recording it here is what
 # lets fm-spawn's mode and Fleet lookup agree with this brief instead of
 # re-deriving a basename that would fall through to no-mistakes. fm-spawn reads it

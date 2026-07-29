@@ -7,8 +7,8 @@
 #   a ship/scout spawn - the SAME key firstmate passes to fm-brief.sh as the repo
 #   name. It is used for BOTH the delivery-mode lookup and the herdr Fleet-label
 #   lookup, so a project whose registry key differs from its clone directory
-#   basename (e.g. the firstmate repo registered as "Agent-Themis" with checkout
-#   basename "Firstmate") resolves its intended mode and Fleet workspace instead of
+#   basename (e.g. the firstmate repo registered as "AgentThemis" with checkout
+#   basename "Themis") resolves its intended mode and Fleet workspace instead of
 #   silently falling through to no-mistakes. Without the flag, the key defaults to
 #   the key fm-brief.sh persisted at data/<task-id>/project-key (the deterministic,
 #   no-double-pass propagation of the identity firstmate already named as the brief
@@ -1380,7 +1380,7 @@ META_WINDOW=$T
   # project_key= records the canonical registry identity ONLY when it differs from
   # the repository basename (mirroring backend='s only-when-non-tmux idiom), so
   # every key==basename task's meta stays byte-identical while a key-mismatched
-  # task (e.g. the firstmate repo registered as Agent-Themis) durably carries the
+  # task (e.g. the firstmate repo registered as AgentThemis) durably carries the
   # identity that produced its mode - no post-spawn hand-correction, and any future
   # re-resolution reads it instead of re-deriving the wrong basename.
   if [ "$KIND" != secondmate ] && [ "${PROJ_KEY:-}" != "${PROJ_BASENAME:-}" ]; then

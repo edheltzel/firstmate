@@ -293,7 +293,7 @@ test_workspace_label_from_clone_basename_not_worktree_path() {
 
 # resolve <kind> <project-abs> <project-key> under FM_HOME=<home>. The 3rd arg is
 # the canonical registry key threaded from fm-spawn.sh, distinct from the clone
-# basename (the Agent-Themis/Firstmate case).
+# basename (the AgentThemis/Themis case).
 _wslabel_key() {  # <home> <kind> <project-abs> <project-key>
   FM_HOME="$1" bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_workspace_label "$1" "$2" "$3"' "$ROOT" "$2" "$3" "$4"
 }
@@ -302,21 +302,30 @@ test_workspace_label_key_differs_from_basename_no_alias() {
   local home
   # The delivery-identity key differs from the clone basename and carries NO
   # fleet= alias: the workspace must stay '<basename>-Fleet', NEVER be renamed to
-  # '<key>-Fleet' (bin/fm-project-mode.sh header; the Agent-Themis/Firstmate case).
-  home="$TMP_ROOT/fleet-key-noalias"; mkdir -p "$home/data" "$home/projects/Firstmate"
-  printf -- '- Agent-Themis [local-only] - key differs from clone dir (added 2026-07-20)\n' > "$home/data/projects.md"
-  out=$(_wslabel_key "$home" ship "$home/projects/Firstmate" Agent-Themis)
-  [ "$out" = "Firstmate-Fleet" ] || fail "a key that differs from the basename with no fleet= alias must keep '<basename>-Fleet', got '$out' (a delivery-identity key must not rename the workspace)"
+  # '<key>-Fleet' (bin/fm-project-mode.sh header; the AgentThemis/Themis case).
+  home="$TMP_ROOT/fleet-key-noalias"; mkdir -p "$home/data" "$home/projects/Themis"
+  printf -- '- AgentThemis [local-only] - key differs from clone dir (added 2026-07-20)\n' > "$home/data/projects.md"
+  out=$(_wslabel_key "$home" ship "$home/projects/Themis" AgentThemis)
+  [ "$out" = "Themis-Fleet" ] || fail "a key that differs from the basename with no fleet= alias must keep '<basename>-Fleet', got '$out' (a delivery-identity key must not rename the workspace)"
   pass "fm_backend_herdr_workspace_label: a canonical key differing from the basename does NOT rename the '<basename>-Fleet' workspace without an explicit fleet= alias"
+}
+
+test_workspace_label_live_agentthemis_defaults_to_themis_fleet() {
+  local home out
+  home="$TMP_ROOT/fleet-live-agentthemis"; mkdir -p "$home/data" "$home/projects/Themis"
+  printf -- '- AgentThemis [local-only] - firstmate (added 2026-07-29)\n' > "$home/data/projects.md"
+  out=$(_wslabel_key "$home" ship "$home/projects/Themis" AgentThemis)
+  [ "$out" = "Themis-Fleet" ] || fail "the live AgentThemis/Themis project without a fleet= alias must resolve to Themis-Fleet, got '$out'"
+  pass "fm_backend_herdr_workspace_label: the live AgentThemis key with Themis basename and no fleet= alias resolves to Themis-Fleet"
 }
 
 test_workspace_label_key_differs_from_basename_with_alias() {
   local home
   # Same key-vs-basename mismatch, but now the key's entry carries fleet=Shown:
   # only an explicit alias renames the workspace.
-  home="$TMP_ROOT/fleet-key-alias"; mkdir -p "$home/data" "$home/projects/Firstmate"
-  printf -- '- Agent-Themis [local-only fleet=Shown] - key with alias (added 2026-07-20)\n' > "$home/data/projects.md"
-  out=$(_wslabel_key "$home" ship "$home/projects/Firstmate" Agent-Themis)
+  home="$TMP_ROOT/fleet-key-alias"; mkdir -p "$home/data" "$home/projects/Themis"
+  printf -- '- AgentThemis [local-only fleet=Shown] - key with alias (added 2026-07-20)\n' > "$home/data/projects.md"
+  out=$(_wslabel_key "$home" ship "$home/projects/Themis" AgentThemis)
   [ "$out" = "Shown-Fleet" ] || fail "an explicit fleet= alias on the key's entry must win over the basename default, got '$out'"
   pass "fm_backend_herdr_workspace_label: an explicit fleet= alias on a key-mismatched project renames the workspace (fleet=Shown -> Shown-Fleet)"
 }
@@ -701,17 +710,20 @@ test_create_task_reports_pane_and_workspace_metadata_after_creation() {
   printf '{"result":{"tabs":[]}}\n' > "$resp/1.out"
   printf '{"result":{"tab":{"tab_id":"w1:t2"},"root_pane":{"pane_id":"w1:p2"}}}\n' > "$resp/2.out"
   printf '{"protocol":17,"schemas":{"request":{"oneOf":[{"properties":{"method":{"const":"pane.report_metadata"}}},{"properties":{"method":{"const":"workspace.report_metadata"}}}]}}}\n' > "$resp/3.out"
+  printf '{"result":{"panes":[{"pane_id":"w1:p2","display_agent":null}]}}\n' > "$resp/4.out"
+  printf '{"result":{"type":"ok"}}\n' > "$resp/5.out"
+  printf '{"result":{"type":"ok"}}\n' > "$resp/6.out"
   fb=$(make_herdr_fakebin "$dir")
   out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
-    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_create_task fmtest:w1 fm-herdr-metadata-m5 /tmp/proj "" herdr-metadata-m5 Agent-Themis codex Firstmate-Fleet' "$ROOT" ) \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_create_task fmtest:w1 fm-herdr-metadata-m5 /tmp/proj "" herdr-metadata-m5 AgentThemis codex Themis-Fleet' "$ROOT" ) \
     || fail "create_task should succeed when pane and workspace metadata are reported"
   [ "$out" = "w1:t2 w1:p2" ] || fail "metadata reporting must not change create_task output, got '$out'"
   calls=$(cat "$log")
   assert_contains "$calls" $'\x1f''api'$'\x1f''schema'$'\x1f''--json' \
     "create_task did not capability-check the installed metadata surface"
-  assert_contains "$calls" $'\x1f''pane'$'\x1f''report-metadata'$'\x1f''w1:p2'$'\x1f''--source'$'\x1f''firstmate'$'\x1f''--title'$'\x1f''herdr metadata m5 (codex)'$'\x1f''--token'$'\x1f''fm_task=herdr-metadata-m5'$'\x1f''--token'$'\x1f''fm_project=Agent-Themis'$'\x1f''--token'$'\x1f''fm_harness=codex' \
-    "create_task did not report the deterministic pane title and namespaced Firstmate tokens"
-  assert_contains "$calls" $'\x1f''workspace'$'\x1f''report-metadata'$'\x1f''w1'$'\x1f''--source'$'\x1f''firstmate'$'\x1f''--token'$'\x1f''fleet=Firstmate-Fleet'$'\x1f''--token'$'\x1f''what=herdr metadata m5 (codex)' \
+  assert_contains "$calls" $'\x1f''pane'$'\x1f''report-metadata'$'\x1f''w1:p2'$'\x1f''--source'$'\x1f''firstmate'$'\x1f''--title'$'\x1f''herdr metadata m5 (codex)'$'\x1f''--token'$'\x1f''fm_task=herdr-metadata-m5'$'\x1f''--token'$'\x1f''fm_project=AgentThemis'$'\x1f''--token'$'\x1f''fm_harness=codex'$'\x1f''--display-agent'$'\x1f''Themis-Fleet-1' \
+    "create_task did not report the deterministic pane title, Fleet display name, and namespaced Firstmate tokens"
+  assert_contains "$calls" $'\x1f''workspace'$'\x1f''report-metadata'$'\x1f''w1'$'\x1f''--source'$'\x1f''firstmate'$'\x1f''--token'$'\x1f''fleet=Themis-Fleet'$'\x1f''--token'$'\x1f''what=herdr metadata m5 (codex)' \
     "create_task did not report the captain-facing workspace Fleet and task description"
   create_line=$(grep -n $'\x1f''tab'$'\x1f''create' "$log" | head -1 | cut -d: -f1)
   schema_line=$(grep -n $'\x1f''api'$'\x1f''schema' "$log" | head -1 | cut -d: -f1)
@@ -720,6 +732,51 @@ test_create_task_reports_pane_and_workspace_metadata_after_creation() {
   [ "$create_line" -lt "$schema_line" ] && [ "$schema_line" -lt "$pane_line" ] && [ "$pane_line" -lt "$workspace_line" ] \
     || fail "metadata capability check and reports must happen only after tab creation"
   pass "fm_backend_herdr_create_task: reports deterministic pane and workspace display metadata after task creation"
+}
+
+test_create_task_display_name_uses_lowest_free_workspace_number() {
+  local dir log resp fb out calls
+  dir="$TMP_ROOT/create-task-display-number"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  printf '{"result":{"tabs":[]}}\n' > "$resp/1.out"
+  printf '{"result":{"tab":{"tab_id":"w1:t2"},"root_pane":{"pane_id":"w1:p2"}}}\n' > "$resp/2.out"
+  printf '{"protocol":17,"schemas":{"request":{"oneOf":[{"properties":{"method":{"const":"pane.report_metadata"}}},{"properties":{"method":{"const":"workspace.report_metadata"}}}]}}}\n' > "$resp/3.out"
+  printf '{"result":{"panes":[{"pane_id":"w1:p2"},{"pane_id":"w1:p3","display_agent":"Themis-Fleet-1"},{"pane_id":"w1:p4","display_agent":"Themis-Fleet-3"}]}}\n' > "$resp/4.out"
+  printf '{"result":{"type":"ok"}}\n' > "$resp/5.out"
+  printf '{"result":{"type":"ok"}}\n' > "$resp/6.out"
+  fb=$(make_herdr_fakebin "$dir")
+  out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_create_task fmtest:w1 fm-display-number /tmp/proj "" display-number AgentThemis codex Themis-Fleet' "$ROOT" ) \
+    || fail "create_task should succeed while allocating a display name"
+  [ "$out" = "w1:t2 w1:p2" ] || fail "display-name allocation must not change create_task output, got '$out'"
+  calls=$(cat "$log")
+  assert_contains "$calls" $'\x1f''--display-agent'$'\x1f''Themis-Fleet-2' \
+    "display-name allocation must choose the lowest free sequential number in the workspace"
+  assert_not_contains "$calls" $'\x1f''--display-agent'$'\x1f''Themis-Fleet-1' \
+    "display-name allocation must not reuse a live pane's number"
+  pass "fm_backend_herdr_create_task: allocates Themis-Fleet-2 when Themis-Fleet-1 is live and Themis-Fleet-2 is free"
+}
+
+test_display_name_stays_stable_for_live_pane() {
+  local dir log resp fb calls count
+  dir="$TMP_ROOT/display-name-stability"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  printf '{"protocol":17,"schemas":{"request":{"oneOf":[{"properties":{"method":{"const":"pane.report_metadata"}}},{"properties":{"method":{"const":"workspace.report_metadata"}}}]}}}\n' > "$resp/1.out"
+  printf '{"result":{"panes":[{"pane_id":"w1:p2"},{"pane_id":"w1:p3","display_agent":"Themis-Fleet-1"}]}}\n' > "$resp/2.out"
+  printf '{"result":{"type":"ok"}}\n' > "$resp/3.out"
+  printf '{"result":{"type":"ok"}}\n' > "$resp/4.out"
+  printf '{"protocol":17,"schemas":{"request":{"oneOf":[{"properties":{"method":{"const":"pane.report_metadata"}}},{"properties":{"method":{"const":"workspace.report_metadata"}}}]}}}\n' > "$resp/5.out"
+  printf '{"result":{"panes":[{"pane_id":"w1:p2","display_agent":"Themis-Fleet-2"},{"pane_id":"w1:p3","display_agent":"Themis-Fleet-1"}]}}\n' > "$resp/6.out"
+  printf '{"result":{"type":"ok"}}\n' > "$resp/7.out"
+  printf '{"result":{"type":"ok"}}\n' > "$resp/8.out"
+  fb=$(make_herdr_fakebin "$dir")
+  PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_report_metadata fmtest w1 w1:p2 first-display AgentThemis codex Themis-Fleet; fm_backend_herdr_report_metadata fmtest w1 w1:p2 second-display AgentThemis codex Themis-Fleet' "$ROOT" \
+    || fail "re-reporting metadata for a live pane should succeed"
+  calls=$(cat "$log")
+  count=$(grep -c $'\x1f''--display-agent'$'\x1f''Themis-Fleet-2' "$log" || true)
+  [ "$count" = 1 ] || fail "a live pane's display name must be assigned once and never renumbered, got $count assignments"
+  assert_not_contains "$calls" $'\x1f''--display-agent'$'\x1f''Themis-Fleet-3' \
+    "stable display-name reporting must not steal or renumber the live pane"
+  pass "fm_backend_herdr_report_metadata: preserves a live pane's Themis-Fleet number across repeated reports"
 }
 
 test_create_task_metadata_failure_does_not_fail_spawn() {
@@ -769,6 +826,9 @@ test_create_task_metadata_preserves_existing_agent_identity() {
   printf '{"result":{"tabs":[]}}\n' > "$resp/1.out"
   printf '{"result":{"tab":{"tab_id":"w1:t2"},"root_pane":{"pane_id":"w1:p2","agent":"claude","agent_name":"named-worker"}}}\n' > "$resp/2.out"
   printf '{"protocol":17,"schemas":{"request":{"oneOf":[{"properties":{"method":{"const":"pane.report_metadata"}}},{"properties":{"method":{"const":"workspace.report_metadata"}}}]}}}\n' > "$resp/3.out"
+  printf '{"result":{"panes":[{"pane_id":"w1:p2","display_agent":"captain-owned"}]}}\n' > "$resp/4.out"
+  printf '{"result":{"type":"ok"}}\n' > "$resp/5.out"
+  printf '{"result":{"type":"ok"}}\n' > "$resp/6.out"
   fb=$(make_herdr_fakebin "$dir")
   out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
     bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_create_task fmtest:w1 fm-identity /tmp/proj "" identity Demo claude Demo-Fleet' "$ROOT" ) \
@@ -963,26 +1023,29 @@ test_projection_create_reports_metadata_for_the_exact_new_workspace() {
   printf '{"result":{"workspace":{"workspace_id":"w9"},"tab":{"tab_id":"w9:t1"},"root_pane":{"pane_id":"w9:p1"}}}\n' > "$resp/1.out"
   printf '{"result":{"tab":{"tab_id":"w9:t2"},"root_pane":{"pane_id":"w9:p2"}}}\n' > "$resp/2.out"
   printf '{"protocol":17,"schemas":{"request":{"oneOf":[{"properties":{"method":{"const":"pane.report_metadata"}}},{"properties":{"method":{"const":"workspace.report_metadata"}}}]}}}\n' > "$resp/3.out"
-  printf '{"result":{"tabs":[{"tab_id":"w9:t1","label":"1","workspace_id":"w9"},{"tab_id":"w9:t2","label":"fm-task-p2","workspace_id":"w9"}]}}\n' > "$resp/6.out"
-  printf '{"result":{"panes":[{"pane_id":"w9:p1","tab_id":"w9:t1"},{"pane_id":"w9:p2","tab_id":"w9:t2"}]}}\n' > "$resp/7.out"
-  printf '{"error":{"code":"agent_not_found"}}\n' > "$resp/8.out"
-  printf '{"result":{"pane":{"pane_id":"w9:p1","tab_id":"w9:t1","workspace_id":"w9"}}}\n' > "$resp/9.out"
-  printf '{"result":{"tabs":[{"tab_id":"w9:t2","label":"fm-task-p2","workspace_id":"w9"}]}}\n' > "$resp/11.out"
-  printf '{"result":{"panes":[{"pane_id":"w9:p2","tab_id":"w9:t2"}]}}\n' > "$resp/12.out"
+  printf '{"result":{"panes":[{"pane_id":"w9:p2","tab_id":"w9:t2"}]}}\n' > "$resp/4.out"
+  printf '{"result":{"type":"ok"}}\n' > "$resp/5.out"
+  printf '{"result":{"type":"ok"}}\n' > "$resp/6.out"
+  printf '{"result":{"tabs":[{"tab_id":"w9:t1","label":"1","workspace_id":"w9"},{"tab_id":"w9:t2","label":"fm-task-p2","workspace_id":"w9"}]}}\n' > "$resp/7.out"
+  printf '{"result":{"panes":[{"pane_id":"w9:p1","tab_id":"w9:t1"},{"pane_id":"w9:p2","tab_id":"w9:t2"}]}}\n' > "$resp/8.out"
+  printf '{"error":{"code":"agent_not_found"}}\n' > "$resp/9.out"
+  printf '{"result":{"pane":{"pane_id":"w9:p1","tab_id":"w9:t1","workspace_id":"w9"}}}\n' > "$resp/10.out"
+  printf '{"result":{"tabs":[{"tab_id":"w9:t2","label":"fm-task-p2","workspace_id":"w9"}]}}\n' > "$resp/12.out"
+  printf '{"result":{"panes":[{"pane_id":"w9:p2","tab_id":"w9:t2"}]}}\n' > "$resp/13.out"
   fb=$(make_herdr_fakebin "$dir")
   out=$(PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" HERDR_SESSION=fmtest \
     bash -c '
       . "$0/bin/backends/herdr.sh"
       fm_backend_herdr_projection_focus_snapshot() { printf "captain-ws\tcaptain-tab"; }
       fm_backend_herdr_projection_focus_restore() { return 0; }
-      fm_backend_herdr_projection_create_task /tmp/proj projection-label fm-task-p2 task-p2 Agent-Themis codex Firstmate-Fleet || exit 1
+      fm_backend_herdr_projection_create_task /tmp/proj projection-label fm-task-p2 task-p2 AgentThemis codex Themis-Fleet || exit 1
       printf "%s %s" "$FM_BACKEND_HERDR_PROJECTION_WORKSPACE_ID" "$FM_BACKEND_HERDR_PROJECTION_PANE_ID"
     ' "$ROOT") || fail "projection create should keep succeeding when it reports metadata"
   [ "$out" = "w9 w9:p2" ] || fail "projection metadata changed the exact response-derived IDs: $out"
   calls=$(cat "$log")
   assert_contains "$calls" $'\x1f''pane'$'\x1f''report-metadata'$'\x1f''w9:p2'$'\x1f''--source'$'\x1f''firstmate' \
     "projection create did not report metadata on the exact new task pane"
-  assert_contains "$calls" $'\x1f''workspace'$'\x1f''report-metadata'$'\x1f''w9'$'\x1f''--source'$'\x1f''firstmate'$'\x1f''--token'$'\x1f''fleet=Firstmate-Fleet'$'\x1f''--token'$'\x1f''what=task p2 (codex)' \
+  assert_contains "$calls" $'\x1f''workspace'$'\x1f''report-metadata'$'\x1f''w9'$'\x1f''--source'$'\x1f''firstmate'$'\x1f''--token'$'\x1f''fleet=Themis-Fleet'$'\x1f''--token'$'\x1f''what=task p2 (codex)' \
     "projection create did not label the exact new workspace with deterministic Fleet and task text"
   create_line=$(grep -n $'\x1f''tab'$'\x1f''create' "$log" | head -1 | cut -d: -f1)
   pane_line=$(grep -n $'\x1f''pane'$'\x1f''report-metadata' "$log" | head -1 | cut -d: -f1)
@@ -3057,6 +3120,7 @@ test_workspace_label_missing_alias_uses_repo_name
 test_workspace_label_different_projects_get_distinct_fleets
 test_workspace_label_from_clone_basename_not_worktree_path
 test_workspace_label_key_differs_from_basename_no_alias
+test_workspace_label_live_agentthemis_defaults_to_themis_fleet
 test_workspace_label_key_differs_from_basename_with_alias
 test_workspace_label_absent_key_arg_is_basename_backcompat
 test_workspace_label_secondmate_uses_marker_id
@@ -3086,6 +3150,8 @@ test_create_task_refuses_when_agent_state_ambiguous
 test_create_task_husk_replacement_creates_before_closing
 test_create_task_creates_and_parses_ids
 test_create_task_reports_pane_and_workspace_metadata_after_creation
+test_create_task_display_name_uses_lowest_free_workspace_number
+test_display_name_stays_stable_for_live_pane
 test_create_task_metadata_failure_does_not_fail_spawn
 test_create_task_skips_metadata_when_surfaces_are_absent
 test_create_task_metadata_preserves_existing_agent_identity
