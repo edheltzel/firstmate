@@ -7,7 +7,9 @@
 # and GitHub reports a PR head that contains the current local work, or its content
 # is already in the up-to-date default branch.
 #
-# Covers three fixes:
+# Covers four fixes:
+#   - pooled-worktree ownership: stale task metadata must not tear down a
+#     recycled worktree now owned by another live task, even under --force.
 #   - local-only fork-remote: a fork IS a remote, so fork-pushed upstream-
 #     contribution PRs are teardown-eligible (the pre-fix code false-refused them).
 #   - squash-merge-then-delete-branch: the branch's own commits live nowhere on a
@@ -49,6 +51,12 @@
 #   (w) index.lock mtime read failure                         -> lock kept, REFUSE
 #   (x) transient lock cleared after first failed return      -> retry ALLOW
 #   (y) persistent lock (never clears, not provably stale)    -> REFUSE loudly
+#
+# Pooled-worktree ownership:
+#   (z) task A meta + recycled task B marker -> REFUSE without touching B
+#   (aa) missing pre-marker ownership claim  -> REFUSE, including under --force
+#   (ab) same task id under a new lease      -> REFUSE
+#   (ac) unreadable ownership claim          -> REFUSE
 set -u
 
 # shellcheck source=tests/lib.sh disable=SC1091
@@ -156,6 +164,19 @@ SH
   chmod +x "$case_dir/fakebin/tasks-axi"
 }
 
+write_worktree_owner() {
+  local case_dir=$1 id=$2 token=${3:-fmw.AAAAAAAAAAAA} marker exclude
+  marker="$case_dir/wt/.fm-worktree-owner"
+  printf 'version=1\ntask_id=%s\ntoken=%s\n' "$id" "$token" > "$marker"
+  exclude=$(git -C "$case_dir/wt" rev-parse --git-path info/exclude)
+  case "$exclude" in
+    /*) : ;;
+    *) exclude="$case_dir/wt/$exclude" ;;
+  esac
+  grep -qxF '.fm-worktree-owner' "$exclude" 2>/dev/null \
+    || printf '%s\n' '.fm-worktree-owner' >> "$exclude"
+}
+
 # Write a meta file for the task. Args: case_dir mode kind
 write_meta() {
   local case_dir=$1 mode=$2 kind=$3
@@ -164,7 +185,9 @@ write_meta() {
     "worktree=$case_dir/wt" \
     "project=$case_dir/project" \
     "kind=$kind" \
-    "mode=$mode"
+    "mode=$mode" \
+    "worktree_owner_token=fmw.AAAAAAAAAAAA"
+  write_worktree_owner "$case_dir" task-x1 fmw.AAAAAAAAAAAA
 }
 
 write_atlas_meta_and_binding() {
@@ -1366,6 +1389,152 @@ test_fractional_legacy_retry_wait_refuses_without_arithmetic_error() {
   pass "fractional legacy retry wait remains supported without arithmetic"
 }
 
+test_recycled_worktree_owner_mismatch_refuses_without_touching_live_task() {
+  local case_dir rc victim_head marker treehouse_called tmux_called
+  case_dir=$(make_case recycled-worktree-owner)
+  write_meta "$case_dir" local-only ship
+
+  # Task A finished and its slot was returned outside this test. Treehouse then
+  # leased the same path to task B, which has clean, remotely preserved work and
+  # is actively using its branch. Task A's stale meta still names that path.
+  git -C "$case_dir/wt" checkout -q -b fm/task-b main
+  wt_commit_file "$case_dir" victim.txt "task B live work" "task B pipeline work"
+  git -C "$case_dir/wt" push -q origin fm/task-b
+  git -C "$case_dir/project" fetch -q origin
+  write_worktree_owner "$case_dir" task-b fmw.BBBBBBBBBBBB
+  marker="$case_dir/wt/.fm-worktree-owner"
+  victim_head=$(git -C "$case_dir/wt" rev-parse HEAD)
+  treehouse_called="$case_dir/treehouse-called"
+  tmux_called="$case_dir/tmux-called"
+
+  cat > "$case_dir/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+: > "${FM_TREEHOUSE_CALLED:?}"
+exit 0
+SH
+  cat > "$case_dir/fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+: > "${FM_TMUX_CALLED:?}"
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/treehouse" "$case_dir/fakebin/tmux"
+
+  set +e
+  FM_TREEHOUSE_CALLED="$treehouse_called" FM_TMUX_CALLED="$tmux_called" \
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "recycled-worktree-owner: task A teardown must refuse task B's live worktree"
+  assert_grep "task-b" "$case_dir/stderr" \
+    "recycled-worktree-owner: refusal did not name the current owner task B"
+  assert_grep "task-x1" "$case_dir/stderr" \
+    "recycled-worktree-owner: refusal did not name stale task A"
+  [ "$(git -C "$case_dir/wt" rev-parse --abbrev-ref HEAD)" = fm/task-b ] \
+    || fail "recycled-worktree-owner: task B branch was detached or deleted"
+  [ "$(git -C "$case_dir/wt" rev-parse HEAD)" = "$victim_head" ] \
+    || fail "recycled-worktree-owner: task B HEAD changed"
+  [ "$(cat "$case_dir/wt/victim.txt")" = "task B live work" ] \
+    || fail "recycled-worktree-owner: task B content changed"
+  assert_grep 'task_id=task-b' "$marker" \
+    "recycled-worktree-owner: task B ownership marker changed"
+  assert_absent "$treehouse_called" \
+    "recycled-worktree-owner: treehouse return ran against task B"
+  assert_absent "$tmux_called" \
+    "recycled-worktree-owner: task A endpoint cleanup ran after ownership refusal"
+  assert_present "$case_dir/state/task-x1.meta" \
+    "recycled-worktree-owner: stale task metadata was removed despite refusal"
+
+  set +e
+  FM_TREEHOUSE_CALLED="$treehouse_called" FM_TMUX_CALLED="$tmux_called" \
+    run_teardown "$case_dir" --force > "$case_dir/force-stdout" 2> "$case_dir/force-stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "recycled-worktree-owner: --force must not seize task B's worktree"
+  assert_grep "task-b" "$case_dir/force-stderr" \
+    "recycled-worktree-owner: forced refusal did not name current owner task B"
+  [ "$(git -C "$case_dir/wt" rev-parse --abbrev-ref HEAD)" = fm/task-b ] \
+    || fail "recycled-worktree-owner: --force detached or deleted task B branch"
+  [ "$(git -C "$case_dir/wt" rev-parse HEAD)" = "$victim_head" ] \
+    || fail "recycled-worktree-owner: --force changed task B HEAD"
+  assert_absent "$treehouse_called" \
+    "recycled-worktree-owner: --force called treehouse return against task B"
+  assert_absent "$tmux_called" \
+    "recycled-worktree-owner: --force killed an endpoint after ownership refusal"
+  pass "stale task A teardown refuses recycled task B worktree without touching it, even under --force"
+}
+
+test_missing_worktree_owner_refuses_including_force() {
+  local case_dir rc
+  case_dir=$(make_case missing-worktree-owner)
+  write_meta "$case_dir" local-only ship
+  rm -f "$case_dir/wt/.fm-worktree-owner"
+  sed -i.bak '/^worktree_owner_token=/d' "$case_dir/state/task-x1.meta"
+  rm -f "$case_dir/state/task-x1.meta.bak"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "missing-worktree-owner: legacy task without a marker must refuse"
+  assert_grep "ownership marker" "$case_dir/stderr" \
+    "missing-worktree-owner: refusal did not identify the missing ownership claim"
+  assert_present "$case_dir/state/task-x1.meta" \
+    "missing-worktree-owner: refusal removed task metadata"
+
+  set +e
+  run_teardown "$case_dir" --force > "$case_dir/force-stdout" 2> "$case_dir/force-stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "missing-worktree-owner: --force must not bypass missing ownership"
+  assert_grep "--force cannot bypass" "$case_dir/force-stderr" \
+    "missing-worktree-owner: forced refusal did not explain the ownership boundary"
+  assert_present "$case_dir/state/task-x1.meta" \
+    "missing-worktree-owner: forced refusal removed task metadata"
+  pass "missing pre-change ownership markers refuse cleanup, including under --force"
+}
+
+test_recycled_same_task_id_with_new_token_refuses() {
+  local case_dir rc
+  case_dir=$(make_case recycled-same-task-id)
+  write_meta "$case_dir" local-only ship
+  write_worktree_owner "$case_dir" task-x1 fmw.BBBBBBBBBBBB
+
+  set +e
+  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "recycled-same-task-id: a fresh lease token must refuse stale same-id metadata"
+  assert_grep "different lease" "$case_dir/stderr" \
+    "recycled-same-task-id: refusal did not identify the lease-token mismatch"
+  assert_present "$case_dir/state/task-x1.meta" \
+    "recycled-same-task-id: refusal removed stale metadata"
+  pass "a recycled worktree refuses stale metadata even when the new task reuses the same id"
+}
+
+test_unreadable_worktree_owner_refuses() {
+  local case_dir rc marker
+  case_dir=$(make_case unreadable-worktree-owner)
+  write_meta "$case_dir" local-only ship
+  marker="$case_dir/wt/.fm-worktree-owner"
+  chmod 000 "$marker"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  chmod 600 "$marker"
+
+  expect_code 1 "$rc" "unreadable-worktree-owner: unreadable marker must refuse"
+  assert_grep "unreadable or invalid" "$case_dir/stderr" \
+    "unreadable-worktree-owner: refusal did not explain the ownership read failure"
+  assert_present "$case_dir/state/task-x1.meta" \
+    "unreadable-worktree-owner: refusal removed task metadata"
+  pass "unreadable worktree ownership markers refuse cleanup"
+}
+
 test_local_only_force_overrides_unpushed() {
   local case_dir rc
   case_dir=$(make_case force-override)
@@ -1518,6 +1687,10 @@ test_local_only_truly_unpushed_refuses
 test_local_only_merged_to_local_main_allows
 test_no_mistakes_origin_remote_allows
 test_no_mistakes_truly_unpushed_refuses
+test_recycled_worktree_owner_mismatch_refuses_without_touching_live_task
+test_missing_worktree_owner_refuses_including_force
+test_recycled_same_task_id_with_new_token_refuses
+test_unreadable_worktree_owner_refuses
 test_local_only_force_overrides_unpushed
 test_herdr_teardown_clears_escalation_marker
 test_herdr_projection_teardown_retires_journal_only_after_confirmed_close

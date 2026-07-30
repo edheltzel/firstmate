@@ -104,7 +104,7 @@ run_settle_spawn() {
 # loop should keep polling until two consecutive reads agree, landing on the
 # real settled worktree instead.
 test_single_stale_first_read_is_not_accepted() {
-  local rec id out status
+  local rec id out status owner_token
   id=settle-single-stale-z1
   rec=$(make_settle_case settle-single "$id" 1)
   read_settle_record "$rec"
@@ -117,6 +117,17 @@ test_single_stale_first_read_is_not_accepted() {
     "meta did not record the settled worktree"
   assert_no_grep "worktree=$STALE_DIR" "$HOME_DIR/state/$id.meta" \
     "meta wrongly recorded the transient stale path as the worktree"
+  owner_token=$(sed -n 's/^worktree_owner_token=//p' "$HOME_DIR/state/$id.meta")
+  case "$owner_token" in
+    fmw.????????????) : ;;
+    *) fail "meta did not record a valid per-spawn worktree ownership token" ;;
+  esac
+  assert_grep "task_id=$id" "$WT_DIR/.fm-worktree-owner" \
+    "spawn did not mark the settled Treehouse worktree with its task id"
+  assert_grep "token=$owner_token" "$WT_DIR/.fm-worktree-owner" \
+    "worktree marker token does not match task metadata"
+  assert_grep '.fm-worktree-owner' "$(git -C "$WT_DIR" rev-parse --git-path info/exclude)" \
+    "spawn did not exclude its worktree ownership marker from git"
   pass "a single transient stale pane_current_path read is not accepted as the worktree"
 }
 

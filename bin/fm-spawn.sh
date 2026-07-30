@@ -119,6 +119,12 @@
 #                  written by this script; outside the worktree to avoid pi's trust gate)
 #     __PITURNEND__ absolute path to .pi/extensions/fm-primary-turnend-guard.ts in a pi secondmate home
 #     __PIWATCH__   absolute path to .pi/extensions/fm-primary-pi-watch.ts in a pi secondmate home
+# Every Treehouse-backed ship/scout spawn writes a gitignored
+# .fm-worktree-owner marker immediately after validating the allocated path and
+# before publishing metadata or launching the worker. The marker and metadata
+# share a per-spawn token, so teardown can reject a recycled path even when a
+# later task reuses the same id. Orca worktrees keep their backend id/path proof,
+# and secondmate homes keep their .fm-secondmate-home proof instead.
 # Per-harness turn-end hooks are installed automatically; some live outside the worktree.
 # grok uses a firstmate-owned global hook under ${GROK_HOME:-$HOME/.grok}/hooks
 # plus a gitignored .fm-grok-turnend worktree pointer and a state token.
@@ -148,6 +154,7 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 PROJECTS="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
 CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 SUB_HOME_MARKER=".fm-secondmate-home"
+WORKTREE_OWNER_MARKER=".fm-worktree-owner"
 # shellcheck source=bin/fm-ff-lib.sh
 . "$SCRIPT_DIR/fm-ff-lib.sh"
 # shellcheck source=bin/fm-wake-lib.sh
@@ -271,6 +278,35 @@ SPAWN_TASK_LOCK_HELD=0
 PR_BINDING_CREATED=0
 CONFIG_INHERIT_LOCK=
 CONFIG_INHERIT_LOCK_HELD=0
+WORKTREE_OWNER_TOKEN=
+
+publish_treehouse_worktree_owner() {
+  local tmp token
+  tmp=$(mktemp "$WT/$WORKTREE_OWNER_MARKER.fmw.XXXXXXXXXXXX") || {
+    echo "error: cannot create Treehouse worktree ownership marker for task $ID at $WT" >&2
+    return 1
+  }
+  token="fmw.${tmp##*.fm-worktree-owner.fmw.}"
+  case "$token" in
+    fmw.????????????) : ;;
+    *)
+      rm -f "$tmp"
+      echo "error: generated invalid Treehouse worktree ownership token for task $ID" >&2
+      return 1
+      ;;
+  esac
+  if ! printf 'version=1\ntask_id=%s\ntoken=%s\n' "$ID" "$token" > "$tmp"; then
+    rm -f "$tmp"
+    echo "error: cannot write Treehouse worktree ownership marker for task $ID at $WT" >&2
+    return 1
+  fi
+  if ! mv -f "$tmp" "$WT/$WORKTREE_OWNER_MARKER"; then
+    rm -f "$tmp"
+    echo "error: cannot publish Treehouse worktree ownership marker for task $ID at $WT" >&2
+    return 1
+  fi
+  WORKTREE_OWNER_TOKEN=$token
+}
 
 parse_orca_worktree_result() {
   local raw=$1 rest
@@ -1225,6 +1261,7 @@ if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   fi
 
   validate_spawn_worktree "treehouse get" "$T"
+  publish_treehouse_worktree_owner || exit 1
 fi
 
 # Per-task temp root: /tmp/fm-<id>/ with Go's build temp nested at gotmp/. Go won't
@@ -1260,9 +1297,16 @@ exclude_path() {
   local rel=$1 EXCL
   EXCL=$(git -C "$WT" rev-parse --git-path info/exclude 2>/dev/null || true)
   [ -n "$EXCL" ] || return 0
+  case "$EXCL" in
+    /*) : ;;
+    *) EXCL="$WT/$EXCL" ;;
+  esac
   mkdir -p "$(dirname "$EXCL")"
   grep -qxF "$rel" "$EXCL" 2>/dev/null || echo "$rel" >> "$EXCL"
 }
+if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
+  exclude_path "$WORKTREE_OWNER_MARKER"
+fi
 if [ "$KIND" != secondmate ]; then
   case "$HARNESS" in
     claude*)
@@ -1391,6 +1435,7 @@ META_WINDOW=$T
   echo "mode=$MODE"
   echo "yolo=$YOLO"
   echo "tasktmp=$TASK_TMP"
+  [ -z "$WORKTREE_OWNER_TOKEN" ] || echo "worktree_owner_token=$WORKTREE_OWNER_TOKEN"
   echo "model=${MODEL:-default}"
   echo "effort=${EFFORT:-default}"
   # backend= is written only for a non-default (non-tmux) backend, so the

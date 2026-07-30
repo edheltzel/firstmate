@@ -1421,7 +1421,9 @@ harness=echo
 kind=ship
 mode=no-mistakes
 yolo=off
+worktree_owner_token=fmw.AAAAAAAAAAAA
 EOF
+  printf 'version=1\ntask_id=child\ntoken=fmw.AAAAAAAAAAAA\n' > "$childwt/.fm-worktree-owner"
   fakebin=$(make_fake_tmux "$TMP_ROOT/force-teardown-fake")
   log="$TMP_ROOT/force-teardown-fake/tmux.log"
   if PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_TMUX_LOG="$log" FM_FAKE_TMUX_CAPTURE="$TMP_ROOT/force-teardown-fake/pane.txt" \
@@ -1529,7 +1531,9 @@ harness=echo
 kind=ship
 mode=no-mistakes
 yolo=off
+worktree_owner_token=fmw.AAAAAAAAAAAA
 EOF
+  printf 'version=1\ntask_id=child\ntoken=fmw.AAAAAAAAAAAA\n' > "$childwt/.fm-worktree-owner"
   fakebin=$(make_fake_tmux "$TMP_ROOT/force-lock-child-fake")
   log="$TMP_ROOT/force-lock-child-fake/tmux.log"
   cat > "$fakebin/treehouse" <<'SH'

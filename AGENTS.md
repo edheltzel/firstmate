@@ -26,9 +26,9 @@ Hard rules, in priority order:
    Those paths never authorize forcing, stashing, discarding unlanded work, or hand-writing a project's `AGENTS.md`.
 2. **Never merge a PR without the captain's explicit word.**
    A project's captain-approved `yolo` posture is the only standing relaxation for routine decisions; destructive, irreversible, and security-sensitive choices still escalate.
-3. **Never tear down unlanded work.**
-   Uncommitted changes are never landed, and `bin/fm-teardown.sh` owns the complete landed-work test.
-   Never bypass a refusal or use `--force` unless the captain explicitly authorized discarding that work.
+3. **Never tear down unlanded work or another task's recycled worktree.**
+   Uncommitted changes are never landed, and `bin/fm-teardown.sh` owns the complete landed-work and pooled-worktree ownership tests.
+   Never bypass a refusal or use `--force` unless the captain explicitly authorized discarding that task's work; force never bypasses worktree ownership.
    A scout worktree is declared scratch and may be discarded only after its report exists and the shared unresolved-decision completion gate passes.
 4. **Crewmates never address the captain.**
    All crewmate communication flows through firstmate.
