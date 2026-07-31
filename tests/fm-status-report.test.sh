@@ -10,7 +10,7 @@ SKILL="$ROOT/.agents/skills/status-report/SKILL.md"
 BODY=$(sed -n '1,240p' "$SKILL")
 
 test_trigger_semantics() {
-  for trigger in '/status-report' 'status' 'status report' "standalone or general request for \`report\`"; do
+  for trigger in '/status-report' '/sr' 'status' 'status report' "standalone or general request for \`report\`"; do
     assert_contains "$BODY" "$trigger" "status-report trigger $trigger"
   done
   assert_contains "$BODY" "Do not trigger for a report about a named subject" "named subject requests stay with their subject"
@@ -54,7 +54,20 @@ test_local_default_and_empty_state() {
   pass "status-report preserves local-only default and concise empty state"
 }
 
+test_sr_alias() {
+  local alias_skill alias_body
+  alias_skill="$ROOT/.agents/skills/sr/SKILL.md"
+  [ -f "$alias_skill" ] || fail "sr alias SKILL.md missing"
+  alias_body=$(cat "$alias_skill")
+  assert_contains "$alias_body" "name: sr" "sr alias declares its skill name"
+  assert_contains "$alias_body" "user-invocable: true" "sr alias is user-invocable"
+  assert_contains "$alias_body" ".agents/skills/status-report/SKILL.md" "sr alias points at the status-report owner"
+  assert_contains "$alias_body" "Do not restate or vary that contract" "sr alias stays a pointer, not a copy"
+  pass "sr alias exists and defers to the status-report contract"
+}
+
 test_trigger_semantics
 test_active_filter_order_and_counts
 test_progress_branch_and_human_options
 test_local_default_and_empty_state
+test_sr_alias

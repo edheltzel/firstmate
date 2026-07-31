@@ -5,6 +5,7 @@
 set -u
 
 ROOT=$(cd -- "$(dirname -- "$0")/.." && pwd)
+TASK_MANIFEST="$ROOT/.agents/tasks/omp-manifest.json"
 MANIFEST="$ROOT/.agents/tasks/omp-publication-manifest.json"
 INVENTORY="$ROOT/docs/omp-publication-inventory.md"
 PLAN="$ROOT/.agents/plans/omp-harness-integration-plan.md"
@@ -54,8 +55,8 @@ require_file() {
 }
 
 require_inventory_token() {
-  if ! grep -Fq "$1" "$INVENTORY"; then
-    error "publication inventory omits: $1"
+  if ! grep -Fq "$INVENTORY_TICK$1$INVENTORY_TICK" "$INVENTORY"; then
+    error "publication inventory omits exact token: $1"
   fi
 }
 
@@ -67,7 +68,11 @@ require_source_binding() {
   fi
   while IFS= read -r token; do
     [ -n "$token" ] || continue
-    if ! grep -Fq "$token" "$ROOT/$source_path"; then
+    if [[ "$token" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      if ! grep -Eq "(^|[^[:alnum:]_])$token([^[:alnum:]_]|$)" "$ROOT/$source_path"; then
+        error "$owner_kind source token is missing from $source_path: $token"
+      fi
+    elif ! grep -Fq "$token" "$ROOT/$source_path"; then
       error "$owner_kind source token is missing from $source_path: $token"
     fi
   done < <(jq -r --arg kind "$owner_kind" --arg id "$artifact_id" --arg path "$source_path" '.artifacts[] | select(.id == $id) | .[$kind][] | select(.path == $path) | .tokens[]' "$MANIFEST")
@@ -78,7 +83,7 @@ require_file "$INVENTORY"
 require_file "$PLAN"
 
 if [ -f "$MANIFEST" ] && jq empty "$MANIFEST" >/dev/null 2>&1; then
-  if ! jq -e '.schema == "omp-publication-inventory.v1" and .version == 1 and .source_document == "docs/omp-publication-inventory.md" and (.tracked_paths | type == "array") and (.artifacts | type == "array")' "$MANIFEST" >/dev/null 2>&1; then
+  if ! jq -e '.schema == "omp-publication-inventory.v1" and .version == 1 and .source_document == "docs/omp-publication-inventory.md" and (.tracked_paths | type == "array") and (.future_paths | type == "array") and (.artifacts | type == "array")' "$MANIFEST" >/dev/null 2>&1; then
     error "publication manifest schema is invalid"
   else
     INVENTORY_COUNT=$(jq '.artifacts | length' "$MANIFEST")
@@ -94,6 +99,9 @@ if [ -f "$MANIFEST" ] && jq empty "$MANIFEST" >/dev/null 2>&1; then
       [ -n "$duplicate_path" ] || continue
       error "publication manifest has duplicate artifact path: $duplicate_path"
     done < <(jq -r '.artifacts[].paths[]' "$MANIFEST" | sort | uniq -d)
+    if [ "$(jq '[.tracked_paths[]] | length' "$MANIFEST")" -ne "$(jq '[.tracked_paths[]] | unique | length' "$MANIFEST")" ]; then
+      error "publication manifest tracked path set is not unique"
+    fi
     while IFS=$'\t' read -r owner_kind artifact_id source_path; do
       [ -n "$owner_kind" ] || continue
       error "publication manifest has duplicate $owner_kind binding: $artifact_id:$source_path"
@@ -114,8 +122,8 @@ if [ -f "$MANIFEST" ] && jq empty "$MANIFEST" >/dev/null 2>&1; then
       if [ "$DOCUMENT_ID_COUNT" -ne 1 ]; then
         error "publication artifact documentation row count is $DOCUMENT_ID_COUNT: $artifact_id"
       fi
-      require_inventory_token "\`$artifact_id\`"
-      if ! jq -e --arg id "$artifact_id" '.artifacts[] | select(.id == $id) | (.paths | length > 0) and (.creator | length > 0) and (.cleanup | length > 0) and ((.rollback_owner | length) > 0) and (.evidence_schema == "omp-evidence.v1" or .evidence_schema == "omp-activation-preflight.v1") and ((.rollback_schema | length) > 0)' "$MANIFEST" >/dev/null 2>&1; then
+      require_inventory_token "$artifact_id"
+      if ! jq -e --arg id "$artifact_id" --slurpfile task_manifest "$TASK_MANIFEST" '.artifacts[] | select(.id == $id) | .task_id as $task_id | (.paths | length > 0) and (.creator | length > 0) and (.cleanup | length > 0) and ((.rollback_owner | length) > 0) and ((.owner | length) > 0) and ((.task_id | type) == "string") and ((.evidence_id | type) == "string") and ((.rollback_id | type) == "string") and (.evidence_schema == "omp-evidence.v1" or .evidence_schema == "omp-activation-preflight.v1") and ((.rollback_schema | length) > 0) and (([$task_manifest[0].tasks[].id] | index($task_id)) != null) and (.rollback_owner == $task_id)' "$MANIFEST" >/dev/null 2>&1; then
         error "publication artifact lacks paths, creator, cleanup, rollback owner, or schemas: $artifact_id"
       fi
       while IFS= read -r artifact_path; do
@@ -124,13 +132,47 @@ if [ -f "$MANIFEST" ] && jq empty "$MANIFEST" >/dev/null 2>&1; then
       done < <(jq -r --arg id "$artifact_id" '.artifacts[] | select(.id == $id) | .paths[]' "$MANIFEST")
       while IFS= read -r source_path; do
         [ -n "$source_path" ] || continue
-        require_source_binding creator "$artifact_id" "$source_path"
+        if ! jq -e --arg id "$artifact_id" '.artifacts[] | select(.id == $id and (.future // false))' "$MANIFEST" >/dev/null 2>&1; then
+          require_source_binding creator "$artifact_id" "$source_path"
+        fi
       done < <(jq -r --arg id "$artifact_id" '.artifacts[] | select(.id == $id) | .creator[].path' "$MANIFEST")
       while IFS= read -r source_path; do
         [ -n "$source_path" ] || continue
-        require_source_binding cleanup "$artifact_id" "$source_path"
+        if ! jq -e --arg id "$artifact_id" '.artifacts[] | select(.id == $id and (.future // false))' "$MANIFEST" >/dev/null 2>&1; then
+          require_source_binding cleanup "$artifact_id" "$source_path"
+        fi
       done < <(jq -r --arg id "$artifact_id" '.artifacts[] | select(.id == $id) | .cleanup[].path' "$MANIFEST")
     done < <(jq -r '.artifacts[].id' "$MANIFEST" | sort -u)
+
+    while IFS= read -r future_path; do
+      [ -n "$future_path" ] || continue
+      require_inventory_token "$future_path"
+    done < <(jq -r '.future_paths[].path' "$MANIFEST")
+
+    # shellcheck disable=SC2016
+    DOCUMENT_TRACKED=$(grep -oE '^<!-- omp-publication-tracked-path: \`[^\`]+\` -->$' "$INVENTORY" | sed -E 's/^<!-- omp-publication-tracked-path: \`([^\`]+)\` -->$/\1/' | sort -u || true)
+    MANIFEST_TRACKED=$(jq -r '.tracked_paths[]' "$MANIFEST" | sort -u)
+    # shellcheck disable=SC2016
+    DOCUMENT_TRACKED_RAW=$(grep -oE '^<!-- omp-publication-tracked-path: \`[^\`]+\` -->$' "$INVENTORY" | sed -E 's/^<!-- omp-publication-tracked-path: \`([^\`]+)\` -->$/\1/' || true)
+    DOCUMENT_TRACKED_ROW_COUNT=$(printf '%s\n' "$DOCUMENT_TRACKED_RAW" | sed '/^$/d' | wc -l | tr -d ' ')
+    DOCUMENT_TRACKED_UNIQUE_COUNT=$(printf '%s\n' "$DOCUMENT_TRACKED_RAW" | sed '/^$/d' | sort -u | wc -l | tr -d ' ')
+    [ "$DOCUMENT_TRACKED_ROW_COUNT" = "$DOCUMENT_TRACKED_UNIQUE_COUNT" ] || error "publication inventory tracked-path rows are duplicated"
+    if [ "$DOCUMENT_TRACKED" != "$MANIFEST_TRACKED" ]; then
+      error "publication inventory tracked-path set differs from manifest"
+    fi
+
+    # Future OMP-native surfaces are not files yet, so their exact path/owner/schema
+    # binding must be compared as structured comment rows rather than by existence.
+    # shellcheck disable=SC2016
+    DOCUMENT_FUTURE_RAW=$(grep -oE '^<!-- omp-publication-future-path: \`[^\`]+\` owner=[^ ]+ schema=[^ ]+ -->$' "$INVENTORY" | sed -E 's/^<!-- omp-publication-future-path: \`([^\`]+)\` owner=([^ ]+) schema=([^ ]+) -->$/\1\towner=\2\tschema=\3/' || true)
+    DOCUMENT_FUTURE=$(printf '%s\n' "$DOCUMENT_FUTURE_RAW" | sed '/^$/d' | sort -u)
+    MANIFEST_FUTURE=$(jq -r '.future_paths[] | "\(.path)\towner=\(.owner)\tschema=\(.schema)"' "$MANIFEST" | sort -u)
+    DOCUMENT_FUTURE_ROW_COUNT=$(printf '%s\n' "$DOCUMENT_FUTURE_RAW" | sed '/^$/d' | wc -l | tr -d ' ')
+    DOCUMENT_FUTURE_UNIQUE_COUNT=$(printf '%s\n' "$DOCUMENT_FUTURE_RAW" | sed '/^$/d' | sort -u | wc -l | tr -d ' ')
+    [ "$DOCUMENT_FUTURE_ROW_COUNT" = "$DOCUMENT_FUTURE_UNIQUE_COUNT" ] || error "publication inventory future-path rows are duplicated"
+    if [ "$DOCUMENT_FUTURE" != "$MANIFEST_FUTURE" ]; then
+      error "publication inventory future-path set differs from manifest"
+    fi
 
     while IFS= read -r document_id; do
       [ -n "$document_id" ] || continue
@@ -155,7 +197,7 @@ if [ -n "$SIMULATION" ]; then
   if [ ! -f "$SIMULATION" ] || ! jq empty "$SIMULATION" >/dev/null 2>&1; then
     error "simulation state is missing or invalid JSON: $SIMULATION"
   else
-    if ! jq -e '.schema == "omp-publication-state.v1"' "$SIMULATION" >/dev/null 2>&1; then
+    if ! jq -e '.schema == "omp-publication-state.v2" and (.inventory_ids | type == "array") and (.changed_paths | type == "array") and (.pre_paths | type == "array") and (.post_paths | type == "array")' "$SIMULATION" >/dev/null 2>&1; then
       error "simulation state has the wrong schema"
     fi
     STATE=$(jq -r '.state // empty' "$SIMULATION")
@@ -170,6 +212,18 @@ if [ -n "$SIMULATION" ]; then
         error "simulation changed path is outside the publication inventory: $path"
       fi
     done < <(jq -r '.changed_paths[]?' "$SIMULATION")
+    if [ "$(jq '[.changed_paths[]] | length' "$SIMULATION")" -ne "$(jq '[.changed_paths[]] | unique | length' "$SIMULATION")" ]; then
+      error "simulation changed path list contains duplicates"
+    fi
+    if [ "$(jq '[.post_paths[]] | length' "$SIMULATION")" -eq 0 ]; then
+      error "simulation post image is empty"
+    fi
+    if jq -e '(.state == "pre" and (.changed_paths | length > 0)) or (.state == "post" and (.changed_paths | length == 0))' "$SIMULATION" >/dev/null 2>&1; then
+      error "simulation pre/post changed-path binding is inconsistent"
+    fi
+    if ! jq -e --slurpfile publication "$MANIFEST" '(.inventory_ids | unique | sort) == ([$publication[0].artifacts[].id] | unique | sort)' "$SIMULATION" >/dev/null 2>&1; then
+      error "simulation inventory ID set is incomplete or stale"
+    fi
     if ! jq -e '.support_fence == "experimental tmux worker; unverified; no primary, secondmate, recovery, or Herdr support"' "$SIMULATION" >/dev/null 2>&1; then
       error "simulation does not preserve the experimental support fence"
     fi

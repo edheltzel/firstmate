@@ -12,7 +12,7 @@
 # is the single canonical project identity. It is NOT necessarily the repository
 # directory basename: a project can be registered under a key that differs from
 # its clone directory name (e.g. the firstmate repo itself registered as
-# "Agent-Themis" while its checkout basename is "Firstmate"). Callers pass the
+# "AgentThemis" while its checkout basename is "Themis"). Callers pass the
 # key, not a guessed-from-path name, so mode and Fleet resolution agree.
 #
 # Registry line format (data/projects.md):
@@ -35,8 +35,8 @@
 # key itself when no <default> is given. Keeping the display DEFAULT separate from
 # the lookup KEY is what lets a key that differs from the repository basename
 # resolve its mode correctly WITHOUT renaming the workspace: a delivery-identity
-# key such as "Agent-Themis" must not turn a "Firstmate-Fleet" workspace into
-# "Agent-Themis-Fleet". Only an explicit fleet=<Display> alias renames it. This is
+# key such as "AgentThemis" must not turn a "Themis-Fleet" workspace into
+# "AgentThemis-Fleet". Only an explicit fleet=<Display> alias renames it. This is
 # the single authoritative source of the Fleet display name; the herdr backend
 # derives the ordinary-worker workspace label "<fleet-display-name>-Fleet" from it
 # (bin/backends/herdr.sh), passing the canonical key and the basename default.

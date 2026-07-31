@@ -1,9 +1,9 @@
 # Themis donor-map consolidation
 
-Date: 2026-07-27.
+Date: 2026-07-29.
 
-This is the port specification assembled from reports 00-07, 09, and 10, `SCOUT-BRIEF.md`, `VALIDATION.md`, and the Themis fleet-orchestrator plan.
-Report 08 is not present; the plan itself labels assignment 8 as a small companion to assignment 7, but no report file was supplied.
+This is the durable port-specification synthesis assembled from reports 00-07, 09, and 10, `SCOUT-BRIEF.md`, `VALIDATION.md`, and the Themis fleet-orchestrator plan.
+Report 08 was not supplied, and this absence is an evidence boundary rather than an inferred result.
 
 The reports are evidence, not authority.
 Where a report cites prose rather than implementation, this document says so.
@@ -15,7 +15,7 @@ The port is not a file-copy exercise.
 The durable core is the deterministic supervision model, Herdr's explicit-session and native-state safety, no-mistakes run attribution, Treehouse isolation assertions, and landed-work proof.
 The largest risks are not missing ideas but prose-only rules and unresolved target architecture: the join record, the local-versus-GitHub task projection, the exact merge-approval contract, and the authority of the three target harness surfaces.
 
-The most important corrections to carry into implementation are:
+The most important corrections to carry into implementation are evidence-qualified findings, not completion claims:
 
 - Keyed decisions are not fixed by copying the fold: ordinary ship and scout briefs do not teach keyed opening, and the downstream decision-hold consumer masks the fold after `done` or `failed` for those task kinds (`VALIDATION.md:18-78`).
 - Lock-refused read-only mode is enforced only inside `fm-session-start.sh`; the correct count is three files and four line-sites, not four files (`VALIDATION.md:80-130`).
@@ -35,10 +35,10 @@ The first citation is the report claim; the second is the conflicting report or 
 | C3 | OMP harness classification | Report 03 treats the omitted `omp` entry in `HARNESS_RE` as a portable-harness defect and a permanent read-only degradation (`03-session-start.md:11-19,193-200`). Validation confirms the no-recovery behavior but says OMP is unsupported by the donor's verified harness list, and that no durable latch exists (`VALIDATION.md:132-196`). | In Themis, OMP is a target bridge and therefore needs an explicit verified adapter entry. Describe the donor issue as unsupported-harness handling plus a misleading banner, not as a stale durable lock. |
 | C4 | Scout/secondmate landed-work protection | Report 06's headline frames the teardown ladder as the safety source and report 07 carries landed-work proof forward as a copy (`06-treehouse-isolation.md:16-76,240-279`; `07-lifecycle-and-backlog.md:198-212`). Validation refutes the universal claim: `scout` and `secondmate` bypass the ladder, while ship is the only complete path (`VALIDATION.md:197-273`). | Preserve the plan's explicit split: ship requires landed proof; scout requires the report and decision gate; any future exempt kind must have its own product check (`plan:80-91`). Never generalize ship's proof to every task kind, and never add a bare exemption. |
 | C5 | Herdr liveness verdict | Report 03 marks the Herdr liveness probe `copy` and treats `dead/no-agent/live/unknown` as directly reusable (`03-session-start.md:154-160`). Report 02 marks the larger busy/liveness/husk mechanism `rebuild` because 0.7.5 behavior differs by harness and needs a canonical policy (`02-herdr-verification.md:102-107,246-261`). | Copy the three-state fail-safe principle and unknown refusal; rebuild the classifier, screen-detection policy, and husk recovery around current Herdr evidence. This is a copy of a rule, not of the donor implementation. |
-| C6 | Treehouse isolation proof | Report 01 says Herdr `foreground_cwd` tracking is a copyable signal that proves entry into the isolated worktree (`01-herdr-adapter.md:83-92,195-202`). Report 06 marks acquisition plus cwd polling `rebuild`, replacing inference with the external CLI's returned path (`06-treehouse-isolation.md:77-119,240-279`). | Keep both checks at different boundaries: Treehouse's returned path is the allocation result; Herdr `foreground_cwd` is the post-launch assertion. Do not use either alone as proof. |
+| C6 | Treehouse isolation proof | Report 01 says Herdr `foreground_cwd` tracking is a copyable signal that proves entry into the isolated worktree (`01-herdr-adapter.md:83-92,195-202`). Report 06 marks acquisition plus cwd polling `rebuild`, replacing inference with the external CLI's returned path (`06-treehouse-isolation.md:77-119,240-279`). | The CLI stdout observation supports subprocess acquisition, while `validate_spawn_worktree` remains the pure-git post-acquisition assertion. Decide separately whether disposable work uses `--lease`, because release ownership is not established by the stdout observation. |
 | C7 | Session-start nudge | Report 03 marks the nudge wrapper and silence predicates `copy` and treats a nudge as the execution rail (`03-session-start.md:163-167`). Report 05 marks nudge suppression `strip`, but explicitly says that verdict flips if a nudge is ported (`05-no-mistakes.md:89-99,196-224`). | The reports do not establish a product decision. The plan requires one persona source and three generated surfaces but does not require or reject a nudge (`plan:88-96`). Keep this as a design choice: if startup state is required, port a deterministic nudge and enforce its idempotence; otherwise remove both the nudge and its suppression logic. |
 | C8 | Workspace topology | Report 02's mechanism inventory says workspace-per-task is rejected as the durable model and retained only as a disposable projection (`02-herdr-verification.md:43-57`). Its verdict later says to rebuild workspace-per-project/tab-per-task as the decided shape (`02-herdr-verification.md:246-252`). | The verdict and the Themis plan win: reusable workspace-per-project, tab-per-task is the intended volatile runtime topology. The report's inventory sentence is stale or refers to the donor projection and must not be ported literally. |
-| C9 | Review authority | Report 05 repeats the donor rule that no-mistakes owns review, fixes, tests, documentation, push, PR, and CI (`05-no-mistakes.md:41-59,224-244`). The same report finds the target persona injects mandatory reviewer and RedTeam passes, and report 07 calls that a direct conflict (`05-no-mistakes.md:187-224`; `07-lifecycle-and-backlog.md:194-212`). | Choose one authority per delivery mode. If no-mistakes is selected, target reviewer prose cannot create a second required gate; encode the ownership boundary in the tool hook and worker contract. |
+| C9 | Review authority | The preserved validation treats Reviewer dispatch as conditional, while the donor no-mistakes rule and the target persona surfaces differ on RedTeam authority (`05-no-mistakes.md:41-59,187-224`; `07-lifecycle-and-backlog.md:194-212`). | The broad per-task Reviewer conflict does not survive. The durable residue is to decide whether model-judgment RedTeam review may run inside a no-mistakes-owned completion path and to generate parity across Claude, Pi, and OMP. |
 
 Other apparent disagreements are not contradictions after scope is separated.
 Report 01's event transport and report 02's blocked-event push both rebuild the same Herdr-only path; report 01's label recovery strip and report 02's label-adoption rebuild differ because one is donor production wiring and the other is the capability to recover under authoritative local IDs.
@@ -128,8 +128,8 @@ These are report findings that the requirements plan does not state as a require
 | Tangle detection and default-branch resolution ownership | `06-treehouse-isolation.md:96-119,280-307`; `07-lifecycle-and-backlog.md:214-226` | These affect whether a dispatch or landing action targets the primary checkout and whether review/teardown agree on the base branch. |
 | Exact-head approval binding, merge record-before-merge, and green-state enforcement | `07-lifecycle-and-backlog.md:55-116,214-226` | R16 says approval/check state but does not require provider/repo/number/head-SHA binding or state queries at the wrapper. |
 | Durable decision identity, dependency edges, completion attestation, and committed decision text | `07-lifecycle-and-backlog.md:140-160,214-226`; `10-skills-inventory.md:98` | R20 establishes durability but no requirement names decision lifecycle mechanics. |
-| Single source and generated Claude/Pi/OMP surfaces, plus drift tests | `09-escalation-state-config.md:283-307`; `10-skills-inventory.md:94-101` | R18 says one source but does not require the generator or a test that blocks drift. |
-| Scoped kill identity and no broad pattern kill | `00-supervision-and-wake.md:114-139`; plan R17 only states the outcome | This is a direct work-preservation guard for the persona's termination promise. |
+| Single source and generated Claude/Pi/OMP surfaces, plus drift tests | `09-escalation-state-config.md:283-307`; `10-skills-inventory.md:94-101` | R18 already requires one generated source; the remaining gap is an executable generator and drift test. |
+| Scoped kill identity and no broad pattern kill | `00-supervision-and-wake.md:114-139`; plan R17 states the outcome at `plan:91` | R17 is already an explicit target requirement, so this is a requirement-to-test gap rather than an unsupported requirement. |
 | Skill triggers are not execution evidence; machine-observable rules belong at hooks | `10-skills-inventory.md:8-14,55-69,127-132` | The plan says port enforcement, but does not enumerate trigger dispatch, owner tests, or hook coverage as acceptance criteria. |
 | Safe update and reread of changed instructions | `09-escalation-state-config.md:296-307`; `10-skills-inventory.md:108-110` | A single generated source is insufficient when workers are already running. |
 
@@ -234,4 +234,10 @@ The safe dependency order is:
 5. Add merge and recovery wrappers with exact-head approval, no-mistakes ownership, and landed-work enforcement.
 6. Generate persona surfaces and add behavioral drift/trigger tests.
 
-Until those gates exist, a report recommendation is not a completion claim.
+Until those gates exist, this document remains reference evidence and is not a completion claim.
+
+## Verification record
+
+The preserved input files were read completely from `/Users/ed/Developer/Atlas/Themis/data/donor-map-untracked-review-d12/inputs/` on 2026-07-29.
+The current tracked donor collection was enumerated with `rg --files docs/plans/support/donor-map | sort`.
+The target requirements and implementation references were checked with `rg -n "R4a|R4b|R16|R17|R18|R20|foreground_cwd|validate_spawn_worktree|treehouse get" docs/plans/2026-07-26-001-feat-themis-fleet-orchestrator-plan.md docs/herdr-backend.md bin/fm-spawn.sh`.

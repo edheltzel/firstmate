@@ -837,6 +837,12 @@ test_default_is_bounded_and_local_only() {
   assert_contains "$toon" "live PR discovery + checks,\"--include-prs\"" "omitted must mark the dropped live-PR surface"
   # Valid JSON, correct schema.
   printf '%s' "$json" | jq -e '.schema == "fm-bearings.v1"' >/dev/null || fail "json schema wrong"
+  printf '%s' "$json" | jq -e '
+    .omp_monitoring.schema == "omp-monitor-check.v1"
+      and .omp_monitoring.status == "PASS"
+      and .omp_monitoring.total == 0
+      and (.omp_monitoring.manifest_only_ids | length) > 0
+  ' >/dev/null || fail "bearings omitted or miscounted the OMP monitoring projection"
   pass "default output is bounded, local-only, and marks omitted surfaces"
 }
 

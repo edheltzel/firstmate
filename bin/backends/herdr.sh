@@ -260,29 +260,153 @@ fm_backend_herdr_task_description() {  # <task-id> [<harness>]
   printf '%.80s' "$description"
 }
 
+# fm_backend_herdr_agent_name_lock_path: shared lock for display-name
+# allocation. The session/workspace pair is the number namespace because Herdr
+# keeps display_agent on each pane and does not enforce global uniqueness.
+fm_backend_herdr_agent_name_lock_path() {  # <session> <workspace>
+  local session=$1 workspace_id=$2 root safe_session safe_workspace
+  root=${FM_BACKEND_HERDR_AGENT_NAME_LOCK_ROOT:-${TMPDIR:-/tmp}/firstmate-herdr-agent-names}
+  safe_session=$(printf '%s' "$session" | LC_ALL=C tr -c 'A-Za-z0-9_.-' '_')
+  safe_workspace=$(printf '%s' "$workspace_id" | LC_ALL=C tr -c 'A-Za-z0-9_.-' '_')
+  [ -n "$safe_session" ] && [ -n "$safe_workspace" ] || return 1
+  mkdir -p "$root" || return 1
+  chmod 700 "$root" 2>/dev/null || true
+  printf '%s/%s-%s.lock' "$root" "$safe_session" "$safe_workspace"
+}
+
+# fm_backend_herdr_agent_name_lock_acquire: serialize allocation with other
+# Firstmate homes sharing the same Herdr session. The normal spawn path has the
+# portable lock helpers loaded; the fallback keeps direct backend callers and
+# tests isolated without making the backend source another state-mutating
+# library.
+fm_backend_herdr_agent_name_lock_acquire() {  # <session> <workspace>
+  local session=$1 workspace_id=$2 lock_path attempt pid
+  FM_BACKEND_HERDR_AGENT_NAME_LOCK=
+  FM_BACKEND_HERDR_AGENT_NAME_LOCK_HELD=0
+  lock_path=$(fm_backend_herdr_agent_name_lock_path "$session" "$workspace_id") || return 1
+  if declare -F fm_lock_try_acquire >/dev/null 2>&1; then
+    fm_lock_try_acquire "$lock_path" || return 1
+  else
+    attempt=0
+    while [ "$attempt" -lt 50 ]; do
+      if mkdir "$lock_path" 2>/dev/null; then
+        printf '%s\n' "${BASHPID:-$$}" > "$lock_path/pid" || {
+          rm -f "$lock_path/pid"
+          rmdir "$lock_path" 2>/dev/null || true
+          return 1
+        }
+        break
+      fi
+      pid=$(cat "$lock_path/pid" 2>/dev/null || true)
+      if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+        rm -f "$lock_path/pid"
+        rmdir "$lock_path" 2>/dev/null || true
+      fi
+      sleep 0.1
+      attempt=$((attempt + 1))
+    done
+    [ "$attempt" -lt 50 ] || return 1
+  fi
+  FM_BACKEND_HERDR_AGENT_NAME_LOCK=$lock_path
+  FM_BACKEND_HERDR_AGENT_NAME_LOCK_HELD=1
+}
+
+fm_backend_herdr_agent_name_lock_release() {
+  [ "${FM_BACKEND_HERDR_AGENT_NAME_LOCK_HELD:-0}" = 1 ] || return 0
+  if declare -F fm_lock_release >/dev/null 2>&1; then
+    fm_lock_release "$FM_BACKEND_HERDR_AGENT_NAME_LOCK" || true
+  else
+    rm -f "$FM_BACKEND_HERDR_AGENT_NAME_LOCK/pid"
+    rmdir "$FM_BACKEND_HERDR_AGENT_NAME_LOCK" 2>/dev/null || true
+  fi
+  FM_BACKEND_HERDR_AGENT_NAME_LOCK=
+  FM_BACKEND_HERDR_AGENT_NAME_LOCK_HELD=0
+}
+
+# fm_backend_herdr_display_fleet_name: strip the existing workspace-label
+# suffix, leaving the Fleet display name used in <Fleet>-Fleet-N.
+fm_backend_herdr_display_fleet_name() {  # <fleet-label>
+  local fleet_label=$1
+  case "$fleet_label" in
+    *-Fleet) printf '%s' "${fleet_label%-Fleet}" ;;
+    *) printf '%s' "$fleet_label" ;;
+  esac
+}
+
+# fm_backend_herdr_display_agent_prepare: choose a display name for a newly
+# created pane while preserving any name already present on that pane. The
+# caller holds the workspace allocation lock, so the pane list and metadata
+# report form one no-renumber/no-steal operation. A non-empty existing name is
+# deliberately returned as "do not set" because it may belong to another
+# owner; Firstmate never claims that identity.
+fm_backend_herdr_display_agent_prepare() {  # <session> <workspace> <pane> <fleet-name>
+  local session=$1 workspace_id=$2 pane_id=$3 fleet_name=$4
+  local list current occupied candidate number used display_prefix
+  FM_BACKEND_HERDR_DISPLAY_AGENT=
+  FM_BACKEND_HERDR_DISPLAY_AGENT_SHOULD_SET=0
+  display_prefix="$fleet_name-Fleet-"
+  list=$(fm_backend_herdr_cli "$session" pane list --workspace "$workspace_id" 2>/dev/null) || return 1
+  current=$(printf '%s' "$list" | jq -r --arg pane "$pane_id" '
+    if ((.result.panes? // null) | type) != "array" then error("missing panes")
+    else ([.result.panes[]? | select(.pane_id == $pane)] | if length == 1 then .[0].display_agent // "" else error("pane missing") end)
+    end
+  ' 2>/dev/null) || return 1
+  [ -z "$current" ] || return 0
+  occupied=$(printf '%s' "$list" | jq -r '
+    .result.panes[]?.display_agent?
+    | select(type == "string" and test("-Fleet-[1-9][0-9]*$"))
+    | capture("(?<number>[1-9][0-9]*)$").number
+  ' 2>/dev/null) || return 1
+  candidate=1
+  while :; do
+    used=0
+    while IFS= read -r number; do
+      [ "$number" = "$candidate" ] && used=1
+    done <<EOF
+$occupied
+EOF
+    [ "$used" = 0 ] && break
+    candidate=$((candidate + 1))
+  done
+  FM_BACKEND_HERDR_DISPLAY_AGENT="${display_prefix}${candidate}"
+  FM_BACKEND_HERDR_DISPLAY_AGENT_SHOULD_SET=1
+}
+
 # fm_backend_herdr_report_metadata: best-effort, display-only Firstmate
 # labeling for a newly created task pane and workspace. It reads the API schema
 # once, capability-gates pane and workspace reports independently, and swallows
 # every probe or report failure so task creation remains authoritative. Pane
-# metadata sets only a title and the fm_task/fm_project/fm_harness tokens.
-# Workspace metadata sets the existing captain-facing fleet/what tokens. It
-# never passes --agent, --display-agent, a clear flag, or an agent-authority
-# command, so an existing Herdr agent name and lifecycle owner remain untouched.
+# metadata sets a title, the Fleet-prefixed display_agent name, and the
+# fm_task/fm_project/fm_harness tokens. Workspace metadata sets the existing
+# captain-facing fleet/what tokens. It never passes --agent, a clear flag, or an
+# agent-authority command, so an existing Herdr agent name and lifecycle owner
+# remain untouched.
 fm_backend_herdr_report_metadata() {  # <session> <workspace> <pane> <task-id> <project-key> <harness> <fleet-label>
   local session=${1:-} workspace_id=${2:-} pane_id=${3:-} task_id=${4:-}
-  local project_key=${5:-} harness=${6:-} fleet_label=${7:-} schema description
+  local project_key=${5:-} harness=${6:-} fleet_label=${7:-} schema description display_fleet
   local pane_args workspace_args
   [ -n "$session" ] && [ -n "$workspace_id" ] && [ -n "$pane_id" ] && [ -n "$task_id" ] || return 0
   fm_backend_herdr_tool_check >/dev/null 2>&1 || return 0
   schema=$(fm_backend_herdr_cli "$session" api schema --json 2>/dev/null) || return 0
   description=$(fm_backend_herdr_task_description "$task_id" "$harness")
+  display_fleet=$(fm_backend_herdr_display_fleet_name "$fleet_label")
 
   if fm_backend_herdr_metadata_capable "$schema" pane.report_metadata; then
     pane_args=(pane report-metadata "$pane_id" --source firstmate --title "$description")
     pane_args+=(--token "fm_task=$task_id")
     [ -z "$project_key" ] || pane_args+=(--token "fm_project=$project_key")
     [ -z "$harness" ] || pane_args+=(--token "fm_harness=$harness")
-    fm_backend_herdr_cli "$session" "${pane_args[@]}" >/dev/null 2>&1 || true
+    if fm_backend_herdr_agent_name_lock_acquire "$session" "$workspace_id"; then
+      if [ -n "$display_fleet" ] && fm_backend_herdr_display_agent_prepare "$session" "$workspace_id" "$pane_id" "$display_fleet"; then
+        if [ "${FM_BACKEND_HERDR_DISPLAY_AGENT_SHOULD_SET:-0}" = 1 ]; then
+          pane_args+=(--display-agent "$FM_BACKEND_HERDR_DISPLAY_AGENT")
+        fi
+      fi
+      fm_backend_herdr_cli "$session" "${pane_args[@]}" >/dev/null 2>&1 || true
+      fm_backend_herdr_agent_name_lock_release
+    else
+      fm_backend_herdr_cli "$session" "${pane_args[@]}" >/dev/null 2>&1 || true
+    fi
   fi
 
   if fm_backend_herdr_metadata_capable "$schema" workspace.report_metadata; then
