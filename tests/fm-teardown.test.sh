@@ -55,8 +55,9 @@
 # Pooled-worktree ownership:
 #   (z) task A meta + recycled task B marker -> REFUSE without touching B
 #   (aa) missing pre-marker ownership claim  -> REFUSE, including under --force
-#   (ab) same task id under a new lease      -> REFUSE
-#   (ac) unreadable ownership claim          -> REFUSE
+#   (ab) pre-marker meta + vanished project  -> REFUSE without touching worktree
+#   (ac) same task id under a new lease      -> REFUSE
+#   (ad) unreadable ownership claim          -> REFUSE
 set -u
 
 # shellcheck source=tests/lib.sh disable=SC1091
@@ -1495,6 +1496,90 @@ test_missing_worktree_owner_refuses_including_force() {
   pass "missing pre-change ownership markers refuse cleanup, including under --force"
 }
 
+test_pre_marker_meta_with_missing_project_refuses_without_touching_worktree() {
+  local case_dir rc stale_project wt_branch wt_head wt_status treehouse_called tmux_called
+  case_dir=$(make_case pre-marker-missing-project)
+  write_meta "$case_dir" local-only ship
+
+  # This reproduces checkpoint-incomplete-omp-plan-c3: its pre-marker metadata
+  # names /Users/ed/Developer/Firstmate after that project path vanished, while
+  # its recorded pooled worktree still exists at the original lease path.
+  stale_project="$case_dir/Developer/Firstmate"
+  sed -i.bak "s|^project=.*|project=$stale_project|" "$case_dir/state/task-x1.meta"
+  sed -i.bak '/^worktree_owner_token=/d' "$case_dir/state/task-x1.meta"
+  rm -f "$case_dir/state/task-x1.meta.bak" "$case_dir/wt/.fm-worktree-owner"
+  [ ! -e "$stale_project" ] \
+    || fail "pre-marker-missing-project: stale project path unexpectedly exists"
+  [ -d "$case_dir/wt" ] \
+    || fail "pre-marker-missing-project: recorded pooled worktree does not exist"
+
+  wt_branch=$(git -C "$case_dir/wt" rev-parse --abbrev-ref HEAD)
+  wt_head=$(git -C "$case_dir/wt" rev-parse HEAD)
+  wt_status=$(git -C "$case_dir/wt" status --porcelain)
+  treehouse_called="$case_dir/treehouse-called"
+  tmux_called="$case_dir/tmux-called"
+  cat > "$case_dir/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+: > "${FM_TREEHOUSE_CALLED:?}"
+exit 0
+SH
+  cat > "$case_dir/fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+: > "${FM_TMUX_CALLED:?}"
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/treehouse" "$case_dir/fakebin/tmux"
+
+  set +e
+  FM_TREEHOUSE_CALLED="$treehouse_called" FM_TMUX_CALLED="$tmux_called" \
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "pre-marker-missing-project: teardown must refuse before using a vanished project path"
+  assert_grep "no Treehouse ownership token" "$case_dir/stderr" \
+    "pre-marker-missing-project: refusal did not exercise the pre-marker ownership branch"
+  assert_not_contains "$(cat "$case_dir/stderr")" "cannot determine default branch" \
+    "pre-marker-missing-project: teardown reached project-path-dependent safety checks"
+  assert_present "$case_dir/state/task-x1.meta" \
+    "pre-marker-missing-project: refusal removed stale metadata"
+  assert_absent "$treehouse_called" \
+    "pre-marker-missing-project: treehouse return touched the pooled worktree"
+  assert_absent "$tmux_called" \
+    "pre-marker-missing-project: endpoint cleanup ran after ownership refusal"
+  [ "$(git -C "$case_dir/wt" rev-parse --abbrev-ref HEAD)" = "$wt_branch" ] \
+    || fail "pre-marker-missing-project: worktree branch changed"
+  [ "$(git -C "$case_dir/wt" rev-parse HEAD)" = "$wt_head" ] \
+    || fail "pre-marker-missing-project: worktree HEAD changed"
+  [ "$(git -C "$case_dir/wt" status --porcelain)" = "$wt_status" ] \
+    || fail "pre-marker-missing-project: worktree contents changed"
+
+  set +e
+  FM_TREEHOUSE_CALLED="$treehouse_called" FM_TMUX_CALLED="$tmux_called" \
+    run_teardown "$case_dir" --force > "$case_dir/force-stdout" 2> "$case_dir/force-stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "pre-marker-missing-project: --force must not bypass pre-marker ownership"
+  assert_grep "--force cannot bypass ownership" "$case_dir/force-stderr" \
+    "pre-marker-missing-project: forced refusal did not explain the ownership boundary"
+  assert_not_contains "$(cat "$case_dir/force-stderr")" "cannot determine default branch" \
+    "pre-marker-missing-project: forced teardown reached the vanished project path"
+  assert_present "$case_dir/state/task-x1.meta" \
+    "pre-marker-missing-project: forced refusal removed stale metadata"
+  assert_absent "$treehouse_called" \
+    "pre-marker-missing-project: --force called treehouse return"
+  assert_absent "$tmux_called" \
+    "pre-marker-missing-project: --force killed the recorded endpoint"
+  [ "$(git -C "$case_dir/wt" rev-parse --abbrev-ref HEAD)" = "$wt_branch" ] \
+    || fail "pre-marker-missing-project: --force changed the worktree branch"
+  [ "$(git -C "$case_dir/wt" rev-parse HEAD)" = "$wt_head" ] \
+    || fail "pre-marker-missing-project: --force changed worktree HEAD"
+  [ "$(git -C "$case_dir/wt" status --porcelain)" = "$wt_status" ] \
+    || fail "pre-marker-missing-project: --force changed worktree contents"
+  pass "pre-marker metadata with a vanished project path preserves its pooled worktree, including under --force"
+}
+
 test_recycled_same_task_id_with_new_token_refuses() {
   local case_dir rc
   case_dir=$(make_case recycled-same-task-id)
@@ -1689,6 +1774,7 @@ test_no_mistakes_origin_remote_allows
 test_no_mistakes_truly_unpushed_refuses
 test_recycled_worktree_owner_mismatch_refuses_without_touching_live_task
 test_missing_worktree_owner_refuses_including_force
+test_pre_marker_meta_with_missing_project_refuses_without_touching_worktree
 test_recycled_same_task_id_with_new_token_refuses
 test_unreadable_worktree_owner_refuses
 test_local_only_force_overrides_unpushed
