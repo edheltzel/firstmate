@@ -1,9 +1,10 @@
 ---
 name: status-report
 description: >-
-  Return a concise current Capt’s Debrief for /status-report, status, status report,
-  or a standalone general request for report, using the deterministic local fleet
-  and Tasks Axi snapshot by default and live GitHub status only when explicitly requested.
+  Return a concise current Capt’s Debrief for /status-report, its /sr shortcut,
+  status, status report, or a standalone general request for report, using the
+  deterministic local fleet and Tasks Axi snapshot by default and live GitHub
+  status only when explicitly requested.
 user-invocable: true
 metadata:
   internal: true
@@ -11,7 +12,7 @@ metadata:
 
 # status-report
 
-Use this skill for `/status-report`, `status`, `status report`, or a standalone or general request for `report`.
+Use this skill for `/status-report`, its `/sr` shortcut, `status`, `status report`, or a standalone or general request for `report`.
 Do not trigger for a report about a named subject, artifact, file, PR, issue, or other specific object.
 Those requests belong to the ordinary subject-specific response.
 

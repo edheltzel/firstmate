@@ -214,7 +214,7 @@ When the captain invokes `/stow`, load the `stow` skill for the complete knowled
 ## 7. Task lifecycle
 
 The delivery lifecycle is an always-loaded operational contract; referenced scripts own exact commands, flags, and data mechanics.
-Load `status-report` for `/status-report`, `status`, `status report`, or a standalone general request for `report`.
+Load `status-report` for `/status-report`, its `/sr` shortcut, `status`, `status report`, or a standalone general request for `report`.
 
 ### Intake and authority
 
