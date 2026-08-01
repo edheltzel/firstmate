@@ -143,17 +143,32 @@ fm_backend_tmux_current_command() {  # <target>
 # AGENTS.md's session-start guarantee closes). See docs/tmux-backend.md
 # "Agent liveness probe" for the empirical basis. Prints one of:
 #   alive   - the foreground command is one of the verified harness binaries
-#             (claude, codex, opencode, grok - each confirmed to run as its
-#             own process name, never wrapped by a generic interpreter).
+#             (claude, codex, opencode, grok), or OMP's exact Bun foreground
+#             process shape is confirmed through the pane shell's tpgid.
 #   dead    - the foreground command is a bare shell: nothing is running in
 #             the pane, so a prior agent process has exited.
-#   unknown - anything else, INCLUDING a bare "node"/"python" interpreter
-#             name (pi's own launcher execs into a generic "node" process
-#             with no reliable way to attribute it back to pi from outside
-#             the pane - docs/tmux-backend.md "Known gaps"), or an unreadable
-#             pane. Callers must never treat unknown as a confirmed-dead
-#             signal (bin/fm-bootstrap.sh's secondmate-liveness sweep gates a
+#   unknown - anything else, INCLUDING an unattributed bare interpreter
+#             (Pi's own launcher is generic "node", and an unrelated or
+#             unreadable Bun process is not OMP), or an unreadable pane.
+#             Callers must never treat unknown as a confirmed-dead signal (bin/fm-bootstrap.sh's secondmate-liveness sweep gates a
 #             respawn on `dead` only).
+# OMP 17.2.2 keeps `bun` as tmux's pane_current_command. A real supervised
+# launch showed the pane shell pid's tpgid pointing at `bun bun /.../omp ...`.
+# Read that exact foreground group and match only its leading executable args;
+# never classify an arbitrary Bun process from a later prompt argument.
+fm_backend_tmux_omp_foreground_alive() {  # <target>
+  local target=$1 pane_pid tpgid args
+  pane_pid=$(tmux display-message -p -t "$target" '#{pane_pid}' 2>/dev/null) || return 1
+  case "$pane_pid" in ''|*[!0-9]*) return 1 ;; esac
+  tpgid=$(ps -o tpgid= -p "$pane_pid" 2>/dev/null | tr -d '[:space:]')
+  case "$tpgid" in ''|*[!0-9]*|0) return 1 ;; esac
+  args=$(ps -o args= -p "$tpgid" 2>/dev/null) || return 1
+  case "$args" in
+    bun\ bun\ */omp|bun\ bun\ */omp\ *|bun\ */omp|bun\ */omp\ *) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 fm_backend_tmux_agent_alive() {  # <target>
   local target=$1 comm
   comm=$(fm_backend_tmux_current_command "$target") || { printf 'unknown'; return 0; }
@@ -161,6 +176,7 @@ fm_backend_tmux_agent_alive() {  # <target>
   case "$comm" in
     '') printf 'unknown' ;;
     *claude*|*codex*|*opencode*|*grok*) printf 'alive' ;;
+    bun) if fm_backend_tmux_omp_foreground_alive "$target"; then printf 'alive'; else printf 'unknown'; fi ;;
     zsh|bash|sh|dash|ash|ksh|mksh|tcsh|csh|fish) printf 'dead' ;;
     *) printf 'unknown' ;;
   esac

@@ -107,5 +107,5 @@ The underlying Claude SessionStart stdout injection and Pi `session_start` event
 
 `tests/fm-sessionstart-nudge.test.sh` proves wrapper silence for both gate signals, an unmarked linked worktree, a missing state directory, and an already-owned lock.
 It proves exact one-line output for a plain primary and a marked linked secondmate primary.
-It also verifies tracked wrapper registration for Claude, Codex, OpenCode, Pi, and Grok.
+It also verifies tracked wrapper registration for Claude, Codex, OpenCode, Pi, Grok, and OMP through OMP's explicit Pi-compatible extension path.
 `tests/fm-turnend-guard.test.sh` continues to cover the same shared primary scope through the turn-end path.

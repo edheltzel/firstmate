@@ -72,7 +72,7 @@
 #   profile consultation. A --secondmate spawn is exempt and resolves the SECONDMATE
 #   harness (config/secondmate-harness -> config/crew-harness -> own), so the
 #   secondmate-vs-crewmate split is DURABLE across every respawn (recovery,
-#   /updatefirstmate, restart). A bare adapter name (claude|codex|opencode|pi|grok)
+#   /updatefirstmate, restart). A bare adapter name (claude|codex|opencode|pi|grok|omp)
 #   overrides it for this spawn (either kind). A non-flag string containing
 #   whitespace is treated as a RAW launch command - the escape hatch for verifying
 #   new adapters.
@@ -115,10 +115,12 @@
 #     __BRIEF__    absolute path to data/<task-id>/brief.md
 #     __TURNEND__  absolute path to state/<task-id>.turn-ended (for harnesses whose
 #                  turn-end signal rides the launch command, e.g. codex -c notify=[...])
-#     __PIEXT__    absolute path to state/<task-id>.pi-ext.ts (pi turn-end extension,
-#                  written by this script; outside the worktree to avoid pi's trust gate)
-#     __PITURNEND__ absolute path to .pi/extensions/fm-primary-turnend-guard.ts in a pi secondmate home
-#     __PIWATCH__   absolute path to .pi/extensions/fm-primary-pi-watch.ts in a pi secondmate home
+#     __PIEXT__    absolute path to state/<task-id>.pi-ext.ts (Pi turn-end extension,
+#                  written by this script; outside the worktree to avoid Pi's trust gate)
+#     __OMPEXT__   absolute path to state/<task-id>.omp-ext.ts (OMP turn-end extension,
+#                  written outside the worktree to avoid project discovery and dotenv coupling)
+#     __PITURNEND__ absolute path to .pi/extensions/fm-primary-turnend-guard.ts in a Pi-compatible secondmate home
+#     __PIWATCH__   absolute path to .pi/extensions/fm-primary-pi-watch.ts in a Pi-compatible secondmate home
 # Every Treehouse-backed ship/scout spawn writes a gitignored
 # .fm-worktree-owner marker immediately after validating the allocated path and
 # before publishing metadata or launching the worker. The marker and metadata
@@ -500,7 +502,7 @@ FIRSTMATE_HOME=
 
 if [ "$KIND" = secondmate ]; then
   case "${POS[1]:-}" in
-    ''|claude|codex|opencode|pi|grok)
+    ''|claude|codex|opencode|pi|grok|omp)
       ARG3=${POS[1]:-}
       ;;
     *' '*)
@@ -551,6 +553,19 @@ launch_template() {
         printf '%s' 'pi __MODELFLAG____EFFORTFLAG__-e __PITURNEND__ -e __PIWATCH__ "$(cat __BRIEF__)"'
       else
         printf '%s' 'pi __MODELFLAG____EFFORTFLAG__-e __PIEXT__ "$(cat __BRIEF__)"'
+      fi
+      ;;
+    # OMP 17.2.2 accepts one positional prompt, uses --auto-approve for
+    # unattended tool execution, and runs as Bun without a native child env
+    # marker. OMP_AGENT=1 gives firstmate-launched descendants an unambiguous
+    # detection marker. --no-prewalk keeps the selected model/thinking profile
+    # stable. Do not pass --no-extensions: a hermetic live probe proved it still
+    # loads autoresearch while also suppressing an explicit -e worker hook.
+    omp)
+      if [ "$kind" = secondmate ]; then
+        printf '%s' 'OMP_AGENT=1 omp --auto-approve --no-prewalk __MODELFLAG____EFFORTFLAG__-e __PITURNEND__ -e __PIWATCH__ "$(cat __BRIEF__)"'
+      else
+        printf '%s' 'OMP_AGENT=1 omp --auto-approve --no-prewalk __MODELFLAG____EFFORTFLAG__-e __OMPEXT__ "$(cat __BRIEF__)"'
       fi
       ;;
     # grok (Grok Build TUI): a positional prompt starts the supervised interactive
@@ -651,7 +666,7 @@ model_flag_for_harness() {
   local harness=$1 model=$2
   [ -n "$model" ] && [ "$model" != default ] || return 0
   case "$harness" in
-    claude|codex|opencode|pi|grok)
+    claude|codex|opencode|pi|grok|omp)
       printf -- '--model %s ' "$(shell_quote "$model")"
       ;;
   esac
@@ -683,9 +698,9 @@ effort_flag_for_harness() {
         low|medium|high) printf -- '--reasoning-effort %s ' "$(shell_quote "$effort")" ;;
       esac
       ;;
-    pi)
-      # Pi 0.80.6 accepts the full shared effort vocabulary, including max, through
-      # its --thinking flag.
+    pi|omp)
+      # Pi 0.80.6 and OMP 17.2.2 accept the full shared effort vocabulary,
+      # including max, through their --thinking flag.
       case "$effort" in
         low|medium|high|xhigh|max) printf -- '--thinking %s ' "$(shell_quote "$effort")" ;;
       esac
@@ -1327,11 +1342,14 @@ export const FmTurnEnd = async ({ \$ }) => ({
 EOF
       exclude_path '.opencode/plugins/fm-turn-end.js'
       ;;
-    pi*)
-      # Written OUTSIDE the worktree: pi's project-trust gate fires on any extension
-      # loaded from inside the project (verified live), but an explicit -e path
-      # elsewhere loads without a dialog. Lives in state/, cleaned by teardown.
-      cat > "$STATE/$ID.pi-ext.ts" <<EOF
+    pi*|omp*)
+      # Written OUTSIDE the worktree: Pi's project-trust gate fires on an extension
+      # loaded from inside the project, while OMP eagerly reads project dotenv and
+      # discovery roots. An explicit -e state path avoids both couplings and loaded
+      # without a dialog in the live OMP trial. Lives in state/, cleaned by teardown.
+      ext_suffix=pi
+      [ "$HARNESS" = omp ] && ext_suffix=omp
+      cat > "$STATE/$ID.$ext_suffix-ext.ts" <<EOF
 // Firstmate turn-end signal; written by fm-spawn.
 // Use "turn_end" (fires after each turn the agent finishes), not "agent_end"
 // (fires once, only when the whole run exits): the watcher needs a signal at
@@ -1481,6 +1499,7 @@ META_WINDOW=$T
 sq_brief=$(shell_quote "$BRIEF")
 sq_turnend=$(shell_quote "$TURNEND")
 sq_piext=$(shell_quote "$STATE/$ID.pi-ext.ts")
+sq_ompext=$(shell_quote "$STATE/$ID.omp-ext.ts")
 sq_piturnend=$(shell_quote "$PROJ_ABS/.pi/extensions/fm-primary-turnend-guard.ts")
 sq_piwatch=$(shell_quote "$PROJ_ABS/.pi/extensions/fm-primary-pi-watch.ts")
 sq_git_config=
@@ -1494,6 +1513,7 @@ LAUNCH=${LAUNCH//__EFFORTFLAG__/$EFFORTFLAG}
 LAUNCH=${LAUNCH//__BRIEF__/$sq_brief}
 LAUNCH=${LAUNCH//__TURNEND__/$sq_turnend}
 LAUNCH=${LAUNCH//__PIEXT__/$sq_piext}
+LAUNCH=${LAUNCH//__OMPEXT__/$sq_ompext}
 LAUNCH=${LAUNCH//__PITURNEND__/$sq_piturnend}
 LAUNCH=${LAUNCH//__PIWATCH__/$sq_piwatch}
 # Ordinary workers share this home's task records, but never inherit selector

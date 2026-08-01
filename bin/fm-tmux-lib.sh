@@ -61,9 +61,9 @@
 . "$(dirname -- "${BASH_SOURCE[0]}")/fm-composer-lib.sh"
 
 # Busy footers per harness (mirror fm-watch.sh). claude/codex: "esc to
-# interrupt"; opencode: "esc interrupt"; pi: "Working..."; grok: "Ctrl+c:cancel"
-# (grok's mid-turn cancel hint, shown iff a turn is running - verified grok 0.2.73).
-FM_TMUX_BUSY_REGEX_DEFAULT='esc (to )?interrupt|Working\.\.\.|Ctrl\+c:cancel'
+# interrupt"; opencode: "esc interrupt"; pi: "Working..."; grok: "Ctrl+c:cancel";
+# OMP: "⟨esc⟩" (shown only while a turn or tool call is running).
+FM_TMUX_BUSY_REGEX_DEFAULT='esc (to )?interrupt|Working\.\.\.|Ctrl\+c:cancel|⟨esc⟩'
 
 # fm_tmux_strip_ghost: thin adapter over the shared, fleet-wide ghost extractor
 # fm_composer_strip_ghost (bin/fm-composer-lib.sh). It drops de-emphasised
@@ -92,9 +92,10 @@ fm_tmux_strip_ghost() { fm_composer_strip_ghost; }
 # out before classification (grok's dark box border drops with the ghost, which
 # is why the bordered flag is read from the plain row, not the ghost-stripped
 # one). Both are internal only, never surfaced. The detector strips the harness's
-# box-drawing composer borders ("│ … │", heavy "┃", or a plain ASCII "|") using
-# literal-string substitution (bash 3.2 safe, locale-independent - no \u escapes,
-# no multibyte character classes), and delegates the empty/pending/unknown
+# box-drawing composer borders ("│ … │", heavy "┃", a plain ASCII "|", or
+# OMP's exact glyphless "╰─ … ─╯" input row) using literal-string substitution.
+# This remains bash 3.2 safe and locale-independent, with no \u escapes or
+# multibyte character classes, and delegates the empty/pending/unknown
 # decision to the shared owner fm_composer_classify_content
 # (bin/fm-composer-lib.sh). The bordered flag is what lets a bordered `│ > │`
 # (claude's own idle composer) read empty while a bare, unbordered `$ ` dead-shell
@@ -110,6 +111,7 @@ fm_tmux_composer_state() {  # <target> -> empty|pending|unknown
   plain="${plain%"${plain##*[![:space:]]}"}"
   case "$plain" in
     '│'*'│'|'┃'*'┃'|'|'*'|') bordered=1 ;;
+    '╰─'*'─╯') bordered=1 ;;
   esac
   # content: from the ghost-stripped row (real typed text only).
   stripped=$(printf '%s\n' "$raw" | fm_composer_strip_ghost)
@@ -119,6 +121,7 @@ fm_tmux_composer_state() {  # <target> -> empty|pending|unknown
     '│'*'│') stripped=${stripped#│}; stripped=${stripped%│} ;;
     '┃'*'┃') stripped=${stripped#┃}; stripped=${stripped%┃} ;;
     '|'*'|') stripped=${stripped#|}; stripped=${stripped%|} ;;
+    '╰─'*'─╯') stripped=${stripped#╰─}; stripped=${stripped%─╯} ;;
   esac
   stripped="${stripped#"${stripped%%[![:space:]]*}"}"
   stripped="${stripped%"${stripped##*[![:space:]]}"}"

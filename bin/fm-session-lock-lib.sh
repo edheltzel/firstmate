@@ -7,14 +7,23 @@
 # This file is sourced by scripts and has no side effects on source.
 
 # Known harness command names; extend when a new adapter is verified.
-FM_HARNESS_RE='claude|codex|opencode|grok|^pi$|^pi-signed$'
+FM_HARNESS_RE='claude|codex|opencode|grok|^pi$|^pi-signed$|^omp$'
 
 # Match only the executable name, never the command arguments.
 fm_harness_comm_matches() {
   local comm=$1 name
   name=$(basename "$comm")
   case "$name" in
-    *claude*|*codex*|*opencode*|*grok*|pi|pi-signed) return 0 ;;
+    *claude*|*codex*|*opencode*|*grok*|omp|pi|pi-signed) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# OMP 17.2.2 runs under Bun instead of retaining `omp` as its command name.
+# Match only the leading Bun script arguments observed from a real launch.
+fm_harness_args_match_omp() {
+  case "$1" in
+    bun\ bun\ */omp|bun\ bun\ */omp\ *|bun\ */omp|bun\ */omp\ *) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -32,7 +41,11 @@ fm_harness_ancestry_pid() {
     fi
     # Bare interpreters can carry the harness name in their script path.
     case "$comm" in
-      *node*|*python*)
+      *node*|*python*|*bun*)
+        if fm_harness_args_match_omp "$args"; then
+          echo "$pid"
+          return 0
+        fi
         printf '%s' "$args" | grep -qE "$FM_HARNESS_RE" && {
           echo "$pid"
           return 0
@@ -54,9 +67,9 @@ fm_harness_pid_alive() {
     return 0
   fi
   case "$comm" in
-    *node*|*python*)
+    *node*|*python*|*bun*)
       args=$(ps -o args= -p "$pid" 2>/dev/null)
-      printf '%s' "$args" | grep -qE "$FM_HARNESS_RE"
+      fm_harness_args_match_omp "$args" || printf '%s' "$args" | grep -qE "$FM_HARNESS_RE"
       ;;
     *) return 1 ;;
   esac

@@ -589,6 +589,27 @@ test_pi_threads_model_and_max_effort() {
   pass "pi receives --model and --thinking max profile flags"
 }
 
+test_omp_threads_profile_and_installs_turnend_extension() {
+  local rec id out status launch ext
+  id=profile-omp-z8b
+  rec=$(make_spawn_case profile-omp omp "$id")
+  read_case_record "$rec"
+
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --model openai-codex/gpt-5.6-sol --effort max)
+  status=$?
+  expect_code 0 "$status" "OMP spawn with max effort should succeed"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" omp openai-codex/gpt-5.6-sol max
+  launch=$(cat "$LAUNCH_LOG")
+  assert_contains "$launch" "OMP_AGENT=1 omp --auto-approve --no-prewalk --model 'openai-codex/gpt-5.6-sol' --thinking 'max' -e" \
+    "OMP launch did not carry its marker, autonomy posture, stable profile, and requested axes"
+  assert_not_contains "$launch" "--no-extensions" "OMP launch must not suppress its explicit turn-end extension"
+  ext="$HOME_DIR/state/$id.omp-ext.ts"
+  assert_present "$ext" "OMP turn-end extension was not generated"
+  assert_grep 'pi.on("turn_end"' "$ext" "OMP extension does not listen for turn_end"
+  pass "OMP receives its verified launch posture, model/thinking flags, and turn-end extension"
+}
+
 test_batch_forwards_shared_profile_flags() {
   local rec id1 id2 out status
   id1=profile-batch-a-z9
@@ -645,6 +666,7 @@ test_grok_omits_invalid_max_reasoning_effort
 test_grok_omits_invalid_xhigh_reasoning_effort
 test_opencode_threads_model_and_ignores_effort_axis
 test_pi_threads_model_and_max_effort
+test_omp_threads_profile_and_installs_turnend_extension
 test_batch_forwards_shared_profile_flags
 test_active_dispatch_profile_does_not_block_secondmate_launch
 

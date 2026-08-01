@@ -1187,7 +1187,8 @@ fm_backend_herdr_tab_is_husk() {  # <session> <pane_id>
 # - EXACTLY the shape a dead secondmate leaves behind) both collapse to
 # `dead`; `live` (a real registered agent_status, including idle/blocked)
 # maps to `alive`; `unknown` stays `unknown` - fail-safe toward refusal,
-# exactly like the husk check itself. Callers must never treat `unknown` as a
+# exactly like the husk check itself. This native state mapping covers OMP
+# without a Bun-process exception; only the tmux backend needs that matcher. Callers must never treat `unknown` as a
 # confirmed-dead signal.
 fm_backend_herdr_agent_alive() {  # <target>
   local target=$1

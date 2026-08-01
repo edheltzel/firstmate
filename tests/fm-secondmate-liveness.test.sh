@@ -57,7 +57,12 @@ make_probe_tmux() {
 set -u
 case "\${1:-}" in
   display-message)
-    for a in "\$@"; do case "\$a" in *pane_current_command*) printf '%s\n' '$comm'; exit 0 ;; esac; done
+    for a in "\$@"; do
+      case "\$a" in
+        *pane_pid*) printf '%s\n' 100; exit 0 ;;
+        *pane_current_command*) printf '%s\n' '$comm'; exit 0 ;;
+      esac
+    done
     exit 0 ;;
 esac
 exit 0
@@ -84,6 +89,22 @@ test_tmux_agent_alive_classifies() {
   fb=$(make_probe_tmux "$TMP_ROOT/tmux-grok" grok)
   [ "$(PATH="$fb:$BASE_PATH" bash -c '. "$0/bin/fm-backend.sh"; fm_backend_source tmux; fm_backend_tmux_agent_alive sess:win' "$ROOT")" = alive ] \
     || fail "a live grok foreground process should classify as alive"
+
+  fb=$(make_probe_tmux "$TMP_ROOT/tmux-omp" bun)
+  cat > "$fb/ps" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *'tpgid='*) printf '4242\n' ;;
+  *'args='*) printf 'bun bun /Users/test/.bun/bin/omp --auto-approve prompt\n' ;;
+esac
+SH
+  chmod +x "$fb/ps"
+  [ "$(PATH="$fb:$BASE_PATH" bash -c '. "$0/bin/fm-backend.sh"; fm_backend_source tmux; fm_backend_tmux_agent_alive sess:win' "$ROOT")" = alive ] \
+    || fail "OMP's exact Bun foreground ancestry should classify as alive"
+
+  fb=$(make_probe_tmux "$TMP_ROOT/tmux-unrelated-bun" bun)
+  [ "$(PATH="$fb:$BASE_PATH" bash -c '. "$0/bin/fm-backend.sh"; fm_backend_source tmux; fm_backend_tmux_agent_alive sess:win' "$ROOT")" = unknown ] \
+    || fail "an unattributed Bun process should stay unknown, never OMP-alive"
 
   fb=$(make_probe_tmux "$TMP_ROOT/tmux-zsh" zsh)
   [ "$(PATH="$fb:$BASE_PATH" bash -c '. "$0/bin/fm-backend.sh"; fm_backend_source tmux; fm_backend_tmux_agent_alive sess:win' "$ROOT")" = dead ] \

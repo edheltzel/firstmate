@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Detect the agent harness this process tree runs on.
-# Usage: fm-harness.sh                  print own harness: claude|codex|opencode|pi|grok|unknown
+# Usage: fm-harness.sh                  print own harness: claude|codex|opencode|pi|grok|omp|unknown
 #        fm-harness.sh crew             print the effective CREWMATE harness
 #                                        (config/crew-harness; "default" resolves to own)
 #        fm-harness.sh secondmate       print the harness the PRIMARY uses to launch
@@ -35,6 +35,10 @@ detect_own() {
   # It does NOT set CLAUDECODE despite being Claude-Code-compatible, so this marker
   # is unambiguous when firstmate runs natively on grok.
   [ "${GROK_AGENT:-}" = "1" ] && { echo grok; return; }
+  # OMP 17.2.2 does not inject a native child marker. fm-spawn prefixes every
+  # verified OMP launch with OMP_AGENT=1, while a primary plain `omp` falls back
+  # to the exact Bun ancestry match below.
+  [ "${OMP_AGENT:-}" = "1" ] && { echo omp; return; }
   # Layer 2: walk the parent chain and match the command name.
   local pid=$$ comm args
   for _ in 1 2 3 4 5 6 7 8; do
@@ -44,11 +48,16 @@ detect_own() {
       *codex*) echo codex; return ;;
       *opencode*) echo opencode; return ;;
       *grok*) echo grok; return ;;
+      omp) echo omp; return ;;
       pi) echo pi; return ;;
-      node*|python*)
-        # Bare interpreter: match the harness name in its script path.
+      node*|python*|bun*)
+        # Bare interpreter: match the harness executable in its script path.
+        # OMP 17.2.2 runs as `bun bun /absolute/path/omp ...`; keep that match
+        # anchored to the leading executable arguments so an unrelated Bun
+        # process whose later prompt text mentions OMP cannot be misclassified.
         args=$(ps -o args= -p "$pid" 2>/dev/null)
         case "$args" in
+          bun\ bun\ */omp|bun\ bun\ */omp\ *|bun\ */omp|bun\ */omp\ *) echo omp; return ;;
           *claude*) echo claude; return ;;
           *codex*) echo codex; return ;;
           *opencode*) echo opencode; return ;;

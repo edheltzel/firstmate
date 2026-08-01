@@ -111,7 +111,7 @@ Verified the same session: a persisting parent process running a child command (
 
 The classifier (`fm_backend_tmux_agent_alive`) maps the observed name to `alive`, `dead`, or `unknown`:
 
-- `alive` - the name contains `claude`, `codex`, `opencode`, or `grok`. All four were confirmed to run as their own literal process name (`ps -ef`, 2026-07-07): `claude` and `codex` and `opencode` are each a native compiled binary (`file` reports Mach-O), so their `comm` is their own binary name with no interpreter wrapper to hide behind.
+- `alive` - the name contains `claude`, `codex`, `opencode`, or `grok`, or a `bun` pane resolves through the pane shell's foreground tpgid to the exact leading arguments `bun bun /.../omp ...`. The four literal-name harnesses were confirmed with `ps -ef` on 2026-07-07. OMP's tpgid and arguments were confirmed with a real supervised OMP 17.2.2 launch on 2026-08-01; unrelated Bun processes remain `unknown`.
 - `dead` - the name is a bare shell (`zsh`, `bash`, `sh`, `dash`, `ash`, `ksh`, `mksh`, `tcsh`, `csh`, `fish`).
 - `unknown` - anything else, including an unreadable pane.
 

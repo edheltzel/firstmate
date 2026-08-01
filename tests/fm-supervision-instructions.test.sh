@@ -133,6 +133,22 @@ test_pi_snippet_uses_effective_extension_path() {
   pass "pi supervision snippet renders the effective extension path"
 }
 
+test_omp_snippet_uses_effective_extension_path() {
+  local home out turnend watch
+  home="$TMP_ROOT/omp-home"
+  turnend="$ROOT/.pi/extensions/fm-primary-turnend-guard.ts"
+  watch="$ROOT/.pi/extensions/fm-primary-pi-watch.ts"
+  mkdir -p "$home/state" "$home/config"
+  out=$(FM_HOME="$home" "$RENDER" --harness omp)
+  assert_contains "$out" "primary harness: omp" "OMP heading missing"
+  assert_contains "$out" "Mode: OMP extension background wake." "OMP snippet missing extension mode"
+  assert_contains "$out" "-e $turnend -e $watch" "OMP snippet did not render both extension paths"
+  assert_contains "$out" "OMP extension already owns watcher continuity" "OMP ordinary wake lost extension ownership"
+  out=$(FM_HOME="$home" "$RENDER" --harness omp --repair-line)
+  assert_contains "$out" "OMP extension tool fm_watch_arm_pi" "OMP repair line lost the extension tool"
+  pass "OMP supervision renders its Pi-compatible extension protocol"
+}
+
 test_selected_harness_block_only
 test_unknown_fallback
 test_conditional_stanzas
@@ -141,3 +157,5 @@ test_ordinary_wake_lines_are_distinct_from_repair
 test_grok_is_background_notify
 test_grok_command_sources_effective_config
 test_pi_snippet_uses_effective_extension_path
+
+test_omp_snippet_uses_effective_extension_path

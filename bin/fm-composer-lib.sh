@@ -17,8 +17,10 @@
 # THE SAFETY RULE this owner enforces: a bare shell prompt glyph is a genuine
 # empty agent composer ONLY when it appears INSIDE a real agent-composer
 # container - a bordered composer box, where the harness draws its own prompt
-# glyph (e.g. claude's older `| > ... |`). On a bare, unstructured row it is a
-# dead-shell prompt and is NEVER "empty"; it classifies as `unknown` (not a safe
+# glyph (e.g. claude's older `| > ... |`). OMP has no prompt glyph or ghost
+# placeholder: its live input row is the exact rounded `╰─ ... ─╯` container,
+# which adapters strip and pass here with `<bordered>=1`. On a bare, unstructured
+# row a shell glyph is NEVER "empty"; it classifies as `unknown` (not a safe
 # injection target). The AGENT prompt glyphs `❯` (claude) and `›` (codex) are a
 # genuine empty agent composer either way, bordered or bare.
 #

@@ -1,6 +1,6 @@
 ---
 name: harness-adapters
-description: Agent-only reference for firstmate harness operations. Use before spawning or recovering a crewmate or secondmate, handling a trust dialog, sending a harness-specific skill invocation, interrupting or exiting an agent, resuming an exited agent, or verifying a new harness adapter. Contains verified facts for claude, codex, opencode, pi, and grok.
+description: Agent-only reference for firstmate harness operations. Use before spawning or recovering a crewmate or secondmate, handling a trust dialog, sending a harness-specific skill invocation, interrupting or exiting an agent, resuming an exited agent, or verifying a new harness adapter. Contains verified facts for claude, codex, opencode, pi, grok, and omp.
 user-invocable: false
 metadata:
   internal: true
@@ -52,7 +52,7 @@ Use that value for interrupt, exit, resume, and skill-invocation facts.
 
 Every verified primary harness has an empirically validated hook path for the "no turn ends blind" guard.
 `claude` and `codex` block directly through Stop hooks that preserve exit status 2 and stderr from `bin/fm-turnend-guard.sh`.
-`opencode`, `pi`, and `grok` expose passive lifecycle callbacks for this purpose, so their tracked primary adapters force one bounded follow-up or resume when the shared predicate blocks.
+`opencode`, `pi`, `grok`, and `omp` expose passive lifecycle callbacks for this purpose, so their tracked primary adapters force one bounded follow-up or resume when the shared predicate blocks.
 The exact hook files, commands, validation transcripts, scoping rules, and fail-open tradeoffs are owned by `docs/turnend-guard.md`.
 When changing any primary turn-end hook, validate the real harness behavior in a scratch project or throwaway home before trusting it, then update that doc and the relevant concise fact below.
 
@@ -60,7 +60,7 @@ When changing any primary turn-end hook, validate the real harness behavior in a
 
 Every verified primary harness also has a wired PreToolUse-equivalent hook that denies a watcher-arm anti-pattern (shell `&`, truncating pipe, bundling, broad `pkill -f fm-watch`) before it runs.
 `claude` and `codex` block directly through PreToolUse hooks; `grok` blocks the same way but requires every `$VAR` reference in its hook `command` string to carry an inline `:-default` or it fails to launch the hook entirely.
-`opencode` and `pi` block by throwing from `tool.execute.before` / returning `{block: true}` from `tool_call`.
+`opencode` blocks by throwing from `tool.execute.before`, while `pi` and the Pi-compatible OMP adapter return `{block: true}` from `tool_call`.
 The exact hook files, commands, output-shaping quirks (Claude Code only honors the deny when stdout is empty), and validation transcripts are owned by `docs/arm-pretool-check.md`.
 When changing any primary PreToolUse hook, validate the real harness behavior in a scratch project before trusting it, then update that doc.
 
@@ -74,6 +74,7 @@ Full mechanics, scoping, dated commands, payloads, and fail-open evidence live i
 - `codex`: verified on 0.144.4; `.codex/hooks.json` receives `source=startup`, and wrapper stdout reaches model context.
 - `opencode`: verified on 1.17.18; `session.created` plus `client.session.promptAsync` starts the nudge turn in the TUI, while `opencode run` remains fail-open headless.
 - `pi`: verified native `session_start`; the existing primary extension handles `startup`, `new`, and `resume` and uses `pi.sendMessage` to inject context without racing a positional launch prompt.
+- `omp`: uses the same tracked Pi-compatible extension through an explicit `-e` launch path; OMP's eager discovery and dotenv behavior make the explicit path the stable operational form.
 - `grok`: the 0.2.103 project `SessionStart` event fires with `source=new`, but stdout does not reach model context; the tracked project hook remains fail-open, and a global token-guarded fallback requires a captain decision.
 
 ## Primary watcher supervision
@@ -84,6 +85,7 @@ Claude and Grok use tracked background-notify cycles around `bin/fm-watch-arm.sh
 Codex uses bounded foreground checkpoints through `bin/fm-watch-checkpoint.sh` because Codex cannot reason while a foreground tool call is running.
 OpenCode uses `.opencode/plugins/fm-primary-watch-arm.js`, which coordinates with the turn-end guard plugin and wakes the TUI with `client.session.promptAsync`.
 Pi uses the tracked `.pi/extensions/fm-primary-turnend-guard.ts` plus the tracked `.pi/extensions/fm-primary-pi-watch.ts`, both project-local extensions Pi auto-discovers once trusted.
+OMP uses those Pi-compatible extensions through explicit `-e` paths, and `docs/supervision-protocols/omp.md` owns its primary wake instructions.
 When changing any primary watcher adapter, update `docs/supervision-protocols/`, `docs/turnend-guard.md` if a shared idle or turn-end hook changed, and the relevant concise fact below.
 
 ## Launch profile axes
@@ -107,6 +109,7 @@ The supported launch-profile flags below are verified locally; each row records 
 | codex | `--model <model>` | `-c 'model_reasoning_effort="<low\|medium\|high\|xhigh>"'` | Verified on codex-cli 0.142.1. The installed binary schema contains `model_reasoning_effort`, the active config uses it, and the bundled model catalog advertises only low/medium/high/xhigh. `max` is omitted. |
 | grok | `--model <model>` | `--reasoning-effort <low\|medium\|high>` | Verified on grok 0.2.99 (2026-07-13). `--effort` is an alias, but firstmate's profile axis is reasoning effort. As of 0.2.99 the ceiling is `high`; both `xhigh` and `max` are rejected with `use one of: high, medium, low`, so firstmate omits them. |
 | pi | `--model <model>` | `--thinking <low\|medium\|high\|xhigh\|max>` | Verified 2026-07-13 on Pi 0.80.6. `pi --help` advertises `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`; `pi --print --model openai-codex/gpt-5.6-sol --thinking max 'Reply with exactly OK.'` completed successfully. |
+| omp | `--model <model>` | `--thinking <low\|medium\|high\|xhigh\|max>` | Verified 2026-08-01 on OMP 17.2.2. `omp --help` advertises `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and `auto`; the supervised launch completed with `--thinking low`, and the deterministic launch test covers `max`. |
 | opencode | `--model <provider/model>` | none for firstmate's interactive launch | Verified on opencode 1.17.6. `opencode run` has `--variant`, but firstmate launches the interactive `opencode --prompt` path, which has no verified effort flag. |
 
 When a requested effort value is outside the harness-specific accepted set, `fm-spawn` records the requested `effort=` in meta but emits no effort flag for that harness.
@@ -121,6 +124,7 @@ Natural language is acceptable if uncertain.
 - codex: `$<skill>`, for example `$no-mistakes`; `/<skill>` is claude-only and codex rejects it as "Unrecognized command".
 - opencode: no separate verified skill invocation beyond normal slash-command behavior; use natural language if the exact skill command is uncertain.
 - pi: no separate verified skill invocation beyond normal command behavior; use natural language if the exact skill command is uncertain.
+- omp: no separate verified skill invocation beyond normal slash-command behavior; use natural language if the exact skill command is uncertain.
 - grok: `/<skill>`, for example `/no-mistakes` (same form as claude). Verified end to end: grok discovers the user-level `no-mistakes` skill, `/no-mistakes` invokes it, and grok drives a real `no-mistakes axi run`. Like codex's `$`/`/` popups, typing `/<skill>` opens grok's slash-autocomplete, so a too-fast Enter selects the popup entry instead of sending, and for an argument-taking command (like `/no-mistakes`'s optional task-first argument) that first Enter only expands the popup selection into an argument-hint placeholder rather than submitting - a genuine second Enter is required (see the grok section below for the 2026-07-03 incident and fix). `fm_tmux_submit_core`'s retried Enter (used by `fm-send` on the tmux backend) already handles this correctly by reading the cursor row; the herdr backend needed a dedicated fix (`fm_backend_herdr_composer_state`, docs/herdr-backend.md) because its prior delta-based verification false-positived on that same popup-close content change.
 
 ## claude (VERIFIED)
@@ -248,6 +252,51 @@ Pi's primary watcher protocol also requires the tracked `.pi/extensions/fm-prima
 The model arms through `fm_watch_arm_pi`, never a foreground bash arm; the watcher tool result and clean-exit fallback are owned by `docs/supervision-protocols/pi.md`.
 `bin/fm-session-start.sh` reports when the live Pi session has not loaded both the turn-end guard and watcher extensions, and points at plain `pi` after project trust as the fix, with `-e` as a trust-free fallback.
 When a secondmate is launched on Pi, `fm-spawn.sh --secondmate` launches Pi with both `-e .pi/extensions/fm-primary-turnend-guard.ts` and `-e .pi/extensions/fm-primary-pi-watch.ts`, both already present in the secondmate home's git worktree.
+
+
+## omp (VERIFIED 2026-08-01, OMP 17.2.2)
+
+OMP (`omp`) is the Oh My Pi interactive coding harness.
+Launch a supervised worker with one positional prompt: `OMP_AGENT=1 omp --auto-approve --no-prewalk -e <state-extension> "$(cat <brief>)"`.
+For OMP's model and thinking flags, see the [launch-profile-axes table](#launch-profile-axes).
+
+| Fact | Value |
+| --- | --- |
+| Busy-pane signature | `⟨esc⟩`, shown after `Working…` or a tool status only while the turn is active. |
+| Exit command | `/exit`; it prints `Resume this session with omp --resume <session-id>` and returns to the pane shell. |
+| Interrupt | Single Escape; the live `sleep 60` tool changed to `[Command cancelled]` and returned to the idle composer. |
+| Autonomy | `--auto-approve`; the supervised worker ran its Bash tool without a permission prompt. |
+| Positional prompt | Keep the complete brief as one quoted positional argument. The supervised task consumed the full multi-line brief and replied with the required exact token. |
+| Env marker | OMP 17.2.2 sets no native child marker. Firstmate prefixes verified launches with `OMP_AGENT=1`; a plain primary OMP session is detected from the exact `bun bun /absolute/path/omp ...` process ancestry. |
+| Resume | `omp --resume <session-id>` restores the prior transcript and context; `omp -c` / `--continue` resumes the most recent session. |
+| Composer | OMP has no prompt glyph and no ghost placeholder. Its live input row is the rounded `╰─ ... ─╯` container; an empty row classifies `empty`, and real text inside it classifies `pending`. |
+| Trust and first run | A newly allocated isolated worktree started immediately with the configured provider credentials. No project trust, permission, or first-run dialog appeared. |
+| Turn-end hook | An explicit extension outside the worktree listens for `turn_end`. One tool turn produced `session_start`, `turn_end`, `turn_end`: OMP fired once after the tool step and once after the final assistant response. |
+| Tmux liveness | Tmux reports `pane_current_command=bun`. The pane shell's foreground tpgid resolved to `bun bun /Users/ed/.bun/bin/omp ...`; only that exact leading executable shape classifies alive, while unrelated Bun remains unknown. |
+| Herdr liveness | Herdr's native `agent get` state is harness-independent: registered `working`, `idle`, `done`, or `blocked` maps to alive, `agent_not_found` maps to dead, and an unreadable state remains unknown. OMP needs no process-name exception in this backend. |
+
+**Supervised trial evidence.**
+The isolated raw-launch trial used `FM_HOME="$PWD" FM_ROOT_OVERRIDE="$PWD" bin/fm-spawn.sh omp-standard-probe-2 "$PWD" --project-key AgentThemis --backend tmux --scout --harness 'omp --auto-approve --no-prewalk --no-skills --no-rules -e <probe-extension> --thinking low "$(cat __BRIEF__)"'`.
+It reported `spawned omp-standard-probe-2 harness=omp kind=scout`, ran `env | sort; ps -axo ...; sleep 20` without approval, and ended with `OMP_SUPERVISED_OK_2`.
+During the tool call, the pane showed `Running verification probe ⟨esc⟩`; during model work it showed `Working… ⟨esc⟩`; both hints disappeared at idle.
+The interrupt probe sent `sleep 60`, then Escape, and the tool output became `[Command cancelled]`.
+The exit probe printed `Resume this session with omp --resume 019fbd4a-70d1-7000-b62d-76247608bce4`; relaunching that command restored `OMP_SUPERVISED_OK_2` and the cancelled tool turn.
+The live tmux classifier command `. bin/fm-backend.sh; fm_backend_source tmux; fm_backend_tmux_agent_alive firstmate:fm-omp-standard-probe-2` printed `alive`.
+The backend regression `tests/fm-secondmate-liveness.test.sh` printed `ok - fm_backend_tmux_agent_alive: alive/dead/unknown classification` and `ok - fm_backend_herdr_agent_alive: dead/no-agent->dead, live->alive, unknown->unknown`.
+
+**Extension quirk re-verified 2026-08-01.**
+The hermetic command `HOME=<fresh> XDG_CONFIG_HOME=<fresh> XDG_DATA_HOME=<fresh> XDG_STATE_HOME=<fresh> XDG_CACHE_HOME=<fresh> PI_CODING_AGENT_DIR= PI_CONFIG_DIR= PI_PROFILE= OMP_PROFILE=o9-isolated omp --mode rpc --no-session --no-skills --no-rules --no-extensions --cwd <fresh-project>` first printed `{"type":"ready",...}` and then `{"type":"extension_ui_request",...,"widgetKey":"autoresearch"}`.
+`--no-extensions` therefore does not suppress the bundled autoresearch extension, but it did suppress the explicit trial `-e` hook when both flags were combined.
+Firstmate never uses `--no-extensions` in the verified launch because it would remove the required turn-end signal without delivering a hermetic extension set.
+
+**Dotenv quirk re-verified 2026-08-01.**
+A fresh HOME/XDG probe placed one unique sentinel in each of `<project>/.env`, `<agent-dir>/.env`, `<config-root>/.env`, and `$HOME/.env`.
+An explicit `session_start` extension printed `from-home`, `from-config`, `from-agent`, and `from-project`, confirming that OMP eagerly loads all four locations before the worker starts.
+Operationally, every OMP spawn inherits values from those files unless the parent launch environment already owns the same key.
+Keep secrets and task-scoped control variables out of project dotenv files, use Firstmate's explicit launch prefix for `OMP_AGENT` and `FM_HOME`, and use fresh isolated HOME/XDG/profile roots for hermetic probes.
+
+OMP releases frequently, so repeat the narrow raw-launch trial, busy and composer capture, Bun ancestry read, hook marker, exit/resume probe, and hermetic `--no-extensions` probe periodically after updates.
+This is a drift check, not a version-equality gate; dispatch support depends on the observed contract remaining valid, not on retaining OMP 17.2.2.
 
 ## grok (VERIFIED 2026-06-29, grok 0.2.73; slash-submit re-verified 2026-07-03 on 0.2.82; reasoning-effort ceiling re-verified 2026-07-13 on 0.2.99; exit paths re-verified 2026-07-19 on grok 0.2.103)
 
