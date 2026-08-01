@@ -49,9 +49,6 @@
 #     state so merge-ready work remains captain-awaited rather than self-progressing.
 #     This is the deterministic local reporting input; it never performs GitHub
 #     or other network discovery.
-#   omp_monitoring: read-only OMP contract projection with live Git provenance;
-#     historical O8/O9 rows and manifest-only future rows are disclosed but never
-#     counted as current progress.
 #
 # Compatibility: JSON is the primary machine-readable surface.
 # Human views must render this output instead of parsing state files again.
@@ -1253,14 +1250,6 @@ SECONDMATE_CURRENT_JSON=$(secondmate_current_json "$TASKS_JSON") \
 SECONDMATE_LANDED_JSON=$(secondmate_landed_from_current_json "$SECONDMATE_CURRENT_JSON") \
   || { echo "fm-fleet-snapshot: secondmate landed projection failed" >&2; exit 1; }
 
-OMP_MONITOR_JSON=$(if [ -f "$FM_ROOT/.agents/tasks/omp-manifest.json" ] && [ -f "$BACKLOG" ]; then
-  "$SCRIPT_DIR/fm-omp-monitor-check.sh" --json --live-backlog "$BACKLOG" --repo-root "$FM_ROOT" 2>/dev/null || \
-    jq -n '{schema:"omp-monitor-check.v1",status:"BLOCK",issues:["OMP monitoring projection failed"]}'
-else
-  jq -n --arg reason "OMP manifest or live backlog is unavailable" \
-    '{schema:"omp-monitor-check.v1",status:"BLOCK",issues:[$reason]}'
-fi)
-
 jq -n \
   --arg generated "$SNAPSHOT_NOW" \
   --arg fm_home "$FM_HOME" \
@@ -1274,7 +1263,6 @@ jq -n \
   --argjson scout_reports "$SCOUT_REPORTS_JSON" \
   --argjson secondmate_current "$SECONDMATE_CURRENT_JSON" \
   --argjson secondmate_landed "$SECONDMATE_LANDED_JSON" \
-  --argjson omp_monitoring "$OMP_MONITOR_JSON" \
   --argjson project_default_branches "$PROJECT_DEFAULT_BRANCHES_JSON" \
   'def backlog_by_id($id): ($backlog.records[]? | select(.structured == true and .id == $id) | .) // null;
    def task_by_id($id): ($tasks[]? | select(.id == $id) | .) // null;
@@ -1436,7 +1424,6 @@ jq -n \
      backlog:$backlog,
      tasks:($tasks | map(. + {backlog:backlog_by_id(.id)})),
      scout_reports:($scout_reports | map(. + {kind:report_kind(.id)})),
-     omp_monitoring:$omp_monitoring,
      projects:$project_rows,
      secondmate_current:$secondmate_current,
      secondmate_landed:$secondmate_landed,

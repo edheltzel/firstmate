@@ -103,7 +103,7 @@ The design note at header `:26-28` is the interesting part: the flag must be exp
 Re-resolved on every spawn (`fm-spawn.sh:535-537`, `:561-575`), which is what makes a secondmate's pin survive recovery, `/updatefirstmate`, and restarts.
 
 **H4. Verified-harness enforcement is emergent from `launch_template`**
-`bin/fm-spawn.sh:475-514` defines launch commands for exactly five adapters - claude, codex, opencode, pi, grok - and returns 1 for anything else (`:512`). That return is the only allowlist in the system: `:546` and `:551` turn it into `exit 1`. Both messages name the escape hatch ("pass a raw launch command to use an unverified adapter").
+At the time of this scout, `bin/fm-spawn.sh:475-514` defined launch commands for claude, codex, opencode, pi, and grok, returning 1 for anything else (`:512`). That return was the only allowlist in the system: `:546` and `:551` turned it into `exit 1`. Both messages named the escape hatch ("pass a raw launch command to use an unverified adapter"). OMP was verified later; current adapter facts are owned by `.agents/skills/harness-adapters/SKILL.md`.
 
 Precision matters here. `AGENTS.md` section 4 says "If configured harness data names an unverified adapter, report it and fall back only to a verified adapter rather than launching it." The *script* refuses; it does not fall back. Reading the sentence as an instruction to the agent layer (refuse at the script, then the agent picks a verified adapter) reconciles them. The porting risk is structural rather than contradictory: because the guard is "does a template exist," adding a template for an unverified adapter deletes the guard with no separate allowlist to update.
 

@@ -21,8 +21,6 @@
 #
 # This wrapper consumes canonical status decisions plus structured captain-held
 # backlog items. It never infers decisions from report or visual-review prose.
-# OMP monitoring is projected from the canonical `omp-monitor-check.v1` snapshot
-# field; historical and manifest-only task rows remain provenance disclosures.
 #
 # The landed section merges this home's Done with the canonical snapshot's
 # secondmate_landed roll-up (fm-fleet-snapshot.sh), so merges a secondmate managed -
@@ -105,7 +103,6 @@ Default fields: schema, home, generated, prs, in_flight{id,kind,state,doing},
   decisions_open{id,key,verb,summary,owner}, landed{id,what,artifact,owner},
   gates{id,title,blocked_by,reason,owner}, reports{id,path}, recorded_prs{id,url},
   projects{id,name,priority,branch,tasks_axi,current_actions,recent_completed,decisions_open,homes},
-  omp_monitoring{schema,status,branch,commit,phase,milestone,completed,total,next_gate,blockers,needs_human,manifest_only_ids,historical_task_ids},
   unhealthy_endpoints{...} (only when non-empty), omitted{surface,reveal}.
 landed merges this home's Done with registered secondmate homes' Done, bounded by
   a per-home cap (FM_BEARINGS_LANDED_PER_HOME) and an overall cap (FM_BEARINGS_LANDED),
@@ -423,8 +420,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
       gates: (if $all_queued == 1 then $gates_all else $gates_all[:$gates_n] end),
       reports: (if $all_reports == 1 then $reports_all else $reports_all[:$reports_n] end),
       recorded_prs: (if $all_recorded_prs == 1 then $recorded_prs_all else $recorded_prs_all[:$recorded_prs_n] end),
-      projects: (if $all_projects == 1 then $projects_all else $projects_all[:$projects_n] end),
-      omp_monitoring: $snap.omp_monitoring
+      projects: (if $all_projects == 1 then $projects_all else $projects_all[:$projects_n] end)
     }
   | . + (if ($unhealthy_all | length) > 0 then
            {unhealthy_endpoints:(if $all_unhealthy == 1 then $unhealthy_all else $unhealthy_all[:$unhealthy_n] end)}

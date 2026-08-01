@@ -4,7 +4,7 @@ Scout report. Read-only pass over firstmate's no-mistakes interface. Per the ass
 
 Environment probed: `no-mistakes v1.40.3 (d873960)` at `/Users/ed/.no-mistakes/bin/no-mistakes`, symlinked from `~/.local/bin/no-mistakes`. All probes were `--help`, `--version`, and `strings` on the binary — no state change.
 
-**Note on the assignment's scope pointer:** the referenced prior report `.agents/plans/2026-07-25-heartbeat-dissection-for-themis-persona.md` does not exist on disk. `.agents/plans/` contains only `omp-harness-integration-plan.md`; a repo-wide `find` for `*heartbeat-dissection*` returns nothing. I could not read it, so I have deliberately kept my treatment of run-step precedence thin and flagged in §5 what may therefore be duplicated or missing.
+**Note on the assignment's scope pointer:** the referenced prior report `.agents/plans/2026-07-25-heartbeat-dissection-for-themis-persona.md` did not exist on disk during this scout. A repo-wide `find` for `*heartbeat-dissection*` returned nothing. I could not read it, so I deliberately kept my treatment of run-step precedence thin and flagged in §5 what may therefore be duplicated or missing.
 
 ---
 

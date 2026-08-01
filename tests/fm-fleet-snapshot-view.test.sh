@@ -134,12 +134,6 @@ test_fixture_snapshot_json() {
   fakebin=$(make_fakebin "$home")
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" "$SNAPSHOT" --json)
   printf '%s' "$out" | jq -e . >/dev/null || fail "snapshot must be valid JSON"
-  printf '%s' "$out" | jq -e '
-    .omp_monitoring.schema == "omp-monitor-check.v1"
-      and .omp_monitoring.status == "PASS"
-      and .omp_monitoring.total == 0
-      and (.omp_monitoring.manifest_only_ids | length) > 0
-  ' >/dev/null || fail "OMP monitoring projection did not exclude manifest-only future rows"
   ids=$(printf '%s' "$out" | jq -r '.tasks | map(.id) | join(",")')
   [ "$ids" = "cmux-task,scout-task,secondmate-task,ship-task" ] \
     || fail "task ordering must be stable by id, got $ids"

@@ -7,7 +7,7 @@ Reports 00-06 were not treated as evidence.
 Summary:
 
 | Claim | Verdict | One-line result |
-|---|---|---|
+| --- | --- | --- |
 | C1 keyed-decision eviction | **CONFIRMED** (and worse than reported) | Eviction is real; a second hazard sits downstream in `fm-decision-hold.sh` |
 | C2 lock-refused mode unenforced | **CONFIRMED** (count corrected) | 3 files, 4 line-sites; the three named mutators contain zero lock references |
 | C3 OMP read-only is permanent | **SPLIT: CONFIRMED it never self-clears without a code change; REFUTED that any durable artifact is involved** | No recovery path exists in-session, but there is nothing to clean up |
@@ -87,7 +87,7 @@ Every reader of the session lock `state/.lock`, after excluding `.watch.lock`, `
 `packed-refs.lock`:
 
 | File | Line | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `bin/fm-lock.sh` | 14 | defines `LOCK="$STATE/.lock"`; acquires (`:60`) or reports status (`:45-50`) |
 | `bin/fm-sessionstart-nudge.sh` | 23, 24 | suppress the session-start nudge when the lock PID is in this process's ancestry |
 | `bin/fm-session-start.sh` | 313 | Pi extension check - the lock PID doubles as a same-session identity |
@@ -185,12 +185,10 @@ Two further corrections a port should not inherit:
   An OMP-hosted session can still spawn, steer, and merge. The concrete losses are the skipped
   mutating bootstrap sweeps (`:267-271`) and a wake queue that is never drained (`:287-292`).
 
-Also worth stating plainly: `omp` is not an omitted harness, it is an unsupported one.
-`bin/fm-harness.sh:3` and `:43-56` enumerate `claude|codex|opencode|pi|grok|unknown`, and
-`AGENTS.md` section 4 names the same five as verified. `.agents/plans/omp-harness-integration-plan.md:383-384`
-is an unlanded plan that already identifies this exact site. Framing the exclusion as a defect
-misreads current design intent - though report 03 line 19 is right that shipping an OMP package makes
-it a `rebuild` rather than a `copy`.
+At the time of this validation, `omp` was unsupported rather than accidentally omitted.
+That historical state was superseded by the standard adapter verification recorded in
+`data/decisions/2026-08-01-omp-standard-integration.md`; current OMP facts are owned by
+`.agents/skills/harness-adapters/SKILL.md`.
 
 ---
 
