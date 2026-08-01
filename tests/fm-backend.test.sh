@@ -926,7 +926,7 @@ test_teardown_conformance_old_vs_new() {
 
   fm_write_meta "$state_old/$id.meta" \
     "window=firstmate:fm-$id" "worktree=$wt" "project=$proj" "harness=claude" "kind=scout" "mode=no-mistakes" "yolo=off" \
-    "decisions_reviewed=1" "decision_keys="
+    "decisions_reviewed=1" "decision_keys=" "worktree_owner_token=fmw.AAAAAAAAAAAA"
   fm_write_meta "$state_new/$id.meta" \
     "window=firstmate:fm-$id" "worktree=$wt" "project=$proj" "harness=claude" "kind=scout" "mode=no-mistakes" "yolo=off" \
     "decisions_reviewed=1" "decision_keys=" "worktree_owner_token=fmw.AAAAAAAAAAAA"
