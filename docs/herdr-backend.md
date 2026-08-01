@@ -4,7 +4,7 @@ This document records the empirical verification behind `bin/backends/herdr.sh`,
 It is the herdr equivalent of the tmux facts recorded in the `harness-adapters` skill and `docs/architecture.md`'s "Runtime session backends" section.
 
 Herdr is [an agent-native terminal multiplexer](https://herdr.dev) with a socket API, CLI wrappers, and native per-pane agent-state detection.
-Originally verified against herdr 0.7.1, protocol 14, on macOS aarch64, and the latest dated evidence below uses `0.7.5-preview.2026-07-21-0f10e1453a7f`, protocol 17.
+Originally verified against herdr 0.7.1, protocol 14, on macOS aarch64, and the latest dated evidence below uses `0.7.5-preview.2026-07-29-44b3adb12552`, protocol 18.
 Current real-herdr verification uses isolated named sessions plus the guarded `bin/fm-herdr-lab.sh` lifecycle helper, either directly or through the compatibility wrappers in `tests/herdr-test-safety.sh`.
 A 2026-07-02 cleanup bug proved that `HERDR_SESSION` alone is not a safe way to target destructive session cleanup; see "Session targeting: the `--session` flag, not `HERDR_SESSION` alone" below.
 All real-herdr verification in this document uses isolated sessions and guarded cleanup; the captain's default herdr session and live tmux fleet were never intended targets.
@@ -18,7 +18,7 @@ Firstmate only drives the `herdr` CLI as a separate process, which carries no AG
 
 Prerequisites:
 
-- `herdr` itself, protocol 14 or newer (0.7.1, 0.7.3, 0.7.4, and `0.7.5-preview.2026-07-21-0f10e1453a7f` verified) - see [herdr.dev](https://herdr.dev) for install instructions.
+- `herdr` itself, protocol 14 or newer (0.7.1, 0.7.3, 0.7.4, `0.7.5-preview.2026-07-21-0f10e1453a7f`, and `0.7.5-preview.2026-07-29-44b3adb12552` verified) - see [herdr.dev](https://herdr.dev) for install instructions.
 - `jq`, required to parse herdr's JSON output: `brew install jq` (or your platform's package manager).
 - The universal firstmate prerequisites - a verified crew harness plus the required toolchain, owned by [`docs/configuration.md`](configuration.md) ("Harness support", "Toolchain"); treehouse still provides the worktree, herdr only provides the session.
 
@@ -315,7 +315,8 @@ Normal teardown still calls only the existing exact recorded task-pane close and
 When that pane was the workspace's last pane, Herdr removes the empty tab and workspace through its existing last-pane behavior.
 Herdr 0.7.4 has a focus bug in that last-pane path: closing a non-focused projected workspace can move the session's active workspace and tab to a neighbor even though the closed workspace was not active.
 The exact reproduction moved focus from `2ndmate-bravo`'s active tab to `2ndmate-alpha` at `herdr pane close <projected-task-pane>`; workspace create, task-tab create, seeded-pane prune, and `workspace.move` all preserved both ids.
-Projected cleanup therefore runs under the same shared presentation lock, captures the exact active workspace and tab immediately before close, and uses one exact `tab focus <captured-tab-id>` to restore both after Herdr moves them.
+Herdr `0.7.5-preview.2026-07-29-44b3adb12552`, protocol 18, preserved the exact focused workspace and tab across five repetitions of the same non-focused last-pane close on 2026-08-01.
+Projected cleanup still runs under the same shared presentation lock, captures the exact active workspace and tab immediately before close, and uses one exact `tab focus <captured-tab-id>` only if Herdr moves them.
 If the projection pane belongs to the active tab, cleanup refuses the close because deleting that tab cannot preserve it exactly.
 If the lock, snapshot, or exact pane verification is ambiguous, cleanup warns, leaves the journal quarantined, and refuses the close.
 If exact-tab restoration fails after the pane close has already succeeded, cleanup warns, and the ordinary exact-pane confirmation still decides whether to retire the journal.
@@ -345,6 +346,35 @@ The user-visible compromises are intentional:
 
 The projection and its ordering follow-up make no Herdr provider/API change, no Treehouse lease or return change, no ownership registry, and no cross-home cleanup path.
 It is intentionally separate from any future Treehouse hardening work.
+
+### Provider focus behavior update (2026-08-01)
+
+The mandatory projection suite initially failed only because its assertion required the raw Herdr 0.7.4 focus steal to occur before accepting exact restoration.
+The installed `0.7.5-preview.2026-07-29-44b3adb12552`, protocol 18, no longer reproduced that provider bug.
+A guarded named-session reproduction created the Fleet, projected, and two Archon workspaces in the historical order, focused the trailing Archon tab, and closed the non-focused projection's last pane.
+Five repetitions preserved the exact workspace and tab directly:
+
+```text
+round=1 before=w7/w7:t1 after=w7/w7:t1 preserved=yes
+round=2 before=wA/wA:t1 after=wA/wA:t1 preserved=yes
+round=3 before=wD/wD:t1 after=wD/wD:t1 preserved=yes
+round=4 before=wG/wG:t1 after=wG/wG:t1 preserved=yes
+round=5 before=wK/wK:t1 after=wK/wK:t1 preserved=yes
+```
+
+The production restoration guard remains for older or future Herdr behavior, while the E2E assertion now accepts either direct focus preservation or observed drift followed by exact-tab restoration.
+The exact suite command ran twice consecutively:
+
+```sh
+HERDR_LAB_HELPER="$(pwd)/bin/fm-herdr-lab.sh" \
+  bash tests/fm-backend-herdr-presentation-e2e.test.sh
+```
+
+Both runs ended with this exact result:
+
+```text
+ok - real Herdr lab validation completed on Herdr 0.7.5-preview.2026-07-29-44b3adb12552 with the default-session tripwire intact
+```
 
 ### Isolated E2E evidence (2026-07-21)
 
