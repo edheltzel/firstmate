@@ -1,41 +1,41 @@
 {
   "schema": "omp-runtime-pin.v1",
   "version": 1,
-  "captured_at": "2026-07-28",
+  "captured_at": "2026-08-01",
   "executable": {
     "command": "omp",
     "path": "/Users/ed/.bun/bin/omp",
     "resolved_path": "/Users/ed/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js",
-    "version": "17.1.7",
-    "sha256": "dc13fb007a5ca2e63d5cbae2318e1b43acfc55fab1b97c3bd55e67edb6ef05dc"
+    "version": "17.2.2",
+    "sha256": "b910d74e72f48db8e741f32af02632066d5af638e7bdd13e05936f960e371180"
   },
   "bun_version": "1.3.14",
   "packages": [
     {
       "name": "@oh-my-pi/pi-coding-agent",
-      "version": "17.1.7",
+      "version": "17.2.2",
       "root": "/Users/ed/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent",
       "files": [
-        {"path": "package.json", "sha256": "b301ee32ee83417d34d46fc466eb8dcc83930702f19d43ac0e6349837c6125db"},
-        {"path": "dist/cli.js", "sha256": "dc13fb007a5ca2e63d5cbae2318e1b43acfc55fab1b97c3bd55e67edb6ef05dc"}
+        {"path": "package.json", "sha256": "3ad63b63d2354e6782aee8c3131457c62fde28a7a4641e155e53cb0f39a85e54"},
+        {"path": "dist/cli.js", "sha256": "b910d74e72f48db8e741f32af02632066d5af638e7bdd13e05936f960e371180"}
       ]
     },
     {
       "name": "@oh-my-pi/pi-utils",
-      "version": "17.1.7",
+      "version": "17.2.2",
       "root": "/Users/ed/.bun/install/global/node_modules/@oh-my-pi/pi-utils",
       "files": [
-        {"path": "package.json", "sha256": "215973cdb1d472da58489c8eecf514d070818b4a536e881a87b7ff43c678b2bb"},
+        {"path": "package.json", "sha256": "98e13f1e490537978e32d1e5618846a8daa3c5f62a5c7d08b3357724ab16e078"},
         {"path": "src/procmgr.ts", "sha256": "9f3be50bc702fea1ba8e9c2ba52158c4ab7e155f697fd5f3f6549f1a5b88da58"}
       ]
     }
   ],
   "source_anchors": [
-    {"id": "noext-cli-paths", "path": "/Users/ed/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/src/main.ts", "line": 1104, "needle": "const cliExtensionPaths = parsed.noExtensions ? []", "sha256": "2a21d425321b1edaf250f0a59f8d8fc316c418ee94ee53c865d87a7da3dfa152"},
-    {"id": "plugin-preload", "path": "/Users/ed/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/src/main.ts", "line": 1182, "needle": "logger.time(\"preloadPluginRoots\", preloadPluginRoots", "sha256": "2a21d425321b1edaf250f0a59f8d8fc316c418ee94ee53c865d87a7da3dfa152"},
-    {"id": "inline-autoresearch", "path": "/Users/ed/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/src/sdk.ts", "line": 1925, "needle": "inlineExtensions.push(createAutoresearchExtension);", "sha256": "00c13e1016e27d17ebf5cd8375caf8e5b8ce95f8e40a57e4723ad2fd6cb18e99"},
+    {"id": "noext-cli-paths", "path": "/Users/ed/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/src/main.ts", "line": 1113, "needle": "const cliExtensionPaths = parsed.noExtensions ? []", "sha256": "01bcbb8c0340be08a1a3f121bdfb8e0a893eb5ae344e3afc1753654e3c40d0c9"},
+    {"id": "plugin-preload", "path": "/Users/ed/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/src/main.ts", "line": 1192, "needle": "logger.time(\"preloadPluginRoots\", preloadPluginRoots", "sha256": "01bcbb8c0340be08a1a3f121bdfb8e0a893eb5ae344e3afc1753654e3c40d0c9"},
+    {"id": "inline-autoresearch", "path": "/Users/ed/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/src/sdk.ts", "line": 1961, "needle": "inlineExtensions.push(createAutoresearchExtension);", "sha256": "f7874ea7fb2421c134db727a98c7d98094ce484012fec827978026080dfac06d"},
     {"id": "plugin-root-enumeration", "path": "/Users/ed/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/src/extensibility/plugins/loader.ts", "line": 176, "needle": "export async function getEnabledPlugins(cwd: string", "sha256": "0dd444fef852217e70915cae0c70deaa0a2b7578c480a47697727c700f564859"},
-    {"id": "continuation-cap", "path": "/Users/ed/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/src/session/agent-session.ts", "line": 3113, "needle": "if (this.#sessionStopContinuationCount >= SESSION_STOP_CONTINUATION_CAP)", "sha256": "eaa74ec7b53b3e6b22f934a4ec6918c19f1b26dd7c3ee7a763dd7271296cbfd4"},
-    {"id": "child-marker-source", "path": "/Users/ed/.bun/install/global/node_modules/@oh-my-pi/pi-utils/src/procmgr.ts", "line": 38, "needle": "OMPCODE", "sha256": "9f3be50bc702fea1ba8e9c2ba52158c4ab7e155f697fd5f3f6549f1a5b88da58"}
+    {"id": "continuation-cap", "path": "/Users/ed/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/src/session/agent-session.ts", "line": 3231, "needle": "if (this.#sessionStopContinuationCount >= SESSION_STOP_CONTINUATION_CAP)", "sha256": "dbafb0476489428e48c7d94be0fb9720147286b3c3b8e0455ef6cff7818f4424"},
+    {"id": "child-marker-source", "path": "/Users/ed/.bun/install/global/node_modules/@oh-my-pi/pi-utils/src/procmgr.ts", "line": 45, "needle": "OMPCODE", "sha256": "9f3be50bc702fea1ba8e9c2ba52158c4ab7e155f697fd5f3f6549f1a5b88da58"}
   ]
 }

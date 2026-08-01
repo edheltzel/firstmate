@@ -110,23 +110,23 @@ The installed OMP executable is `/Users/ed/.bun/bin/omp`.
 
 The executable resolves to `/Users/ed/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js`.
 
-The package is `@oh-my-pi/pi-coding-agent` version `17.1.7`, bound by `.agents/tasks/omp-runtime-pin.json` immediately before activation.
+The package is `@oh-my-pi/pi-coding-agent` version `17.2.2`, bound by `.agents/tasks/omp-runtime-pin.json` immediately before activation.
 
 The observed Bun version is `1.3.14`.
 
-The package manifest SHA-256 is `b301ee32ee83417d34d46fc466eb8dcc83930702f19d43ac0e6349837c6125db`.
+The package manifest SHA-256 is `3ad63b63d2354e6782aee8c3131457c62fde28a7a4641e155e53cb0f39a85e54`.
 
-The CLI SHA-256 is `dc13fb007a5ca2e63d5cbae2318e1b43acfc55fab1b97c3bd55e67edb6ef05dc`.
+The CLI SHA-256 is `b910d74e72f48db8e741f32af02632066d5af638e7bdd13e05936f960e371180`.
 
-The installed dependency identity used for the child-marker source claim is `@oh-my-pi/pi-utils@17.1.7`.
+The installed dependency identity used for the child-marker source claim is `@oh-my-pi/pi-utils@17.2.2`.
 
-The observed `@oh-my-pi/pi-utils/package.json` SHA-256 is `215973cdb1d472da58489c8eecf514d070818b4a536e881a87b7ff43c678b2bb`.
+The observed `@oh-my-pi/pi-utils/package.json` SHA-256 is `98e13f1e490537978e32d1e5618846a8daa3c5f62a5c7d08b3357724ab16e078`.
 
 The observed `@oh-my-pi/pi-utils/src/procmgr.ts` SHA-256 is `9f3be50bc702fea1ba8e9c2ba52158c4ab7e155f697fd5f3f6549f1a5b88da58`.
 
-The installed coding-agent manifest pins `@oh-my-pi/pi-utils` to `17.1.7`.
+The installed coding-agent manifest pins `@oh-my-pi/pi-utils` to `17.2.2`.
 
-The versioned pin also binds the current no-extension flag path at `src/main.ts:1104-1110`, plugin preload and root enumeration at `src/main.ts:1182`, inline autoresearch registration at `src/sdk.ts:1925`, plugin loader at `src/extensibility/plugins/loader.ts:176`, continuation cap at `src/session/agent-session.ts:3113` with cap value `8`, child marker source at `pi-utils/src/procmgr.ts:38`, and their exact file SHA-256 values. Activation rechecks every installed package byte and source anchor immediately before publication.
+The versioned pin also binds the current no-extension flag path at `src/main.ts:1113`, plugin preload and root enumeration at `src/main.ts:1192`, inline autoresearch registration at `src/sdk.ts:1961`, plugin loader at `src/extensibility/plugins/loader.ts:176`, continuation cap at `src/session/agent-session.ts:3231` with cap value `8`, child marker source at `pi-utils/src/procmgr.ts:45`, and their exact file SHA-256 values. Activation rechecks every installed package byte and source anchor immediately before publication.
 
 The reproducible identity commands are `command -v omp`, `readlink <resolved-omp>`, `omp --version`, `bun --version`, `shasum -a 256 <coding-agent>/package.json <coding-agent>/dist/cli.js`, `node -p "require('<pi-utils>/package.json').name+'@'+require('<pi-utils>/package.json').version"`, and `shasum -a 256 <pi-utils>/package.json <pi-utils>/src/procmgr.ts`.
 
@@ -144,9 +144,9 @@ The direct probe with `--no-extensions --extension <path>` did not load the expl
 
 The direct probe with `--extension <path>` loaded the factory, notification, and session-start markers before ready.
 
-Installed source `src/main.ts:1103-1112` clears explicit extension paths when `parsed.noExtensions` is set.
+Installed source `src/main.ts:1112-1121` clears explicit extension paths when `parsed.noExtensions` is set.
 
-Installed source `src/main.ts:1187-1195` skips CLI extension-root injection when that flag is set.
+Installed source `src/main.ts:1197-1206` skips CLI extension-root injection when that flag is set.
 
 The `--no-extensions` plus explicit extension combination is therefore prohibited.
 
@@ -158,19 +158,19 @@ OMP child-shell source `@oh-my-pi/pi-utils/src/procmgr.ts:38-48` sets both `OMPC
 
 Host identity must use executable and argv ancestry rather than mixed child markers.
 
-OMP source `src/session/model-controls.ts:470-510` resolves requested thinking through model capability.
+OMP source `src/session/model-controls.ts:496-546` resolves requested thinking through model capability.
 
 The effective `get_state.thinkingLevel` can be `xhigh` when the request says `max`.
 
-OMP source `src/session/agent-session.ts:3051-3057` enforces a runtime continuation cap of eight.
+OMP source `src/session/agent-session.ts:3231-3237` enforces a runtime continuation cap of eight.
 
 Runtime cap exhaustion logs and returns a normal-looking stop unless the adapter owns a lower visible budget.
 
-OMP source `src/extensibility/extensions/runner.ts:627-667` turns handler throw, timeout, or abort into an error and undefined result.
+OMP source `src/extensibility/extensions/runner.ts:925-963` turns handler throw, timeout, or abort into an error and undefined result.
 
-OMP source `src/session/agent-session.ts:5272-5294` can suppress automatic follow-up resume after interrupt, retry, or an invalid transcript tail.
+OMP source `src/session/agent-session.ts:5496-5518` can suppress automatic follow-up resume after interrupt, retry, or an invalid transcript tail.
 
-OMP source `src/modes/rpc/rpc-mode.ts:1026-1034` acknowledges follow-up queueing rather than eventual turn start.
+OMP source `src/modes/rpc/rpc-mode.ts:1045-1047` acknowledges follow-up queueing rather than eventual turn start.
 
 Herdr `0.7.5-preview` directly recognized a running `bun ... omp` process as `agent:"omp", agent_status:"idle"` in a named lab.
 
@@ -504,7 +504,7 @@ Missing terminal event, duplicate terminal event, dropped frame, hidden extensio
 
 `omp-p3-cleanup-live` invokes the real `bin/fm-teardown.sh` task path and inspects process descendants, backend, tmux, extension, generated hook, state, temp, profile, cache, lock, wake, session, socket, log, package, worktree, and isolated-home residue.
 
- `omp-p3-regression` runs focused tests, then `for test_file in tests/*.test.sh; do bash "$test_file"; done`, `bin/fm-lint.sh` when shell files change, and pinned Bun syntax, type, import, and generated-extension load checks against the recorded `@oh-my-pi/pi-coding-agent@17.1.7` and `@oh-my-pi/pi-utils@17.1.7` identities. `bin/fm-omp-runtime-pin-check.sh --json` is a required non-mutating pre-activation check and any installed version, package byte, source-anchor, or continuation-cap drift is a hard stop.
+ `omp-p3-regression` runs focused tests, then `for test_file in tests/*.test.sh; do bash "$test_file"; done`, `bin/fm-lint.sh` when shell files change, and pinned Bun syntax, type, import, and generated-extension load checks against the recorded `@oh-my-pi/pi-coding-agent@17.2.2` and `@oh-my-pi/pi-utils@17.2.2` identities. `bin/fm-omp-runtime-pin-check.sh --json` is a required non-mutating pre-activation check and any installed version, package byte, source-anchor, or continuation-cap drift is a hard stop.
 
 P3 deterministic tests may establish parsing and state transitions, but live evidence is mandatory for every REQ-RPC-01 operation, every REQ-RPC-02 abnormal exact-once path, effective state, streamed turns, abort, terminal events, process exit, resume, and real teardown.
 
