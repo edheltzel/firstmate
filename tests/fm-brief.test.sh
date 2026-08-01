@@ -183,6 +183,29 @@ test_no_mistakes_dod_wording() {
   pass "fm-brief.sh: no-mistakes DOD wording avoids the apostrophe regression"
 }
 
+test_no_mistakes_done_requires_green_pr() {
+  local home id brief status_protocol definition_of_done
+  home="$TMP_ROOT/no-mistakes-done-home"
+  mkdir -p "$home/data"
+  id="brief-no-mistakes-done-b2"
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" some-proj >/dev/null 2>&1
+  brief="$home/data/$id/brief.md"
+  status_protocol=$(sed -n '/4\. Report status/,/5\. If you hit/p' "$brief")
+  definition_of_done=$(sed -n '/# Definition of done/,$p' "$brief")
+
+  assert_contains "$status_protocol" "For this no-mistakes task, \`done:\` means ONLY \`done: PR {url} checks green\`." \
+    "no-mistakes status protocol must reserve done for a green PR"
+  assert_contains "$status_protocol" "\`working: implementation complete; driving no-mistakes to PR\`" \
+    "no-mistakes status protocol must keep implementation-only completion working"
+  assert_contains "$definition_of_done" "The only valid terminal success line is \`done: PR {url} checks green\`" \
+    "no-mistakes Definition of done must require a green PR"
+  assert_contains "$definition_of_done" "If no green PR exists yet, report \`working:\` and continue" \
+    "no-mistakes Definition of done must reject implementation-only done"
+  assert_no_grep "append \`done: {summary}\`" "$brief" \
+    "no-mistakes brief retained the premature implementation-complete done line"
+  pass "fm-brief.sh: no-mistakes done requires a green PR in both status and completion contracts"
+}
+
 test_ship_project_memory_wording() {
   local home id brief
   home="$TMP_ROOT/project-memory-home"
@@ -439,6 +462,7 @@ test_commit_discipline_applies_to_every_crewmate_brief
 test_ordinary_worker_role_boundary_is_generated_only_for_ship_and_scout
 test_faster_paths_use_configured_authority_without_stacked_review
 test_no_mistakes_dod_wording
+test_no_mistakes_done_requires_green_pr
 test_ship_project_memory_wording
 test_herdr_lab_contract_is_explicit_and_complete
 test_herdr_lab_contract_quotes_foreign_firstmate_path

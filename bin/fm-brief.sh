@@ -319,6 +319,7 @@ EOF
 
 PR_IDENTITY=$("$FM_ROOT/bin/fm-project-mode.sh" --pr-identity "$REPO" 2>/dev/null || true)
 BROKER_NOTE=
+STATUS_DONE_CONTRACT=
 PUBLISH_INSTRUCTION="When it is implemented and committed, push your branch and open a PR with \`gh-axi\`, then append \`done: PR {url}\` to the status file and stop."
 if [ "$PR_IDENTITY" = atlas-pat ]; then
   BROKER_NOTE="For this opted-in project, publish only through \`$FM_ROOT/bin/fm-pr-identity.sh\` using its task-bound \`push\`, \`create\`, and \`verify\` operations; never call raw GitHub or Git publication commands."
@@ -356,13 +357,15 @@ EOF
     SETUP2="
 2. Run \`no-mistakes doctor\`; if it reports the repo is not initialized here, run \`no-mistakes init\`."
     RULE1='1. Never push to the default branch. Never merge a PR.'
+    STATUS_DONE_CONTRACT="
+   For this no-mistakes task, \`done:\` means ONLY \`done: PR {url} checks green\`.
+   If implementation and local validation are complete but no green PR exists, append \`working: implementation complete; driving no-mistakes to PR\` and continue - never append \`done:\`."
     DOD=$(cat <<EOF
 # Definition of done
-The task is complete only when committed on your branch.
+This project ships through **no-mistakes**: implementation and local validation alone are not completion.
+The only valid terminal success line is \`done: PR {url} checks green\` after you drive the no-mistakes pipeline through PR creation and green CI.
+If no green PR exists yet, report \`working:\` and continue; never report \`done:\` for implementation completion.
 $BROKER_NOTE
-When you believe it is complete, append \`done: {summary}\` to the status file and stop.
-Firstmate will then instruct you to run /no-mistakes to validate and ship a PR.
-
 You drive no-mistakes by responding to its gates, not by implementing fixes.
 Follow the guidance no-mistakes itself provides for the mechanics: it loads when you invoke /no-mistakes, and \`no-mistakes axi run --help\` plus the \`help\` lines in each \`axi\` response are authoritative and version-matched to the installed binary.
 Do not hand-edit, commit, or fix findings yourself while a run is active - the pipeline applies every fix.
@@ -409,7 +412,7 @@ $RULE1
    needs-decision/blocked/paused/done/failed states. No step-by-step FYI progress lines;
    firstmate reads your pane for that.
    A mid-task \`working:\` line (including setup complete) is nonterminal: do not end the
-   turn after it; continue the same stage until a defined \`done:\` gate under Definition of done.
+   turn after it; continue the same stage until a defined \`done:\` gate under Definition of done.$STATUS_DONE_CONTRACT
    Use \`$PAUSED_VERB: {why}\` - distinct from \`blocked:\` - ONLY when you are deliberately idling on a
    known external wait you expect to clear on its own (an upstream release, a rate-limit reset,
    a scheduled window): firstmate then leaves your idle pane alone and rechecks it on a long
