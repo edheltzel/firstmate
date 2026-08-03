@@ -17,10 +17,18 @@ FM_WORKER_GIT_FORMAT=
 FM_WORKER_GIT_SIGN=
 FM_WORKER_GIT_IDENTITY_ERROR=
 
+# Portable link count. Never the `stat -f <fmt> || stat -c <fmt>` fallback form:
+# on Linux `stat -f` is *filesystem* stat and dumps a partial filesystem report
+# to stdout before failing, so the fallback's real count is appended to that
+# garbage and every safe file reads as unsafe. Detect the platform instead.
 fm_worker_git_identity_file_safe() {
   local path=$1 links
   [ -f "$path" ] && [ ! -L "$path" ] || return 1
-  links=$(stat -f %l "$path" 2>/dev/null || stat -c %h "$path" 2>/dev/null) || return 1
+  if [ "$(uname)" = Darwin ]; then
+    links=$(stat -f %l "$path" 2>/dev/null) || return 1
+  else
+    links=$(stat -c %h "$path" 2>/dev/null) || return 1
+  fi
   [ "$links" = 1 ]
 }
 

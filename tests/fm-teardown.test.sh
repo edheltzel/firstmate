@@ -69,11 +69,19 @@ PR_CHECK="$ROOT/bin/fm-pr-check.sh"
 TMP_ROOT=$(fm_test_tmproot fm-teardown-tests)
 REAL_GIT_FOR_TEST=$(command -v git)
 export REAL_GIT_FOR_TEST
-WORKER_SIGNING_KEY="${FM_TEST_WORKER_SIGNING_KEY:-${HOME:-}/.ssh/atlas_signing.pub}"
-WORKER_SIGNER_PRINCIPAL="${FM_TEST_WORKER_SIGNER_PRINCIPAL:-296298943+Atlas-Key@users.noreply.github.com}"
+# The worker signing identity is a fixture, not a host secret: generate an
+# ephemeral key pair in the case root so the suite runs anywhere, CI included.
+WORKER_SIGNING_KEY="$TMP_ROOT/worker-signing.pub"
+WORKER_SIGNER_PRINCIPAL="296298943+Atlas-Key@users.noreply.github.com"
+mkdir -p "$TMP_ROOT"
+ssh-keygen -q -t ed25519 -N '' -f "${WORKER_SIGNING_KEY%.pub}" \
+  || fail "could not create the portable worker signing fixture"
 WORKER_SIGNING_FINGERPRINT=$(ssh-keygen -lf "$WORKER_SIGNING_KEY" -E sha256 2>/dev/null \
   | awk 'NF >= 2 { count++; value=$2 } END { if (count != 1) exit 1; print value }') \
-  || fail "configured test signing key is unavailable: $WORKER_SIGNING_KEY"
+  || fail "worker Git signing fixture is unavailable: $WORKER_SIGNING_KEY"
+# Point the broker's pinned signing policy at the ephemeral fixture key. Only
+# the broker's synthetic test mode honors this, so the real pin is untouched.
+export FM_PR_IDENTITY_SIGNING_FINGERPRINT="$WORKER_SIGNING_FINGERPRINT"
 
 # Build a fresh sandbox for one test case. Sets up:
 #   $CASE/state/        - firstmate state dir (with a fresh watcher beacon)

@@ -11,11 +11,19 @@ HOME_DIR="$CASE_ROOT/home"
 PROJECT="$CASE_ROOT/project"
 FAKEBIN="$CASE_ROOT/fakebin"
 ENV_FILE="$CASE_ROOT/synthetic.env"
-SIGNING_KEY="${FM_TEST_WORKER_SIGNING_KEY:-${HOME:-}/.ssh/atlas_signing.pub}"
-SIGNER_PRINCIPAL="${FM_TEST_WORKER_SIGNER_PRINCIPAL:-296298943+Atlas-Key@users.noreply.github.com}"
+# The signing identity is a fixture, not a host secret: generate an ephemeral
+# key pair in the case root so the suite runs on any machine, CI included.
+SIGNING_KEY="$CASE_ROOT/worker-signing.pub"
+SIGNER_PRINCIPAL="296298943+Atlas-Key@users.noreply.github.com"
+mkdir -p "$CASE_ROOT"
+ssh-keygen -q -t ed25519 -N '' -f "${SIGNING_KEY%.pub}" \
+  || fail "could not create the portable signing fixture"
 SIGNING_FINGERPRINT=$(ssh-keygen -lf "$SIGNING_KEY" -E sha256 2>/dev/null \
   | awk 'NF >= 2 { count++; value=$2 } END { if (count != 1) exit 1; print value }') \
-  || fail "configured test signing key is unavailable: $SIGNING_KEY"
+  || fail "signing fixture is unavailable: $SIGNING_KEY"
+# Point the broker's pinned signing policy at the ephemeral fixture key. Only
+# the broker's synthetic test mode honors this, so the real pin is untouched.
+export FM_PR_IDENTITY_SIGNING_FINGERPRINT="$SIGNING_FINGERPRINT"
 mkdir -p "$HOME_DIR/data" "$HOME_DIR/state" "$HOME_DIR/config" "$FAKEBIN" "$PROJECT"
 
 cat > "$HOME_DIR/data/projects.md" <<'EOF'

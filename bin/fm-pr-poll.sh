@@ -11,6 +11,17 @@
 set -u
 LC_ALL=C
 export LC_ALL
+
+# Portable link count. Never the `stat -f <fmt> || stat -c <fmt>` fallback form:
+# on Linux `stat -f` is *filesystem* stat and dumps a partial filesystem report
+# to stdout before failing, so the fallback's real count is appended to that
+# garbage and every safe binding reads as unsafe. Detect the platform instead.
+if [ "$(uname)" = Darwin ]; then
+  poll_link_count() { stat -f %l "$1" 2>/dev/null; }
+else
+  poll_link_count() { stat -c %h "$1" 2>/dev/null; }
+fi
+
 data=
 POLL_ROOT=${FM_PR_POLL_ROOT:-${FM_ROOT_OVERRIDE:-}}
 POLL_HOME=${FM_PR_POLL_HOME:-${FM_HOME:-}}
@@ -72,7 +83,7 @@ if [ -n "$POLL_TASK_ID" ] && [ -n "$POLL_STATE" ]; then
   if [ -e "$poll_binding" ] || [ -L "$poll_binding" ]; then
     atlas_opted_in=1
     if [ -f "$poll_binding" ] && [ ! -L "$poll_binding" ] \
-      && [ "$(stat -f %l "$poll_binding" 2>/dev/null || stat -c %h "$poll_binding" 2>/dev/null)" = 1 ]; then
+      && [ "$(poll_link_count "$poll_binding")" = 1 ]; then
       atlas_binding_profile=$(awk -F= '$1 == "profile" { count++; value=$2 } END { if (count == 1 && value != "") print value; else exit 1 }' "$poll_binding" 2>/dev/null || true)
       if [ "$atlas_binding_profile" = atlas-pat ]; then
         atlas_binding_state=valid
