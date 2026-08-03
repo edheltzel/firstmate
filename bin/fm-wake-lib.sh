@@ -9,6 +9,10 @@ STATE="${FM_STATE_OVERRIDE:-${STATE:-$FM_HOME/state}}"
 FM_WAKE_QUEUE="${FM_WAKE_QUEUE:-$STATE/.wake-queue}"
 FM_WAKE_QUEUE_LOCK="${FM_WAKE_QUEUE_LOCK:-$STATE/.wake-queue.lock}"
 FM_LOCK_STALE_AFTER="${FM_LOCK_STALE_AFTER:-2}"
+# Resolved once at source time: fm_pid_identity and fm_path_mtime run inside 0.2s
+# confirm and 0.5s attach polls, and forking uname per call is a measurable cost on
+# the platform (Git Bash/MSYS) that already pays the highest fork price.
+_FM_UNAME=$(uname 2>/dev/null || echo unknown)
 mkdir -p "$STATE"
 
 fm_current_pid() {
@@ -24,17 +28,19 @@ fm_pid_alive() {
 }
 
 fm_pid_identity() {
-  local pid=$1 out proc_root stat_line starttime cmdline_hex
+  local pid=$1 out proc_root stat_line starttime cmdline_hex identity_key
   local -a stat_fields
   case "$pid" in
     ''|*[!0-9]*) return 1 ;;
   esac
   proc_root=${FM_PROC_ROOT_OVERRIDE:-/proc}
-  # Prefer /proc on Linux: stat field 22 (starttime, clock ticks since boot) is
+  # Prefer a Linux-compatible /proc when present: stat field 22 (starttime, clock ticks since boot) is
   # immune to the wall-clock steps that re-render the ps lstart fallback's date
   # (observed as WSL2 btime drift) and would evict a live watcher; combining the
   # full NUL-separated cmdline keeps PID reuse a mismatch even on a tick collision.
-  if [ "$(uname)" = Linux ] && [ -r "$proc_root/$pid/stat" ] && [ -r "$proc_root/$pid/cmdline" ]; then
+  # Git Bash/MSYS exposes these compatible files but its Cygwin ps rejects the
+  # portable fallback's -o fields, so capability detection must not key on uname.
+  if [ -r "$proc_root/$pid/stat" ] && [ -r "$proc_root/$pid/cmdline" ]; then
     stat_line=$(cat "$proc_root/$pid/stat" 2>/dev/null) || return 1
     # After the final comm delimiter, array index 19 is proc stat field 22.
     read -r -a stat_fields <<< "${stat_line##*)}"
@@ -45,7 +51,9 @@ fm_pid_identity() {
     esac
     cmdline_hex=$(od -An -v -tx1 "$proc_root/$pid/cmdline" 2>/dev/null | tr -d '[:space:]') || return 1
     [ -n "$cmdline_hex" ] || return 1
-    printf 'linux-starttime=%s cmdline-hex=%s\n' "$starttime" "$cmdline_hex"
+    identity_key=proc-starttime
+    [ "$_FM_UNAME" != Linux ] || identity_key=linux-starttime
+    printf '%s=%s cmdline-hex=%s\n' "$identity_key" "$starttime" "$cmdline_hex"
     return 0
   fi
   # Pin LC_ALL=C so lstart's date format is locale-invariant: the identity is
@@ -57,7 +65,7 @@ fm_pid_identity() {
 }
 
 fm_path_mtime() {
-  if [ "$(uname)" = Darwin ]; then
+  if [ "$_FM_UNAME" = Darwin ]; then
     stat -f %m "$1" 2>/dev/null
   else
     stat -c %Y "$1" 2>/dev/null
@@ -70,8 +78,10 @@ fm_path_age() {
   echo $(( $(date +%s) - m ))
 }
 
+FM_WATCHER_MATCHED_IDENTITY=
 fm_watcher_lock_matches_pid() {
   local state=$1 watch_path=$2 pid=$3 home=${4:-$FM_HOME} lockdir lock_home lock_path lock_identity current_identity
+  FM_WATCHER_MATCHED_IDENTITY=
   lockdir="$state/.watch.lock"
   lock_home=$(cat "$lockdir/fm-home" 2>/dev/null || true)
   lock_path=$(cat "$lockdir/watcher-path" 2>/dev/null || true)
@@ -80,22 +90,28 @@ fm_watcher_lock_matches_pid() {
   [ "$lock_path" = "$watch_path" ] || return 1
   [ -n "$lock_identity" ] || return 1
   current_identity=$(fm_pid_identity "$pid") || return 1
-  [ "$current_identity" = "$lock_identity" ]
+  [ "$current_identity" = "$lock_identity" ] || return 1
+  FM_WATCHER_MATCHED_IDENTITY=$lock_identity
 }
 
 FM_WATCHER_HEALTHY_PID=
+FM_WATCHER_HEALTHY_IDENTITY=
 fm_watcher_healthy() {
-  local state=$1 watch_path=$2 grace=${3:-${FM_GUARD_GRACE:-300}} home=${4:-$FM_HOME} lockdir beat pid age
+  local state=$1 watch_path=$2 grace=${3:-${FM_GUARD_GRACE:-300}} home=${4:-$FM_HOME} lockdir beat pid identity age
   FM_WATCHER_HEALTHY_PID=
+  FM_WATCHER_HEALTHY_IDENTITY=
   lockdir="$state/.watch.lock"
   beat="$state/.last-watcher-beat"
   pid=$(cat "$lockdir/pid" 2>/dev/null || true)
   fm_pid_alive "$pid" || return 1
   fm_watcher_lock_matches_pid "$state" "$watch_path" "$pid" "$home" || return 1
+  identity=$FM_WATCHER_MATCHED_IDENTITY
   age=$(fm_path_age "$beat")
   [ "$age" -lt "$grace" ] || return 1
   # shellcheck disable=SC2034 # Read by callers after fm_watcher_healthy returns.
   FM_WATCHER_HEALTHY_PID=$pid
+  # shellcheck disable=SC2034 # Read by callers after fm_watcher_healthy returns.
+  FM_WATCHER_HEALTHY_IDENTITY=$identity
   return 0
 }
 
@@ -105,8 +121,27 @@ fm_lock_clean_known_files() {
     "$lockdir/pid" \
     "$lockdir/fm-home" \
     "$lockdir/pid-identity" \
+    "$lockdir/role" \
     "$lockdir/watcher-path" \
     2>/dev/null || true
+}
+
+fm_lock_set_role() {
+  local lockdir=$1 role=$2 current pid back
+  case "$role" in
+    autoarm|terminal-check) : ;;
+    *) return 1 ;;
+  esac
+  current=${BASHPID:-$$}
+  pid=$(cat "$lockdir/pid" 2>/dev/null || true)
+  [ "$pid" = "$current" ] || return 1
+  printf '%s\n' "$role" > "$lockdir/role" 2>/dev/null || return 1
+  back=$(cat "$lockdir/role" 2>/dev/null || true)
+  [ "$back" = "$role" ]
+}
+
+fm_lock_role() {
+  cat "$1/role" 2>/dev/null
 }
 
 fm_lock_abs_path() {
@@ -367,6 +402,43 @@ fm_lock_release() {
   rmdir "$lockdir" 2>/dev/null || true
 }
 
+fm_failure_episode_reset() {
+  local state=$1 mode=${2:-acquire} lock current pid acquired=0 path
+  lock="$state/.turnend-claude-blocks.lock"
+  case "$mode" in
+    acquire)
+      fm_lock_try_acquire "$lock" || return 1
+      acquired=1
+      ;;
+    held)
+      current=${BASHPID:-$$}
+      pid=$(cat "$lock/pid" 2>/dev/null || true)
+      [ "$pid" = "$current" ] || return 1
+      ;;
+    *) return 1 ;;
+  esac
+  for path in \
+    "$state/.turnend-claude-blocks" \
+    "$state/.claude-autoarm-failure-notified" \
+    "$state/.claude-autoarm-failure-alarmed"
+  do
+    if [ -d "$path" ] && [ ! -L "$path" ]; then
+      [ "$acquired" -eq 0 ] || fm_lock_release "$lock"
+      return 1
+    fi
+  done
+  if ! rm -f \
+    "$state/.turnend-claude-blocks" \
+    "$state/.claude-autoarm-failure-notified" \
+    "$state/.claude-autoarm-failure-alarmed" \
+    2>/dev/null; then
+    [ "$acquired" -eq 0 ] || fm_lock_release "$lock"
+    return 1
+  fi
+  [ "$acquired" -eq 0 ] || fm_lock_release "$lock"
+  return 0
+}
+
 fm_wake_clean_field() {
   LC_ALL=C tr '\t\r\n' '   '
 }
@@ -396,6 +468,28 @@ fm_wake_append() {
   fi
   fm_lock_release "$FM_WAKE_QUEUE_LOCK"
   return "$status"
+}
+
+# fm_wake_queued_keys <kind>
+# Print the distinct keys currently queued for <kind>, oldest first. Read under
+# the append lock so a concurrent append is never observed half-written. The
+# durable queue stays the authority: a key appears here exactly while a record
+# for it is queued and unconsumed, and disappears when a drain consumes it.
+fm_wake_queued_keys() {
+  local kind=$1
+  case "$kind" in
+    signal|stale|check|heartbeat) ;;
+    *) printf 'fm_wake_queued_keys: invalid wake kind: %s\n' "$kind" >&2; return 2 ;;
+  esac
+  fm_lock_acquire_wait "$FM_WAKE_QUEUE_LOCK"
+  fm_wake_queued_keys_locked "$kind"
+  fm_lock_release "$FM_WAKE_QUEUE_LOCK"
+}
+
+fm_wake_queued_keys_locked() {
+  local kind=$1
+  awk -F '\t' -v kind="$kind" 'NF >= 5 && $3 == kind && !seen[$4]++ { print $4 }' \
+    "$FM_WAKE_QUEUE" 2>/dev/null || true
 }
 
 fm_wake_restore_queue() {

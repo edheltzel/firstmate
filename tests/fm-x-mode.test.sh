@@ -700,6 +700,23 @@ test_bootstrap_activates_on_env_token() {
   pass "bootstrap activates X mode from an .env token, idempotently"
 }
 
+test_bootstrap_relative_home_writes_absolute_poll_shim() {
+  local root home out quoted_home
+  root="$TMP_ROOT/boot-relative-home"
+  mkdir -p "$root/home" "$root/cdpath/home"
+  home=$(cd "$root/home" && pwd -P)
+  printf 'FMX_PAIRING_TOKEN=tok-relative\n' > "$home/.env"
+  out=$(
+    cd "$root" || exit 1
+    CDPATH="$root/cdpath" FM_HOME=home "$ROOT/bin/fm-bootstrap.sh" 2>/dev/null
+  )
+  assert_contains "$out" "FMX: X mode on" "relative-home bootstrap must announce X mode"
+  quoted_home=$(printf '%q' "$home")
+  assert_grep "export FM_HOME=$quoted_home" "$home/state/x-watch.check.sh" \
+    "relative FM_HOME leaked into the durable X-mode poll shim"
+  pass "bootstrap ignores CDPATH when writing absolute FM_HOME into the durable X-mode poll shim"
+}
+
 test_bootstrap_reports_missing_x_dependency() {
   local home fakebin out tool tool_path
   home="$TMP_ROOT/boot-missing-x"; mkdir -p "$home"
@@ -871,7 +888,8 @@ test_bootstrap_opt_out_cleanup() {
   printf 'FMX_PAIRING_TOKEN=\n' > "$home/.env"
   out=$(CLAUDECODE=1 FM_HOME="$home" "$ROOT/bin/fm-bootstrap.sh" 2>/dev/null)
   assert_contains "$out" "FMX: X mode off" "opt-out must announce X mode off when it removed artifacts"
-  assert_contains "$out" "Claude Code background task" "opt-out remediation must use the harness-aware repair renderer"
+  assert_contains "$out" "watcher supervision needs Stop-owned automatic recovery" "opt-out remediation must use neutral automatic-recovery guidance"
+  assert_not_contains "$out" "is broken" "opt-out remediation claimed an unverified mechanism failure"
   assert_not_contains "$out" "bin/fm-watch-arm.sh --restart" "opt-out remediation must not hardcode a background-arm restart"
   assert_absent "$home/state/x-watch.check.sh" "opt-out must remove the shim"
   assert_absent "$home/config/x-mode.env" "opt-out must remove the cadence config"
@@ -1043,7 +1061,7 @@ test_reply_dry_run_outbox_private_publication_rejects_unsafe_paths() {
 }
 
 test_split_thread_lib() {
-  # shellcheck source=bin/fm-x-lib.sh
+  # shellcheck source=/dev/null
   . "$ROOT/bin/fm-x-lib.sh"
   local out n last rejoin maxlen txt
   # A reply that fits one tweet stays a single, UNNUMBERED chunk.
@@ -1605,7 +1623,7 @@ test_poll_records_context_registry_from_relay_platform() {
 
 test_context_registry_private_publication_rejects_unsafe_paths() {
   local home rc dest hardlink target out
-  # shellcheck source=bin/fm-x-lib.sh
+  # shellcheck source=/dev/null
   . "$ROOT/bin/fm-x-lib.sh"
 
   home="$TMP_ROOT/context-linked-dir"; mkdir -p "$home/state" "$home/external"
@@ -1670,7 +1688,7 @@ test_context_registry_private_publication_rejects_unsafe_paths() {
 
 test_context_registry_rejects_unsafe_reads() {
   local home out target dest hardlink
-  # shellcheck source=bin/fm-x-lib.sh
+  # shellcheck source=/dev/null
   . "$ROOT/bin/fm-x-lib.sh"
 
   home="$TMP_ROOT/context-read-linked-dir"; mkdir -p "$home/state" "$home/external-context"
@@ -2862,6 +2880,7 @@ test_followup_post_dry_run_increments_counter_keeps_link
 test_followup_post_dry_run_final_clears_link
 test_followup_usage_errors
 test_bootstrap_activates_on_env_token
+test_bootstrap_relative_home_writes_absolute_poll_shim
 test_bootstrap_reports_missing_x_dependency
 test_bootstrap_does_not_announce_when_arm_fails
 test_bootstrap_does_not_follow_x_artifact_symlinks

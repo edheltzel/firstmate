@@ -43,6 +43,13 @@ EXPECTED_AUTHOR_NAME=Atlas
 EXPECTED_AUTHOR_EMAIL=atlas@rainyday.media
 EXPECTED_SIGNER_PRINCIPAL=296298943+Atlas-Key@users.noreply.github.com
 EXPECTED_SIGNING_FINGERPRINT=SHA256:r+7H1GGgXgA9i3c5S00smkLEby/6iqxt1HmGmkHgX7M
+# The pinned fingerprint is the production policy and is never relaxed for a real
+# run. Synthetic tests own an ephemeral key pair instead of the host key, so the
+# existing test mode - which already substitutes the broker CLI and credential
+# file - may substitute the fingerprint it is expected to match.
+if [ "$TEST_MODE" = 1 ] && [ -n "${FM_PR_IDENTITY_SIGNING_FINGERPRINT:-}" ]; then
+  EXPECTED_SIGNING_FINGERPRINT=$FM_PR_IDENTITY_SIGNING_FINGERPRINT
+fi
 PROFILE=atlas-pat
 GH_AXI_SUPPORTED_VERSION=0.1.27
 PAT=
@@ -344,7 +351,7 @@ load_binding() {
   META_BINDING="$STATE/$id.pr-binding"
   [ -f "$META_BINDING" ] && [ ! -L "$META_BINDING" ] \
     || fail metadata unknown no "host identity binding is unavailable"
-  value=$(stat -f %l "$META_BINDING" 2>/dev/null || stat -c %h "$META_BINDING" 2>/dev/null)
+  value=$(fm_pr_file_link_count "$META_BINDING")
   [ "$value" = 1 ] || fail metadata unknown no "host identity binding is unsafe"
   for value in version task profile project_key repo branch base project; do
     [ "$(metadata_count "$META_BINDING" "$value")" -eq 1 ] \
@@ -380,7 +387,7 @@ load_metadata() {
   load_binding "$id"
   META="$STATE/$id.meta"
   [ -f "$META" ] && [ ! -L "$META" ] || fail metadata unknown no "task metadata is unavailable"
-  value=$(stat -f %l "$META" 2>/dev/null || stat -c %h "$META" 2>/dev/null)
+  value=$(fm_pr_file_link_count "$META")
   [ "$value" = 1 ] || fail metadata unknown no "task metadata is unsafe"
   for value in pr_identity pr_project_key pr_repo pr_branch pr_base project worktree; do
     [ "$(metadata_count "$META" "$value")" -eq 1 ] || fail metadata unknown no "task metadata has duplicate or missing identity fields"

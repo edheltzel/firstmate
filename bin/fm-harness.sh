@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Detect the agent harness this process tree runs on.
-# Usage: fm-harness.sh                  print own harness: claude|codex|opencode|pi|grok|omp|unknown
+# Usage: fm-harness.sh                  print own harness: claude|codex|opencode|pi|pi-signed|grok|kimi|omp|unknown
 #        fm-harness.sh crew             print the effective CREWMATE harness
 #                                        (config/crew-harness; "default" resolves to own)
 #        fm-harness.sh secondmate       print the harness the PRIMARY uses to launch
@@ -29,15 +29,23 @@ CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 
 detect_own() {
   # Layer 1: environment markers for verified harnesses.
+  # Keep marker detection before ancestry detection as an explicit precedence rule.
+  # Only claude, pi, and grok set verified markers of their own; codex, opencode,
+  # and kimi are markerless, so a foreign marker retained in a terminal
+  # multiplexer's stored environment can silently misidentify one of them before
+  # ancestry is consulted. This is a precedence hazard, not evidence that
+  # CLAUDECODE inheritance into a kimi child was observed; it was not observed.
   [ "${CLAUDECODE:-}" = "1" ] && { echo claude; return; }
-  [ "${PI_CODING_AGENT:-}" = "true" ] && { echo pi; return; }
+  if [ "${PI_CODING_AGENT:-}" = "true" ]; then
+    if [ "${FM_PI_HARNESS:-}" = pi-signed ]; then echo pi-signed; else echo pi; fi
+    return
+  fi
   # grok sets GROK_AGENT=1 for its child/tool processes (verified, grok 0.2.73).
   # It does NOT set CLAUDECODE despite being Claude-Code-compatible, so this marker
   # is unambiguous when firstmate runs natively on grok.
   [ "${GROK_AGENT:-}" = "1" ] && { echo grok; return; }
-  # OMP 17.2.2 does not inject a native child marker. fm-spawn prefixes every
-  # verified OMP launch with OMP_AGENT=1, while a primary plain `omp` falls back
-  # to the exact Bun ancestry match below.
+  # OMP does not set a native marker. fm-spawn supplies this task-local marker;
+  # a primary OMP session falls through to the anchored Bun ancestry check.
   [ "${OMP_AGENT:-}" = "1" ] && { echo omp; return; }
   # Layer 2: walk the parent chain and match the command name.
   local pid=$$ comm args
@@ -48,21 +56,28 @@ detect_own() {
       *codex*) echo codex; return ;;
       *opencode*) echo opencode; return ;;
       *grok*) echo grok; return ;;
+      kimi) echo kimi; return ;;
       omp) echo omp; return ;;
+      pi-signed) echo pi; return ;;
       pi) echo pi; return ;;
       node*|python*|bun*)
-        # Bare interpreter: match the harness executable in its script path.
-        # OMP 17.2.2 runs as `bun bun /absolute/path/omp ...`; keep that match
-        # anchored to the leading executable arguments so an unrelated Bun
-        # process whose later prompt text mentions OMP cannot be misclassified.
+        # OMP's Bun shape is deliberately anchored to the leading executable
+        # arguments, so later prompt text mentioning omp cannot classify it.
         args=$(ps -o args= -p "$pid" 2>/dev/null)
         case "$args" in
           bun\ bun\ */omp|bun\ bun\ */omp\ *|bun\ */omp|bun\ */omp\ *) echo omp; return ;;
-          *claude*) echo claude; return ;;
-          *codex*) echo codex; return ;;
-          *opencode*) echo opencode; return ;;
-          *grok*) echo grok; return ;;
-          *" pi "*|*/pi) echo pi; return ;;
+        esac
+        case "$(basename "$comm")" in
+          bun*) ;;
+          *)
+            case "$args" in
+              *claude*) echo claude; return ;;
+              *codex*) echo codex; return ;;
+              *opencode*) echo opencode; return ;;
+              *grok*) echo grok; return ;;
+              *" pi "*|*/pi) echo pi; return ;;
+            esac
+            ;;
         esac ;;
     esac
     pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
@@ -103,14 +118,14 @@ secondmate_line() {
 # the resolved secondmate_line, or nothing if the line or that field is absent.
 secondmate_field() {
   local idx=$1 line
+  local -a fields=()
   line=$(secondmate_line)
   [ -n "$line" ] || return 0
-  # shellcheck disable=SC2086  # deliberate word-splitting: tokenizing the line into fields
-  set -- $line
+  read -r -a fields <<< "$line"
   case "$idx" in
-    1) printf '%s\n' "${1:-}" ;;
-    2) printf '%s\n' "${2:-}" ;;
-    3) printf '%s\n' "${3:-}" ;;
+    1) printf '%s\n' "${fields[0]:-}" ;;
+    2) printf '%s\n' "${fields[1]:-}" ;;
+    3) printf '%s\n' "${fields[2]:-}" ;;
   esac
 }
 
