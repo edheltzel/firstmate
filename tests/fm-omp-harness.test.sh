@@ -86,12 +86,20 @@ test_omp_rounded_composer_classifies_empty_and_pending() {
 }
 
 test_omp_busy_signature_is_registered() {
-  bash -c '. "$0/bin/fm-tmux-lib.sh"; printf "%s" "$FM_TMUX_BUSY_REGEX_DEFAULT"' "$ROOT" \
+  local state out
+  state="$TMP_ROOT/busy-state"
+  mkdir -p "$state"
+  bash -c '. "$0/bin/fm-tmux-lib.sh"; printf "%s" "$FM_TMUX_OMP_BUSY_REGEX_DEFAULT"' "$ROOT" \
     | grep -F '⟨esc⟩' >/dev/null \
-    || fail "tmux busy signature does not include OMP's cancel hint"
-  grep -F '⟨esc⟩' "$ROOT/bin/fm-watch.sh" >/dev/null \
-    || fail "watcher busy signature does not include OMP's cancel hint"
-  pass "OMP busy signature is shared by watcher and tmux submit logic"
+    || fail "tmux OMP busy signature does not include OMP's cancel hint"
+  out=$(bash -c '. "$0/bin/fm-tmux-lib.sh"; printf "%s" "working ⟨esc⟩ to interrupt" | fm_busy_lines_match omp && printf busy || printf idle' "$ROOT")
+  [ "$out" = busy ] || fail "OMP's rendered cancel hint should match the tmux submit busy check, got '$out'"
+  out=$(bash -c '. "$0/bin/fm-busy-lib.sh"; fm_busy_classify tmux %0 omp fm-omp-x "$1" "working
+⟨esc⟩ to interrupt"' "$ROOT" "$state")
+  [ "$out" = 'busy omp-regex' ] || fail "OMP's rendered cancel hint should classify busy omp-regex, got '$out'"
+  out=$(bash -c '. "$0/bin/fm-busy-lib.sh"; fm_busy_classify tmux %0 omp fm-omp-x "$1" "composer idle"' "$ROOT" "$state")
+  [ "$out" = 'idle omp-regex' ] || fail "an OMP tail without the cancel hint should classify idle omp-regex, got '$out'"
+  pass "OMP busy signature is registered for tmux submit and semantic classification"
 }
 
 test_omp_detection_marker_and_bun_ancestry

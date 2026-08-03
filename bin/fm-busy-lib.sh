@@ -39,7 +39,7 @@
 #   fm-interrupt     a firstmate-controlled interruption of the worker
 #   fm-recovery      a documented recovery reset after relaunch
 # Classifier-only sources (never written into a record):
-#   endpoint-gone, herdr-native, grok-regex, missing, malformed,
+#   endpoint-gone, herdr-native, grok-regex, omp-regex, missing, malformed,
 #   gen-mismatch, source-mismatch, kimi-unverified, codex-unverified,
 #   capture-failed, no-target
 #
@@ -50,12 +50,15 @@
 #   3. a valid, gen-matching, source-trusted record -> its state and source
 #   4. no record at all: herdr's native busy verdict is trusted as busy
 #      (generation state is sufficient for busy, not for idle), then the
-#      Grok-only temporary regex fallback classifies a grok task from its
-#      rendered tail, then unknown missing
+#      Grok and OMP harness-scoped regex fallbacks classify those tasks from
+#      their rendered tails, then unknown missing
 #   5. malformed, stale, or untrusted records -> unknown, never a fallback
-# The Grok arm is the ONLY rendered-text classification that survives the
-# redesign, because Grok's structured lifecycle was not credited-live-verified
-# in the approved audit; it is scoped to harness=grok and can never classify
+# The Grok and OMP arms are the ONLY rendered-text classifications that
+# survive the redesign: Grok because its structured lifecycle was not
+# credited-live-verified in the approved audit, and OMP because its verified
+# extension contract is turn-end notification only (no in-turn lifecycle
+# events), leaving its verified rendered cancel hint as the busy signal.
+# Each arm is scoped to its own harness and can never classify
 # another adapter. The delivery guards in bin/fm-tmux-lib.sh match rendered
 # footers for submit acknowledgement and away-mode supervisor injection only;
 # neither is a recorded worker state source.
@@ -161,8 +164,9 @@ fm_busy_current_gen() {  # <state-dir> <id>
 # fm_busy_sources_for_harness: the semantic sources trusted to classify a
 # task recorded with <harness>. One line, space-separated, possibly empty.
 # The firstmate-owned sources are appended for every converted adapter.
-# Grok deliberately trusts nothing: it has no semantic writer yet, and its
-# temporary rendered-tail fallback lives in the classifier, not in records.
+# Grok and OMP deliberately trust nothing: neither has a semantic writer
+# (OMP's verified contract is turn-end notification only), and their
+# rendered-tail fallbacks live in the classifier, not in records.
 fm_busy_sources_for_harness() {  # <harness>
   local adapter=
   case "${1:-}" in
@@ -255,6 +259,15 @@ fm_busy_grok_tail_busy() {
     | grep -qiE "${FM_BUSY_REGEX:-${FM_TMUX_GROK_BUSY_REGEX_DEFAULT:-Ctrl\\+c:cancel}}"
 }
 
+# fm_busy_omp_tail_busy: the OMP-only rendered-tail fallback. OMP's verified
+# extension contract is turn-end notification only, so its verified rendered
+# cancel hint remains the busy signal. Consumes the tail on stdin; 0 when the
+# signature matches. FM_BUSY_REGEX globally overrides, as for Grok.
+fm_busy_omp_tail_busy() {
+  grep -v '^[[:space:]]*$' | tail -12 \
+    | grep -qiE "${FM_BUSY_REGEX:-${FM_TMUX_OMP_BUSY_REGEX_DEFAULT:-⟨esc⟩}}"
+}
+
 # fm_busy_classify: semantic classification for a task whose endpoint the
 # caller has already established as present. Prints "<verdict> <source>":
 # busy|idle|unknown plus the producing source (see header). Never probes
@@ -263,7 +276,7 @@ fm_busy_grok_tail_busy() {
 # if available, else reports unknown capture-failed.
 fm_busy_classify() {  # <backend> <target> <harness> <id> <state-dir> [tail40]
   local backend=$1 target=$2 harness=$3 id=$4 state=$5 tail40=${6-}
-  local out rc r_state r_source native
+  local out rc r_state r_source native tail_source tail_matcher
   case "$harness" in
     kimi*)
       if ! fm_busy_kimi_verified; then
@@ -308,7 +321,11 @@ fm_busy_classify() {  # <backend> <target> <harness> <id> <state-dir> [tail40]
     fi
   fi
   case "$harness" in
-    grok*)
+    grok*|omp)
+      case "$harness" in
+        grok*) tail_source=grok-regex; tail_matcher=fm_busy_grok_tail_busy ;;
+        *) tail_source=omp-regex; tail_matcher=fm_busy_omp_tail_busy ;;
+      esac
       if [ -z "$tail40" ]; then
         if command -v fm_backend_capture >/dev/null 2>&1; then
           tail40=$(fm_backend_capture "$backend" "$target" 40 2>/dev/null) || {
@@ -320,10 +337,10 @@ fm_busy_classify() {  # <backend> <target> <harness> <id> <state-dir> [tail40]
           return 0
         fi
       fi
-      if printf '%s' "$tail40" | fm_busy_grok_tail_busy; then
-        printf 'busy grok-regex'
+      if printf '%s' "$tail40" | "$tail_matcher"; then
+        printf 'busy %s' "$tail_source"
       else
-        printf 'idle grok-regex'
+        printf 'idle %s' "$tail_source"
       fi
       return 0
       ;;

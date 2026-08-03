@@ -1105,9 +1105,6 @@ PR_REPO=
 PR_BRANCH=
 PR_BASE=
 if [ "$KIND" != secondmate ]; then
-  read -r MODE YOLO <<EOF
-$([ -n "${PROJ_KEY:-}" ] && "$FM_ROOT/bin/fm-project-mode.sh" "$PROJ_KEY")
-EOF
   PR_IDENTITY=$("$FM_ROOT/bin/fm-project-mode.sh" --pr-identity "$PROJ_KEY" 2>/dev/null) || {
     echo "error: project PR identity profile is invalid; refusing to create a worker" >&2
     exit 1
@@ -1670,9 +1667,9 @@ if [ "$KIND" != secondmate ]; then
   # adapter with a verified semantic source. The launch brief sent below IS a
   # submitted turn, so the seed record is busy/fm-spawn. The minted gen is
   # embedded into each adapter's wiring so an event from a superseded
-  # incarnation is rejected as stale. Grok stays on its isolated rendered-tail
-  # fallback and standalone Kimi stays unknown until fm_busy_kimi_verified
-  # opens, so neither is armed here.
+  # incarnation is rejected as stale. Grok and OMP stay on their isolated
+  # rendered-tail fallbacks and standalone Kimi stays unknown until
+  # fm_busy_kimi_verified opens, so none of those is armed here.
   BUSY_GEN=
   case "$HARNESS" in
     codex*)
