@@ -3,17 +3,19 @@
 #
 # These drive the REAL bin/fm-spawn.sh through meta writing with a fake tmux pane
 # and a real isolated git worktree (the same harness shape as
-# tests/fm-spawn-dispatch-profile.test.sh), so each case asserts the delivery mode
-# and project_key= that firstmate would record - WITHOUT the interactive
-# `treehouse get`-in-a-pane step that is environment-flaky under some login shells.
+# tests/fm-spawn-dispatch-profile.test.sh), so each case asserts the project_key=
+# identity and the explicit per-task delivery contract that firstmate would
+# record - WITHOUT the interactive `treehouse get`-in-a-pane step that is
+# environment-flaky under some login shells.
 #
-# The identity bug: fm-spawn derived the registry lookup key from
-# basename($PROJ_ABS), so a project whose registry KEY differs from its clone
-# directory basename (the firstmate repo registered as "Agent-Themis" while its
-# checkout basename is "Firstmate") recorded mode=no-mistakes instead of its true
-# delivery mode, and required post-spawn meta hand-correction. --project-key
-# carries the canonical registry key for the mode lookup; when it is absent the
-# basename fallback preserves back-compat for callers that pass only a project dir.
+# The identity contract: fm-spawn derives the registry identity from
+# basename($PROJ_ABS) unless --project-key or the fm-brief-persisted
+# data/<id>/project-key sidecar carries the canonical key (the firstmate repo
+# registered as "Agent-Themis" while its checkout basename is "Firstmate").
+# The key is ADVISORY identity only - PR identity lookup, standing-posture
+# context, and durable project_key= recording. A ship task's delivery mode and
+# yolo are the explicit --mode/--yolo flags, validated and recorded verbatim;
+# the registry never decides or overrides them.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -110,72 +112,71 @@ seed_project_key() {  # <home> <id> <key>
   printf '%s\n' "$3" > "$1/data/$2/project-key"
 }
 
-# --- 1. ship: --project-key resolves a mode when the key differs from basename --
-# The core fix. Project dir basename is "Firstmate"; the registry key is
-# "Agent-Themis [local-only]". Passing --project-key Agent-Themis must record
-# mode=local-only (not the no-mistakes basename fallback) and persist project_key.
+# --- 1. ship: --project-key records identity; explicit --mode/--yolo record ---
+# Project dir basename is "Firstmate"; the registry key is "Agent-Themis
+# [local-only]". Passing --project-key Agent-Themis must persist project_key,
+# and the explicit --mode/--yolo flags must reach meta verbatim - the registry
+# posture is context only and never rewrites them.
 test_ship_project_key_differs_from_basename() {
   read_case "$(make_case ship-key-diff Firstmate '- Agent-Themis [local-only] - firstmate repo (added 2026-07-20)')"
   seed_brief "$HOME_DIR" cm-a-z1
-  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" cm-a-z1 "$PROJ_DIR" "sh -c :" --project-key Agent-Themis)
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" cm-a-z1 "$PROJ_DIR" "sh -c :" --project-key Agent-Themis --mode local-only --yolo on)
   expect_code 0 "$?" "ship --project-key spawn should succeed"$'\n'"$out"
   meta="$HOME_DIR/state/cm-a-z1.meta"
   assert_present "$meta" "ship --project-key spawn must write meta"
-  assert_grep "mode=local-only" "$meta" "the canonical key Agent-Themis must resolve mode=local-only, not the basename fallback"
+  assert_grep "mode=local-only" "$meta" "the explicit --mode local-only must be recorded verbatim"
+  assert_grep "yolo=on" "$meta" "the explicit --yolo on must be recorded verbatim, never rewritten from the registry"
   assert_grep "project_key=Agent-Themis" "$meta" "the canonical key must be recorded in meta when it differs from the basename"
   assert_grep "kind=ship" "$meta" "meta must record kind=ship"
-  assert_not_contains "$out" "not in registry" "a resolved canonical key must not emit the unregistered warning"
-  pass "fm-spawn --project-key: a key differing from the clone basename resolves the intended mode (local-only) and is recorded"
+  pass "fm-spawn --project-key: a key differing from the clone basename is recorded, and the explicit delivery contract reaches meta verbatim"
 }
 
 # --- 2. ship: key == basename (matching-key project) stays byte-identical -------
 # The common case (clones under projects/): no --project-key, basename IS a
-# registry key. Mode resolves normally and NO project_key= line is written, so the
-# meta stays byte-identical to before this change.
+# registry key. NO project_key= line is written, so the meta stays
+# byte-identical, and the explicit mode is recorded as passed.
 test_ship_matching_key_no_project_key_line() {
   read_case "$(make_case ship-key-match Echo '- Echo [no-mistakes] - voice daemon (added 2026-07-20)')"
   seed_brief "$HOME_DIR" cm-b-z2
-  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" cm-b-z2 "$PROJ_DIR" "sh -c :")
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" cm-b-z2 "$PROJ_DIR" "sh -c :" --mode no-mistakes --yolo off)
   expect_code 0 "$?" "matching-key spawn should succeed"$'\n'"$out"
   meta="$HOME_DIR/state/cm-b-z2.meta"
-  assert_grep "mode=no-mistakes" "$meta" "Echo (key==basename) must resolve mode=no-mistakes"
+  assert_grep "mode=no-mistakes" "$meta" "the explicit --mode no-mistakes must be recorded"
   assert_no_grep "project_key=" "$meta" "when the key equals the basename, meta must NOT carry a project_key= line (byte-identical)"
   pass "fm-spawn: a matching-key project (key==basename) records no project_key= line, keeping meta byte-identical"
 }
 
-# --- 3. ship: no --project-key + a non-key basename reproduces the fallback -----
-# The reproduction AND the preserved back-compat path: without --project-key, the
-# lookup uses basename "Firstmate", which is NOT a registry key, so it falls back
-# to the safe no-mistakes default and is visibly warned. This is what recorded the
-# wrong mode before the fix, and it stays as the deliberate back-compat fallback.
-test_ship_basename_fallback_is_visibly_diagnosed() {
+# --- 3. ship: no --project-key + a non-key basename keeps the identity default --
+# The preserved back-compat identity path: without --project-key or a sidecar,
+# the identity is basename "Firstmate" (key==basename, so no project_key= line),
+# and registry membership neither decides nor blocks anything - the explicit
+# delivery contract is recorded as passed.
+test_ship_basename_fallback_records_no_key_line() {
   read_case "$(make_case ship-fallback Firstmate '- Agent-Themis [local-only] - firstmate repo (added 2026-07-20)')"
   seed_brief "$HOME_DIR" cm-c-z3
-  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" cm-c-z3 "$PROJ_DIR" "sh -c :")
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" cm-c-z3 "$PROJ_DIR" "sh -c :" --mode no-mistakes --yolo off)
   expect_code 0 "$?" "basename-fallback spawn should still succeed"$'\n'"$out"
   meta="$HOME_DIR/state/cm-c-z3.meta"
-  assert_grep "mode=no-mistakes" "$meta" "without --project-key, the non-key basename must fall back to the safe no-mistakes default"
+  assert_grep "mode=no-mistakes" "$meta" "the explicit --mode no-mistakes must be recorded on the basename-identity path"
   assert_no_grep "project_key=" "$meta" "the basename fallback records no project_key= line (key==basename)"
-  assert_contains "$out" "not in registry" "the safe fallback must remain visibly diagnosed on stderr"
-  pass "fm-spawn: the basename fallback keeps the safest no-mistakes default and stays visibly diagnosed (unknown-project safeguard preserved)"
+  pass "fm-spawn: the basename identity fallback records no project_key= line and the explicit delivery contract as passed"
 }
 
 # --- 3b. deterministic propagation: the fm-brief sidecar drives the key ---------
 # The robust path: firstmate names the key ONCE as fm-brief's repo-name, which
 # persists data/<id>/project-key; fm-spawn reads it with NO --project-key and
-# resolves the intended mode. This is what ends the repeated basename fallback
-# without relying on firstmate remembering a second flag.
+# records the canonical identity. The key's registered [local-only] posture must
+# NOT override the explicit --mode: the registry is advisory identity only.
 test_sidecar_drives_key_without_flag() {
   read_case "$(make_case sidecar-drives Firstmate '- Agent-Themis [local-only] - firstmate repo (added 2026-07-20)')"
   seed_brief "$HOME_DIR" cm-s-z1
   seed_project_key "$HOME_DIR" cm-s-z1 Agent-Themis
-  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" cm-s-z1 "$PROJ_DIR" "sh -c :")
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" cm-s-z1 "$PROJ_DIR" "sh -c :" --mode no-mistakes --yolo off)
   expect_code 0 "$?" "sidecar-driven spawn should succeed"$'\n'"$out"
   meta="$HOME_DIR/state/cm-s-z1.meta"
-  assert_grep "mode=local-only" "$meta" "the fm-brief-persisted key must resolve mode=local-only with NO --project-key flag"
+  assert_grep "mode=no-mistakes" "$meta" "the explicit --mode must win even though the sidecar key's registered posture is local-only"
   assert_grep "project_key=Agent-Themis" "$meta" "the sidecar-resolved key must be recorded when it differs from the basename"
-  assert_not_contains "$out" "not in registry" "the persisted key resolves, so no unregistered warning"
-  pass "fm-spawn: the fm-brief-persisted data/<id>/project-key drives the delivery-mode identity deterministically, no flag needed"
+  pass "fm-spawn: the fm-brief-persisted data/<id>/project-key drives the recorded identity, and the registry posture never overrides the explicit mode"
 }
 
 # --- 3c. an explicit --project-key overrides the persisted sidecar --------------
@@ -184,11 +185,11 @@ test_explicit_key_overrides_sidecar() {
 - Echo [no-mistakes] - voice daemon (added 2026-07-20)')"
   seed_brief "$HOME_DIR" cm-s-z2
   seed_project_key "$HOME_DIR" cm-s-z2 Echo
-  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" cm-s-z2 "$PROJ_DIR" "sh -c :" --project-key Agent-Themis)
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" cm-s-z2 "$PROJ_DIR" "sh -c :" --project-key Agent-Themis --mode no-mistakes --yolo off)
   expect_code 0 "$?" "override spawn should succeed"$'\n'"$out"
   meta="$HOME_DIR/state/cm-s-z2.meta"
-  assert_grep "mode=local-only" "$meta" "an explicit --project-key must win over the persisted sidecar (Agent-Themis, not the sidecar's Echo)"
-  assert_grep "project_key=Agent-Themis" "$meta" "the explicit key must be the one recorded"
+  assert_grep "project_key=Agent-Themis" "$meta" "the explicit key must win over the persisted sidecar (Agent-Themis, not the sidecar's Echo)"
+  assert_grep "mode=no-mistakes" "$meta" "the explicit --mode must be recorded regardless of either key's registered posture"
   pass "fm-spawn: an explicit --project-key overrides the fm-brief-persisted sidecar"
 }
 
@@ -196,19 +197,19 @@ test_explicit_key_overrides_sidecar() {
 # The whole-bug-class regression guard: the two scripts independently derived
 # identity and disagreed. Here real fm-brief writes the sidecar (no hand-mimic)
 # and real fm-spawn reads it, proving they agree on the file's PATH and FORMAT.
-# key != basename: Agent-Themis must flow through to mode=local-only end to end.
+# key != basename: Agent-Themis must flow through end to end, and the brief's
+# recorded "Delivery contract: mode=" line must agree with the spawn's --mode.
 test_end_to_end_brief_then_spawn_key_differs() {
   read_case "$(make_case e2e-key-diff Firstmate '- Agent-Themis [local-only] - firstmate repo (added 2026-07-20)')"
-  FM_HOME="$HOME_DIR" "$ROOT/bin/fm-brief.sh" e2e-a1 Agent-Themis >/dev/null 2>&1 \
+  FM_HOME="$HOME_DIR" "$ROOT/bin/fm-brief.sh" e2e-a1 Agent-Themis --mode local-only >/dev/null 2>&1 \
     || fail "real fm-brief should scaffold the Agent-Themis brief"
   assert_present "$HOME_DIR/data/e2e-a1/project-key" "real fm-brief must persist the sidecar that fm-spawn reads"
-  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" e2e-a1 "$PROJ_DIR" "sh -c :")
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" e2e-a1 "$PROJ_DIR" "sh -c :" --mode local-only --yolo off)
   expect_code 0 "$?" "the real fm-brief -> fm-spawn chain should succeed"$'\n'"$out"
   meta="$HOME_DIR/state/e2e-a1.meta"
-  assert_grep "mode=local-only" "$meta" "real chain: Agent-Themis (key != basename Firstmate) must resolve mode=local-only end to end"
+  assert_grep "mode=local-only" "$meta" "real chain: the explicit mode agreed between brief and spawn must be recorded"
   assert_grep "project_key=Agent-Themis" "$meta" "real chain: the key fm-brief persisted must be the one fm-spawn records"
-  assert_not_contains "$out" "not in registry" "real chain: the persisted key resolves, no unregistered warning"
-  pass "fm-brief -> fm-spawn (real, no hand-mimic): the two scripts agree on the persisted-key path and format (key != basename)"
+  pass "fm-brief -> fm-spawn (real, no hand-mimic): the two scripts agree on the persisted-key path, format, and delivery contract (key != basename)"
 }
 
 # --- 3e. END-TO-END: matching key stays byte-identical WITH a real sidecar ------
@@ -217,18 +218,20 @@ test_end_to_end_brief_then_spawn_key_differs() {
 # project_key= line - byte-identical meta, proven with a real sidecar present.
 test_end_to_end_brief_then_spawn_matching_key_byte_identical() {
   read_case "$(make_case e2e-key-match Echo '- Echo [no-mistakes] - voice daemon (added 2026-07-20)')"
-  FM_HOME="$HOME_DIR" "$ROOT/bin/fm-brief.sh" e2e-b2 Echo >/dev/null 2>&1 \
+  FM_HOME="$HOME_DIR" "$ROOT/bin/fm-brief.sh" e2e-b2 Echo --mode no-mistakes >/dev/null 2>&1 \
     || fail "real fm-brief should scaffold the Echo brief"
   assert_present "$HOME_DIR/data/e2e-b2/project-key" "fm-brief writes a sidecar even for a matching-key project"
-  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" e2e-b2 "$PROJ_DIR" "sh -c :")
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" e2e-b2 "$PROJ_DIR" "sh -c :" --mode no-mistakes --yolo off)
   expect_code 0 "$?" "the real matching-key chain should succeed"$'\n'"$out"
   meta="$HOME_DIR/state/e2e-b2.meta"
-  assert_grep "mode=no-mistakes" "$meta" "real chain: Echo (key == basename) resolves no-mistakes end to end"
+  assert_grep "mode=no-mistakes" "$meta" "real chain: the explicit no-mistakes contract is recorded end to end"
   assert_no_grep "project_key=" "$meta" "real chain: a matching-key project with a real sidecar present must still write NO project_key= line (byte-identical meta)"
   pass "fm-brief -> fm-spawn (real): a matching-key project writes a sidecar yet keeps meta byte-identical (no project_key= line)"
 }
 
 # --- 4. scout: honors --project-key the same way (every worker kind) -----------
+# A scout delivers a report and records no delivery posture: --mode is rejected
+# for scouts, so its meta must carry the canonical key but no mode= line.
 test_scout_project_key_resolves_mode() {
   read_case "$(make_case scout-key-diff Firstmate '- Agent-Themis [local-only] - firstmate repo (added 2026-07-20)')"
   seed_brief "$HOME_DIR" sc-a-z4
@@ -236,22 +239,23 @@ test_scout_project_key_resolves_mode() {
   expect_code 0 "$?" "scout --project-key spawn should succeed"$'\n'"$out"
   meta="$HOME_DIR/state/sc-a-z4.meta"
   assert_grep "kind=scout" "$meta" "meta must record kind=scout"
-  assert_grep "mode=local-only" "$meta" "a scout resolves the same canonical key (mode recorded even though scout teardown ignores it)"
+  assert_no_grep "mode=" "$meta" "a scout records no delivery posture (no mode= line)"
   assert_grep "project_key=Agent-Themis" "$meta" "a scout records the canonical key when it differs from the basename"
-  pass "fm-spawn --project-key --scout: a scout honors the same canonical-key identity contract"
+  pass "fm-spawn --project-key --scout: a scout honors the same canonical-key identity contract and records no delivery posture"
 }
 
-# --- 5. unknown key via --project-key: safe fallback, recorded, and diagnosed --
+# --- 5. unknown key via --project-key: recorded for traceability ---------------
+# An unregistered key does not block a spawn: delivery comes from the explicit
+# flags, the identity is recorded verbatim, and PR identity resolves to none.
 test_unknown_project_key_falls_back_and_warns() {
   read_case "$(make_case unknown-key Firstmate '- Echo [no-mistakes] - voice daemon (added 2026-07-20)')"
   seed_brief "$HOME_DIR" cm-d-z5
-  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" cm-d-z5 "$PROJ_DIR" "sh -c :" --project-key Nonexistent-Key)
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" cm-d-z5 "$PROJ_DIR" "sh -c :" --project-key Nonexistent-Key --mode no-mistakes --yolo off)
   expect_code 0 "$?" "unknown-key spawn should still succeed"$'\n'"$out"
   meta="$HOME_DIR/state/cm-d-z5.meta"
-  assert_grep "mode=no-mistakes" "$meta" "an unknown --project-key must fall back to the safest no-mistakes default"
+  assert_grep "mode=no-mistakes" "$meta" "an unknown key spawns on the explicit delivery contract"
   assert_grep "project_key=Nonexistent-Key" "$meta" "the explicit key is still recorded when it differs from the basename, for traceability"
-  assert_contains "$out" "not in registry" "an unknown --project-key must remain visibly diagnosed"
-  pass "fm-spawn --project-key: an unknown key falls back to no-mistakes, is recorded, and is visibly diagnosed"
+  pass "fm-spawn --project-key: an unknown key is recorded for traceability and never decides delivery"
 }
 
 test_atlas_spawn_abort_removes_only_unpublished_binding() {
@@ -287,7 +291,7 @@ SH
   chmod +x "$fake_root/bin/fm-pr-identity.sh"
   FM_FAKE_ROOT="$fake_root"
   out=$(run_spawn_with_pane "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$HOME_DIR" \
-    atlas-abort-z8 "$PROJ_DIR" --harness claude --project-key Atlas)
+    atlas-abort-z8 "$PROJ_DIR" --harness claude --project-key Atlas --mode direct-PR --yolo off)
   rc=$?
   [ "$rc" -ne 0 ] || fail "Atlas spawn abort should fail when the backend did not enter a worktree"$'\n'"$out"
   assert_absent "$HOME_DIR/state/atlas-abort-z8.pr-binding" \
@@ -311,7 +315,7 @@ test_secondmate_rejects_project_key() {
 # --- 7. batch: --project-key is rejected (heterogeneous pairs) -----------------
 test_batch_rejects_project_key() {
   read_case "$(make_case batch-reject Firstmate '')"
-  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "a-z7=projects/x" "b-z8=projects/y" --project-key Whatever)
+  out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "a-z7=projects/x" "b-z8=projects/y" --project-key Whatever --mode no-mistakes --yolo off)
   rc=$?
   [ "$rc" -ne 0 ] || fail "a batch spawn with --project-key must be rejected"$'\n'"$out"
   assert_contains "$out" "applies to a single spawn only" "the batch rejection must name the reason"
@@ -335,7 +339,7 @@ test_project_key_requires_value() {
 
 test_ship_project_key_differs_from_basename
 test_ship_matching_key_no_project_key_line
-test_ship_basename_fallback_is_visibly_diagnosed
+test_ship_basename_fallback_records_no_key_line
 test_sidecar_drives_key_without_flag
 test_explicit_key_overrides_sidecar
 test_end_to_end_brief_then_spawn_key_differs
