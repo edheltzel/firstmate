@@ -333,7 +333,7 @@ case "${1:-} ${2:-}" in
     printf '{"sessions":[{"name":"default","running":true,"socket_path":"%s.sock"}]}\n' "$state"
     ;;
   "workspace list")
-    printf '{"result":{"workspaces":[{"workspace_id":"ws1","label":"Archon-%s","focused":true,"active_tab_id":"t-focus"}]}}\n' "$mate_id"
+    printf '{"result":{"workspaces":[{"workspace_id":"ws1","label":"2ndmate-%s","focused":true,"active_tab_id":"t-focus"}]}}\n' "$mate_id"
     ;;
   "tab list")
     if [ -e "$spawned" ]; then
@@ -412,18 +412,18 @@ SH
 # Drop every harness env marker from bin/fm-harness.sh detect_own so the
 # surrounding interactive shell cannot leak past the suite's fake ps harness.
 # Markers today: CLAUDECODE (claude), PI_CODING_AGENT plus FM_PI_HARNESS
-# (Pi family), GROK_AGENT (grok), and OMP_AGENT (omp).
+# (Pi family), GROK_AGENT (grok).
 # codex and opencode have no env markers (ancestry only). Without this, a local
 # claude/pi/grok session fails cases that pin a different fake harness while CI
 # (no ambient markers) still passes.
 run_session_start() {
   local home=$1 root=$2 path=$3 pi_harness=${4:-}
   if [ -n "$pi_harness" ]; then
-    env -u CLAUDECODE -u GROK_AGENT -u OMP_AGENT PI_CODING_AGENT=true FM_PI_HARNESS="$pi_harness" \
+    env -u CLAUDECODE -u GROK_AGENT PI_CODING_AGENT=true FM_PI_HARNESS="$pi_harness" \
       FM_HOME="$home" FM_ROOT_OVERRIDE="$root" PATH="$path" \
       "$SESSION_START"
   else
-    env -u CLAUDECODE -u PI_CODING_AGENT -u FM_PI_HARNESS -u GROK_AGENT -u OMP_AGENT \
+    env -u CLAUDECODE -u PI_CODING_AGENT -u FM_PI_HARNESS -u GROK_AGENT \
       FM_HOME="$home" FM_ROOT_OVERRIDE="$root" PATH="$path" \
       "$SESSION_START"
   fi
@@ -684,6 +684,39 @@ EOF
   pass "session start stays read-only when lock ownership cannot be published"
 }
 
+test_trace_context_effective_state_is_frozen_after_lock() {
+  local rec root home fakebin out frozen
+  rec=$(new_world trace-context-session-state)
+  IFS='|' read -r root home fakebin <<EOF
+$rec
+EOF
+  make_fake_toolchain "$fakebin"
+  make_fake_ps_claude "$fakebin"
+  : > "$home/config/trace-context"
+
+  FM_TRACE_CONTEXT=off run_session_start "$home" "$root" "$fakebin:$BASE_PATH" >/dev/null
+  [ "$(awk '{print $2}' "$home/state/.trace-context-effective")" = off ] \
+    || fail "session start must freeze an env-off override over a present config flag"
+
+  rm "$home/config/trace-context"
+  FM_TRACE_CONTEXT=on run_session_start "$home" "$root" "$fakebin:$BASE_PATH" >/dev/null
+  [ "$(awk '{print $2}' "$home/state/.trace-context-effective")" = on ] \
+    || fail "a new session start must freeze an env-on override over an absent config flag"
+  frozen=$(cat "$home/state/.trace-context-effective")
+
+  sleep 300 &
+  holder_pid=$!
+  printf '%s\n' "$holder_pid" > "$home/state/.lock"
+  out=$(FM_TRACE_CONTEXT=off run_session_start "$home" "$root" "$fakebin:$BASE_PATH")
+  kill "$holder_pid" 2>/dev/null || true
+  wait "$holder_pid" 2>/dev/null || true
+  assert_contains "$out" "READ-ONLY SESSION" "trace-context refusal fixture did not enter read-only mode"
+  [ "$(cat "$home/state/.trace-context-effective")" = "$frozen" ] \
+    || fail "a lock-refused session must not mutate the frozen trace-context state"
+
+  pass "locked session start freezes trace context and lock refusal leaves it unchanged"
+}
+
 test_session_lock_concurrent_single_winner() {
   local rec root home fakebin ready completed winners pids i pid count
   rec=$(new_world lock-concurrency)
@@ -729,9 +762,7 @@ SH
   i=1
   while [ "$i" -le 40 ]; do
     (
-      # BASHPID does not exist on stock macOS Bash 3.2; a child's PPID is this
-      # subshell's own pid, which is the portable spelling of the same value.
-      harness_pid=$(exec sh -c 'echo "$PPID"')
+      harness_pid=$(sh -c 'printf "%s\n" "$PPID"')
       : > "$home/state/harness-$harness_pid"
       : > "$ready/$i"
       while [ "$(find "$ready" -type f | wc -l | tr -d ' ')" -lt 40 ]; do
@@ -1396,6 +1427,7 @@ EOF
 test_context_digest_absent_empty_present
 test_lock_refusal_read_only_path
 test_lock_write_failure_read_only_path
+test_trace_context_effective_state_is_frozen_after_lock
 test_session_lock_concurrent_single_winner
 test_output_ordering_diagnostics_lead
 test_herdr_backend_diagnostics_follow_real_session_start
@@ -1421,3 +1453,5 @@ test_pi_diagnostic_rejects_stale_loaded_marker
 test_pi_diagnostic_accepts_prelock_loaded_marker
 test_pi_diagnostic_rejects_missing_turnend_guard_marker
 test_pi_diagnostic_rejects_previous_session_loaded_marker
+
+echo "# fm-session-start.test.sh: all assertions passed"

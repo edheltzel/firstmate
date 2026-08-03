@@ -23,8 +23,6 @@
 #   tasks[]: one row per state/<id>.meta, sorted by id.
 #     current_state is parsed from bin/fm-crew-state.sh <id> and preserves
 #     state, source, detail, and raw line separately.
-#     project_key is the persisted canonical registry identity when available;
-#     reporting never substitutes a clone basename for that key.
 #     paths.status_log.last_event is historical wake-event data only, never
 #     current state.
 #     hints.open_decisions is the keyed open-decision set returned by
@@ -54,12 +52,6 @@
 #     structured homes with an unknown current classification are partial, not
 #     unreadable, and retain independently trustworthy structured surfaces.
 #   secondmate_guidance: return-channel action note for renderers and bearings.
-#   projects[]: project-centered reporting records derived from Tasks Axi rows,
-#     current task metadata, local branch refs, and structured decision folds.
-#     Their classification reconciles Tasks Axi state with authoritative worker
-#     state so merge-ready work remains captain-awaited rather than self-progressing.
-#     This is the deterministic local reporting input; it never performs GitHub
-#     or other network discovery.
 #
 # Compatibility: JSON is the primary machine-readable surface.
 # Human views must render this output instead of parsing state files again.
@@ -142,9 +134,6 @@ validate_positive_bound FM_SNAPSHOT_REGISTRY_TIMEOUT "$FM_SNAPSHOT_REGISTRY_TIME
 # shellcheck source=bin/fm-ff-lib.sh
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/fm-ff-lib.sh"  # validate_secondmate_home: shared seeded-home boundary checks
-# shellcheck source=bin/fm-tangle-lib.sh
-# shellcheck disable=SC1091
-. "$SCRIPT_DIR/fm-tangle-lib.sh"
 
 usage() {
   cat <<'EOF'
@@ -194,49 +183,6 @@ path_present_json() {  # <path>
   [ -e "$1" ] && present=1
   jq -n --arg path "$1" --argjson present "$(bool_json "$present")" \
     '{path:$path,present:$present}'
-}
-
-git_branch_json() {  # <directory>
-  local dir=$1 active='' default='' selected='' clean=false ready=false
-  if [ -d "$dir" ] && git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    active=$(git -C "$dir" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
-    default=$(fm_default_branch "$dir" 2>/dev/null || true)
-    selected=$active
-    [ -n "$selected" ] || selected=$default
-    if [ -z "$(git -C "$dir" status --porcelain 2>/dev/null)" ]; then
-      clean=true
-    fi
-    if [ -n "$active" ] && [ -n "$default" ] && [ "$active" != "$default" ] && [ "$clean" = true ]; then
-      ready=true
-    fi
-  fi
-  jq -n --arg active "$active" --arg default "$default" --arg selected "$selected" \
-    --argjson clean "$clean" --argjson ready "$ready" \
-    '{active:($active | if . == "" then null else . end),
-      default:($default | if . == "" then null else . end),
-      selected:($selected | if . == "" then null else . end),
-      clean:$clean,ready:$ready}'
-}
-
-project_default_branches_json() {
-  local dir name default
-  for dir in "$PROJECTS"/*; do
-    [ -d "$dir" ] || continue
-    if git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-      name=$(basename "$dir")
-      default=$(fm_default_branch "$dir" 2>/dev/null || true)
-      [ -n "$default" ] || continue
-      jq -n --arg project "$name" --arg default "$default" \
-        '{project:$project,branch:{active:[],default:[$default],selected:[$default]}}'
-    fi
-  done
-  if git -C "$FM_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    default=$(fm_default_branch "$FM_ROOT" 2>/dev/null || true)
-    if [ -n "$default" ]; then
-      jq -n --arg project "$(basename "$FM_ROOT")" --arg default "$default" \
-        '{project:$project,branch:{active:[],default:[$default],selected:[$default]}}'
-    fi
-  fi
 }
 
 meta_value() {  # <meta-file> <key>
@@ -453,9 +399,10 @@ backlog_json() {  # [<backlog-path>] - defaults to this home's $BACKLOG
 
 task_json_lines() {
   local meta id kind harness mode yolo project worktree home projects backend target status_log report_path
-  local pr pr_source event_json current_json endpoint_exists agent_alive meta_json status_json report_json worktree_json branch_json
+  local remote_host remote_root remote_state remote_rc remote_home_present
+  local pr pr_source event_json current_json endpoint_exists agent_alive meta_json status_json report_json worktree_json home_json
   local last_event_raw current_state current_source pending_decision blocked_event report_present=0 pr_from_status
-  local open_decisions_tsv open_decisions_json project_key
+  local open_decisions_tsv open_decisions_json
 
   for meta in "$STATE"/*.meta; do
     [ -e "$meta" ] || continue
@@ -469,9 +416,17 @@ task_json_lines() {
     worktree=$(meta_value "$meta" worktree)
     home=$(meta_value "$meta" home)
     projects=$(meta_value "$meta" projects)
-    project_key=$(meta_value "$meta" project_key)
-    backend=$(fm_backend_of_meta "$meta")
-    target=$(fm_backend_target_of_meta "$meta")
+    remote_host=$(meta_value "$meta" remote_host)
+    remote_root=$(meta_value "$meta" remote_root)
+    remote_home_present=null
+    if [ -n "$remote_host" ]; then
+      backend=$(meta_value "$meta" remote_backend)
+      [ -n "$backend" ] || backend=unknown
+      target=$(meta_value "$meta" remote_target)
+    else
+      backend=$(fm_backend_of_meta "$meta")
+      target=$(fm_backend_target_of_meta "$meta")
+    fi
     status_log="$STATE/$id.status"
     report_path="$DATA/$id/report.md"
     pr=$(meta_value "$meta" pr)
@@ -523,16 +478,38 @@ task_json_lines() {
     blocked_event=$(printf '%s' "$open_decisions_json" | jq 'if any(.[]; .verb == "blocked") then 1 else 0 end')
 
     endpoint_exists=null
-    if [ -n "$target" ]; then
-      if fm_backend_target_exists "$backend" "$target" "fm-$id" >/dev/null 2>&1; then
-        endpoint_exists=true
-      else
-        endpoint_exists=false
-      fi
-    fi
     agent_alive=not_checked
-    if [ "$kind" = secondmate ] && [ -n "$target" ]; then
-      agent_alive=$(fm_backend_agent_alive "$backend" "$target" 2>/dev/null || printf unknown)
+    if [ -n "$remote_host" ]; then
+      if remote_state=$(run_timed "$FM_SNAPSHOT_SECONDMATE_TIMEOUT" \
+        "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh state "$id" 2>/dev/null); then
+        remote_rc=0
+      else
+        remote_rc=$?
+      fi
+      if [ "$remote_rc" -eq 0 ]; then
+        remote_home_present=true
+        remote_state=$(printf '%s\n' "$remote_state" | tail -1)
+        case "$remote_state" in
+          alive) endpoint_exists=true; agent_alive=alive ;;
+          dead) endpoint_exists=true; agent_alive=dead ;;
+          missing) endpoint_exists=false; agent_alive=dead ;;
+          *) endpoint_exists=null; agent_alive=unknown ;;
+        esac
+      else
+        endpoint_exists=null
+        agent_alive=unknown
+      fi
+    else
+      if [ -n "$target" ]; then
+        if fm_backend_target_exists "$backend" "$target" "fm-$id" >/dev/null 2>&1; then
+          endpoint_exists=true
+        else
+          endpoint_exists=false
+        fi
+      fi
+      if [ "$kind" = secondmate ] && [ -n "$target" ]; then
+        agent_alive=$(fm_backend_agent_alive "$backend" "$target" 2>/dev/null || printf unknown)
+      fi
     fi
 
     [ -f "$report_path" ] && report_present=1 || report_present=0
@@ -540,8 +517,13 @@ task_json_lines() {
     status_json=$event_json
     report_json=$(path_present_json "$report_path")
     if [ -n "$worktree" ]; then worktree_json=$(path_present_json "$worktree"); else worktree_json=$(jq -n '{path:null,present:false}'); fi
-    if [ -n "$home" ]; then home_json=$(path_present_json "$home"); else home_json=$(jq -n '{path:null,present:false}'); fi
-    if [ -n "$worktree" ]; then branch_json=$(git_branch_json "$worktree"); else branch_json=$(jq -n '{active:null,default:null,selected:null}'); fi
+    if [ -n "$home" ] && [ -n "$remote_host" ]; then
+      home_json=$(jq -n --arg path "$home" --argjson present "$remote_home_present" '{path:$path,present:$present}')
+    elif [ -n "$home" ]; then
+      home_json=$(path_present_json "$home")
+    else
+      home_json=$(jq -n '{path:null,present:false}')
+    fi
 
     jq -n \
       --arg id "$id" \
@@ -550,12 +532,13 @@ task_json_lines() {
       --arg mode "$mode" \
       --arg yolo "$yolo" \
       --arg project "$project" \
-      --arg project_key "$project_key" \
       --arg worktree "$worktree" \
       --arg home "$home" \
       --arg projects "$projects" \
       --arg backend "$backend" \
       --arg target "$target" \
+      --arg remote_host "$remote_host" \
+      --arg remote_root "$remote_root" \
       --arg pr "$pr" \
       --arg pr_source "$pr_source" \
       --arg agent_alive "$agent_alive" \
@@ -567,7 +550,6 @@ task_json_lines() {
       --argjson report "$report_json" \
       --argjson worktree_path "$worktree_json" \
       --argjson home_path "$home_json" \
-      --argjson branch "$branch_json" \
       --argjson endpoint_exists "$endpoint_exists" \
       --argjson open_decisions "$open_decisions_json" \
       --argjson pending_decision "$(bool_json "$pending_decision")" \
@@ -580,8 +562,8 @@ task_json_lines() {
         mode:($mode // ""),
         yolo:($yolo // ""),
         project:($project // ""),
-        project_key:($project_key | if . == "" then null else . end),
         backend:$backend,
+        remote:(if $remote_host == "" then null else {host:$remote_host,root:$remote_root} end),
         paths:{
           meta:$meta_path,
           status_log:$status_log,
@@ -589,7 +571,6 @@ task_json_lines() {
           home:$home_path,
           report:$report
         },
-        branch:$branch,
         secondmate_projects:($projects | if . == "" then [] else split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | map(select(. != "")) end),
         current_state:($current_state + {observed_at:$observed_at,freshness:"fresh"}),
         endpoint:{target:($target | if . == "" then null else . end),exists:$endpoint_exists,agent_alive:$agent_alive,
@@ -664,7 +645,6 @@ secondmate_home_summary_json() {  # <backlog-json> <tasks-json>
     def trunc($n):
       tostring | gsub("\\s+"; " ")
       | if length > $n then .[:$n] + "…" else . end;
-    def backlog_for($id): ($backlog.records[]? | select(.structured and .id == $id)) // {};
     ([ $backlog.records[]?
        | select((.state == "in_flight" or .state == "queued") and (.structured | not)) ]) as $unstructured_current
     | ([ $backlog.records[]? | select(.state == "in_flight" and .structured) ]) as $owned_in_flight
@@ -677,14 +657,12 @@ secondmate_home_summary_json() {  # <backlog-json> <tasks-json>
     | ([ $queued_all[]
          | select(.captain_actionable == true)
          | {id,key:.id,verb:"captain-hold",summary:(.title | trunc(160)),
-            reason:(.hold_reason | trunc(160)),source:"backlog",project:(.repo // null)} ]) as $captain_holds_all
+            reason:(.hold_reason | trunc(160)),source:"backlog"} ]) as $captain_holds_all
     | ([ $backlog.records[]? | select(.state == "done" and .structured and .kind != "captain")
          | {id:(.id | trunc(120)),title:(.title | trunc(120)),
             pr_url:((.pr_url // null) | if . == null then null else trunc(500) end),
             report_path:((.report_path // null) | if . == null then null else trunc(500) end),
-            local_note:((.local_note // null) | if . == null then null else trunc(120) end),
-            repo:((.repo // null) | if . == null then null else trunc(120) end),
-            priority:((.priority // null) | if . == null then null else trunc(40) end),completion} ]
+            local_note:((.local_note // null) | if . == null then null else trunc(120) end),completion} ]
        | sort_by([(.completion.date // ""), .id]) | reverse) as $landed_all
     | ([ $tasks[] | select(.current_state.state == "unknown") ]) as $unknown_children
     | ([ $owned_in_flight[]
@@ -722,16 +700,13 @@ secondmate_home_summary_json() {  # <backlog-json> <tasks-json>
          | $tasks[]
          | select(.id == $work.id and .current_state.state == "working")
          | {id,kind,state:.current_state.state,source:.current_state.source,
-            project:(.project // null),branch:.branch,priority:(backlog_for(.id).priority // null),
             doing:((.current_state.detail // "") | trunc(120))} ]) as $active_all
     | ($captain_holds_all
        + ([ $tasks[] as $t | ($t.hints.open_decisions // [])[]
-            | {id:$t.id,key,verb,summary:(.summary | trunc(160)),reason:null,source:"status",
-               project:($t.project // null)} ])) as $decisions_all
+            | {id:$t.id,key,verb,summary:(.summary | trunc(160)),reason:null,source:"status"} ])) as $decisions_all
     | ([ $queued_all[]
          | select((.unresolved_blocker_ids | length) > 0 or (.hold_reason != null and .hold_kind != null))
          | {id:(.id | trunc(120)),title:(.title | trunc(90)),
-            repo:(.repo // null),priority:(.priority // null),
             blocked_by:((.unresolved_blocker_ids | join(",")) | if . == "" then null else trunc(120) end),
             blocked_by_ids:(.blocked_by_ids | map(trunc(120))),
             unresolved_blocker_ids:(.unresolved_blocker_ids | map(trunc(120))),
@@ -740,8 +715,7 @@ secondmate_home_summary_json() {  # <backlog-json> <tasks-json>
            | $tasks[]
            | select(.id == $work.id and (.current_state.state == "parked" or .current_state.state == "paused" or .current_state.state == "blocked"))
            | select(($work.hold_reason != null and $work.hold_kind != null) | not)
-           | {id,title:((backlog_for(.id).title // .id) | trunc(90)),
-              repo:(.project // null),priority:(backlog_for(.id).priority // null),blocked_by:null,
+           | {id,title:((.backlog.title // .id) | trunc(90)),blocked_by:null,
               blocked_by_ids:[],unresolved_blocker_ids:[],
               reason:((.current_state.detail // .current_state.state) | trunc(120)),source:"child-state"} ]) as $holds_all
     | ($backlog.present == true
@@ -906,9 +880,13 @@ BASH
         | select(startswith("- "))
         | (capture("^- (?<id>[^[:space:]]+)")?) as $id
         | select($id != null)
-        | (capture("^.*\\(home:[[:space:]]*(?<home>[^;)]*);[[:space:]]*scope:[[:space:]]*.*;[[:space:]]*projects:[[:space:]]*[^;)]*;[[:space:]]*added[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}\\)[[:space:]]*$")?) as $home
-        | {id:$id.id,home:($home.home // null),registered:true,
-           registry_error:(if $home == null or ($home.home | length) == 0 then "registry entry has no home" else null end)} ]
+        | ([capture("^.*\\(host:[[:space:]]*(?<host>[^;)]*);[[:space:]]*root:[[:space:]]*(?<root>[^;)]*);[[:space:]]*home:[[:space:]]*(?<home>[^;)]*);[[:space:]]*scope:[[:space:]]*.*;[[:space:]]*projects:[[:space:]]*[^;)]*;[[:space:]]*added[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}\\)[[:space:]]*$")?][0] // null) as $remote
+        | ([capture("^.*\\(home:[[:space:]]*(?<home>[^;)]*);[[:space:]]*scope:[[:space:]]*.*;[[:space:]]*projects:[[:space:]]*[^;)]*;[[:space:]]*added[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}\\)[[:space:]]*$")?][0] // null) as $local
+        | ($local // $remote) as $route
+        | (($local == null) and ($remote != null)) as $is_remote
+        | {id:$id.id,home:($route.home // null),host:(if $is_remote then $remote.host else null end),root:(if $is_remote then $remote.root else null end),
+           remote:$is_remote,registered:true,
+           registry_error:(if $route == null or ($route.home | length) == 0 then "registry entry has no home" else null end)} ]
       | group_by(.id)
       | map(if length > 1 then .[0] + {registry_error:"duplicate secondmate id in registry"} else .[0] end)
 JQ
@@ -1030,10 +1008,16 @@ BASH
 }
 
 terminal_evidence_json() {  # <parent-task-json> <event-note> <evidence-contradicts>
-  local task=$1 note=$2 evidence_contradicts=$3 backend target exists expected out rc clean bytes lines seen=false contradiction=false reason=''
+  local task=$1 note=$2 evidence_contradicts=$3 backend target exists expected out rc clean bytes lines seen=false contradiction=false reason='' remote_host
   backend=$(printf '%s' "$task" | jq -r '.backend // ""')
   target=$(printf '%s' "$task" | jq -r '.endpoint.target // ""')
   exists=$(printf '%s' "$task" | jq -r '.endpoint.exists // "unknown"')
+  remote_host=$(printf '%s' "$task" | jq -r '.remote.host // ""')
+  if [ -n "$remote_host" ]; then
+    jq -n --arg observed "$SNAPSHOT_NOW" --arg reason "remote terminal evidence is not collected by the primary" \
+      '{provenance:"remote-direct-report-terminal",trust:"untrusted-supplement",captured:false,observed_at:$observed,freshness:"not-collected",reason:$reason,lines:0,bytes:0,event_note_seen:false,contradiction:false}'
+    return 0
+  fi
   expected=$(printf '%s' "$task" | jq -r '"fm-" + (.id // "")')
   if [ -z "$target" ] || [ "$exists" = false ]; then
     [ "$exists" = false ] && reason="recorded endpoint is absent" || reason="no recorded endpoint"
@@ -1139,7 +1123,7 @@ parent_evidence_reconciliation_json() {  # <summary-json> <activities-json> <dec
 
 secondmate_current_json() {  # <parent-tasks-json>
   local tasks=$1 registry union rows total_registered total shown truncated
-  local row id home registered registry_error task status_file event_raw event_note event_epoch event_age
+  local row id home host remote registered registry_error task status_file event_raw event_note event_epoch event_age
   local activity_scan activities decisions reconciliation provenance freshness reason summary summary_rc summary_bytes summary_valid summary_reason summary_invalidity state current_reason terminal terminal_contradiction contradiction
   local records='[]' seen_homes=''
   registry=$(registry_secondmates_json) || return 1
@@ -1168,6 +1152,8 @@ secondmate_current_json() {  # <parent-tasks-json>
     [ -n "$row" ] || continue
     id=$(printf '%s' "$row" | jq -r '.id')
     home=$(printf '%s' "$row" | jq -r '.home // ""')
+    host=$(printf '%s' "$row" | jq -r '.host // ""')
+    remote=$(printf '%s' "$row" | jq -r '.remote // false')
     registered=$(printf '%s' "$row" | jq -r '.registered')
     registry_error=$(printf '%s' "$row" | jq -r '.registry_error // ""')
     task=$(printf '%s' "$row" | jq -c '.parent_task // {}')
@@ -1195,40 +1181,53 @@ secondmate_current_json() {  # <parent-tasks-json>
       esac
     fi
     if [ -z "$reason" ]; then
-      if ! validate_secondmate_home "$id" "$home" 2>/dev/null; then
+      if [ "$remote" = true ]; then
+        [ -n "$host" ] || reason="invalid remote route: missing SSH host"
+        case " $seen_homes " in
+          *" $host:$home "*) reason="invalid home: duplicate resolved remote route" ;;
+          *) seen_homes="$seen_homes $host:$home" ;;
+        esac
+      elif ! validate_secondmate_home "$id" "$home" 2>/dev/null; then
         reason="invalid home: $VALIDATION_ERROR"
       else
         home=$VALIDATED_HOME
         case " $seen_homes " in
-          *" $home "*) reason="invalid home: duplicate resolved home route" ;;
-          *) seen_homes="$seen_homes $home" ;;
+          *" local:$home "*) reason="invalid home: duplicate resolved home route" ;;
+          *) seen_homes="$seen_homes local:$home" ;;
         esac
       fi
     fi
     if [ -z "$reason" ]; then
-      summary=$(run_timed "$FM_SNAPSHOT_SECONDMATE_TIMEOUT" env \
-        FM_ROOT_OVERRIDE="$FM_ROOT" \
-        FM_HOME="$home" \
-        FM_STATE_OVERRIDE="$home/state" \
-        FM_DATA_OVERRIDE="$home/data" \
-        FM_CONFIG_OVERRIDE="$home/config" \
-        FM_PROJECTS_OVERRIDE="$home/projects" \
-        FM_SNAPSHOT_NOW="$SNAPSHOT_NOW" \
-        FM_SNAPSHOT_NOW_EPOCH="$SNAPSHOT_EPOCH" \
-        FM_SNAPSHOT_SECONDMATE_CHILDREN="$FM_SNAPSHOT_SECONDMATE_CHILDREN" \
-        FM_SNAPSHOT_SECONDMATE_QUEUED="$FM_SNAPSHOT_SECONDMATE_QUEUED" \
-        FM_SNAPSHOT_SECONDMATE_DECISIONS="$FM_SNAPSHOT_SECONDMATE_DECISIONS" \
-        FM_SNAPSHOT_SECONDMATE_LANDED_PER_HOME="$FM_SNAPSHOT_SECONDMATE_LANDED_PER_HOME" \
-        "$SCRIPT_DIR/fm-fleet-snapshot.sh" --secondmate-home-summary 2>/dev/null)
-      summary_rc=$?
+      if [ "$remote" = true ]; then
+        summary=$(run_timed "$FM_SNAPSHOT_SECONDMATE_TIMEOUT" \
+          "$SCRIPT_DIR/fm-on.sh" "$id" fm-fleet-snapshot.sh --secondmate-home-summary 2>/dev/null)
+        summary_rc=$?
+      else
+        summary=$(run_timed "$FM_SNAPSHOT_SECONDMATE_TIMEOUT" env \
+          FM_ROOT_OVERRIDE="$FM_ROOT" \
+          FM_HOME="$home" \
+          FM_STATE_OVERRIDE="$home/state" \
+          FM_DATA_OVERRIDE="$home/data" \
+          FM_CONFIG_OVERRIDE="$home/config" \
+          FM_PROJECTS_OVERRIDE="$home/projects" \
+          FM_SNAPSHOT_NOW="$SNAPSHOT_NOW" \
+          FM_SNAPSHOT_NOW_EPOCH="$SNAPSHOT_EPOCH" \
+          FM_SNAPSHOT_SECONDMATE_CHILDREN="$FM_SNAPSHOT_SECONDMATE_CHILDREN" \
+          FM_SNAPSHOT_SECONDMATE_QUEUED="$FM_SNAPSHOT_SECONDMATE_QUEUED" \
+          FM_SNAPSHOT_SECONDMATE_DECISIONS="$FM_SNAPSHOT_SECONDMATE_DECISIONS" \
+          FM_SNAPSHOT_SECONDMATE_LANDED_PER_HOME="$FM_SNAPSHOT_SECONDMATE_LANDED_PER_HOME" \
+          "$SCRIPT_DIR/fm-fleet-snapshot.sh" --secondmate-home-summary 2>/dev/null)
+        summary_rc=$?
+      fi
       if [ "$summary_rc" -ne 0 ]; then
         [ "$summary_rc" -eq 124 ] && reason="structured home snapshot timed out" || reason="structured home snapshot failed"
       else
         summary_bytes=$(printf '%s' "$summary" | LC_ALL=C wc -c | tr -d ' ')
         if [ "$summary_bytes" -gt "$FM_SNAPSHOT_SECONDMATE_MAX_BYTES" ]; then
           reason="structured home snapshot exceeded byte limit"
-        elif ! printf '%s' "$summary" | jq -e --arg home "$home" --arg generated "$SNAPSHOT_NOW" '
-          .schema == "fm-secondmate-home-summary.v1" and .home == $home and .generated == $generated
+        elif ! printf '%s' "$summary" | jq -e --arg home "$home" --arg generated "$SNAPSHOT_NOW" --argjson remote "$remote" '
+          .schema == "fm-secondmate-home-summary.v1" and .home == $home
+          and (($remote == true) or .generated == $generated)
           and (.valid | type) == "boolean" and (.state | type) == "string"
           and (.invalidity | type) == "object" and (.invalidity.ids | type) == "array"
           and (.active_children | type) == "array" and (.decisions_open | type) == "array"
@@ -1268,12 +1267,12 @@ secondmate_current_json() {  # <parent-tasks-json>
       fi
       if printf '%s' "$terminal" | jq -e '.contradiction == true' >/dev/null; then contradiction=true; fi
       record=$(jq -n \
-        --arg id "$id" --arg home "$home" --arg state "$state" --arg current_reason "$current_reason" --arg observed "$SNAPSHOT_NOW" \
+        --arg id "$id" --arg home "$home" --arg host "$host" --argjson remote "$remote" --arg state "$state" --arg current_reason "$current_reason" --arg observed "$SNAPSHOT_NOW" \
         --argjson registered "$registered" --argjson summary "$summary" --argjson summary_valid "$summary_valid" --argjson decisions "$decisions" \
         --argjson activities "$activities" --argjson activity_scan "$activity_scan" \
         --argjson reconciliation "$reconciliation" --argjson terminal "$terminal" --argjson contradiction "$contradiction" \
         --arg event_raw "$event_raw" --arg event_note "$event_note" --argjson event_age "$event_age" '
-        {id:$id,home:$home,registered:$registered,
+        {id:$id,home:$home,host:($host | if . == "" then null else . end),remote:$remote,registered:$registered,
          current:{state:$state,reason:($current_reason | if . == "" then null else . end)},invalidity:$summary.invalidity,
          provenance:{selected:"structured-home",structured_home:$home,summary_valid:$summary_valid,
            trust:(if $summary_valid then "complete" else "partial-structured" end),parent_event_role:"historical-only"},
@@ -1298,11 +1297,11 @@ secondmate_current_json() {  # <parent-tasks-json>
           '{provenance:"parent-direct-report-terminal",trust:"untrusted-supplement",captured:false,observed_at:$observed,freshness:"not-collected",reason:"no parent event to compare",lines:0,bytes:0,event_note_seen:false,contradiction:false}')
       fi
       record=$(jq -n \
-        --arg id "$id" --arg home "$home" --arg reason "$reason" --arg observed "$SNAPSHOT_NOW" \
+        --arg id "$id" --arg home "$home" --arg host "$host" --argjson remote "$remote" --arg reason "$reason" --arg observed "$SNAPSHOT_NOW" \
         --arg provenance "$provenance" --arg freshness "$freshness" --arg event_raw "$event_raw" --arg event_note "$event_note" \
         --argjson registered "$registered" --argjson event_age "$event_age" --argjson activities "$activities" --argjson activity_scan "$activity_scan" \
         --argjson decisions "$decisions" --argjson terminal "$terminal" '
-        {id:$id,home:($home | if . == "" then null else . end),registered:$registered,
+        {id:$id,home:($home | if . == "" then null else . end),host:($host | if . == "" then null else . end),remote:$remote,registered:$registered,
          current:{state:"unknown",reason:$reason},invalidity:null,
          provenance:{selected:$provenance,structured_home:($home | if . == "" then null else . end),parent_event_role:"fallback-only-not-current"},
          freshness:{status:$freshness,observed_at:$observed,age_seconds:$event_age},
@@ -1369,7 +1368,6 @@ fi
 SCOUT_REPORTS_JSON=$(scout_report_lines)
 MAIN_INVENTORY_JSON=$(main_inventory_json "$BACKLOG_JSON" "$TASKS_JSON") \
   || { echo "fm-fleet-snapshot: main inventory summary failed" >&2; exit 1; }
-PROJECT_DEFAULT_BRANCHES_JSON=$(project_default_branches_json | jq -s '.')
 SECONDMATE_CURRENT_JSON=$(secondmate_current_json "$TASKS_JSON") \
   || { echo "fm-fleet-snapshot: registered secondmate aggregation failed" >&2; exit 1; }
 SECONDMATE_LANDED_JSON=$(secondmate_landed_from_current_json "$SECONDMATE_CURRENT_JSON") \
@@ -1389,167 +1387,10 @@ jq -n \
   --argjson scout_reports "$SCOUT_REPORTS_JSON" \
   --argjson secondmate_current "$SECONDMATE_CURRENT_JSON" \
   --argjson secondmate_landed "$SECONDMATE_LANDED_JSON" \
-  --argjson project_default_branches "$PROJECT_DEFAULT_BRANCHES_JSON" \
   'def backlog_by_id($id): ($backlog.records[]? | select(.structured == true and .id == $id) | .) // null;
    def task_by_id($id): ($tasks[]? | select(.id == $id) | .) // null;
    def report_kind($id): (task_by_id($id).kind // backlog_by_id($id).kind // "scout");
-   def branch_empty: {active:null,default:null,selected:null,clean:false,ready:false};
-   def project_name($value):
-     ($value // "unassigned") as $raw
-     | ([$tasks[]? | select(.project_key != null) | . as $t
-         | select(($t.project == $raw) or (($t.project | split("/") | last) == $raw))
-         | $t.project_key][0] // $raw);
-   ([ $tasks[]? | select(.project_key != null)
-      | {key:.project_key,aliases:[.project, (.project | split("/") | last)]} ]) as $identities
-   | ([ $project_default_branches[] as $b
-       | ({key:$b.project,branch:$b.branch}
-          , ($identities[]? | select(.aliases | index($b.project))
-             | {key:.key,branch:$b.branch})) ]) as $fallbacks
-   | def fallback_branch($project):
-       ([$fallbacks[] | select(.key == $project) | .branch][0] // branch_empty);
-   def canonical($value): project_name($value);
-   def current_state($task): ($task.current_state.state // null);
-   def local_merge_ready($task):
-     (($task.mode // "") == "local-only"
-      and (($task.branch.ready // false) == true)
-      and (current_state($task) == "done"
-           or (current_state($task) == "unknown"
-               and ($task.paths.status_log.last_event.state // null) == "done")));
-   def reporting_state($task):
-     if local_merge_ready($task) then "done" else current_state($task) end;
-   def reporting_state_source($task):
-     if local_merge_ready($task) and current_state($task) != "done" then "local-ready-reconciliation"
-     else ($task.current_state.source // null) end;
-   def action_class($row; $task):
-     if $row.state == "done" then "completed"
-     elif ($row.kind == "captain" and $row.hold_reason != null) then "captain_awaited"
-     elif local_merge_ready($task) then "captain_awaited"
-     elif ($row.blocked_by != null
-           or current_state($task) == "blocked"
-           or current_state($task) == "parked"
-           or current_state($task) == "paused"
-           or $row.state == "held") then "blocked_or_held"
-     elif $row.state == "in_flight" then "self_progressing"
-     elif $row.state == "queued" then "queued_next"
-     else "unknown"
-     end;
-   def human_options($class; $row; $task):
-     if $class == "captain_awaited" and local_merge_ready($task) then
-       ["approve local merge", "hold for changes"]
-     elif $class == "captain_awaited" then
-       ["approve", "request changes", "hold"]
-     else [] end;
-   def decorate($row; $task):
-     (action_class($row; $task)) as $class
-     | (human_options($class; $row; $task)) as $options
-     | $row + {
-         current_state:reporting_state($task),
-         current_state_source:reporting_state_source($task),
-         classification:$class,
-         needs_human:($class == "captain_awaited"),
-         options:$options
-       };
-   def priority_num:
-     if . == null or . == "" then null
-     else (tonumber? // null)
-     end;
-   def reporting_group($rows):
-     if any($rows[]; .classification == "self_progressing") then 0
-     elif any($rows[]; .classification == "blocked_or_held" or .classification == "queued_next") then 1
-     elif any($rows[]; .classification == "captain_awaited") then 2
-     else 3 end;
-   ([ $backlog.records[]?
-      | select(.structured == true)
-      | select((.state == "queued" and ((.body_excerpt // "") | test("SUPERSEDED|NOT REQUIRED|NOT-REQUIRED|DEFERRED"; "i"))) | not)
-      | . as $r
-      | (([$tasks[]? | select(.id == $r.id)][0]) // {}) as $t
-      | {id:$r.id,
-         project:canonical($r.repo // $t.project // "unassigned"),
-         state:(if $r.state == "queued" and $r.hold_kind != null then "held" else $r.state end),
-         title:($r.title // $r.id),kind:($r.kind // "unknown"),
-         priority:($r.priority // null),blocked_by:($r.blocked_by // null),
-         blocked_reason:($r.blocked_reason // null),hold_reason:($r.hold_reason // null),
-         branch:($t.branch // branch_empty),
-         source:"main",home:"(main)",completed:($r.state == "done"),task:$t}
-      | decorate(.; .task)
-      | del(.task)
-    ]) as $main_actions
-   | ([ ($secondmate_current.records // [])[] as $m
-       | $m.active_children[]?
-       | {id:($m.id + "/" + .id),project:canonical(.project // "unassigned"),state:"in_flight",
-          title:(.doing // .id),kind:(.kind // "unknown"),priority:(.priority // null),
-          blocked_by:null,blocked_reason:null,hold_reason:null,
-          branch:(.branch // {active:null,default:null,selected:null}),
-          source:"secondmate",home:$m.id,completed:false,
-          classification:"self_progressing",needs_human:false,options:[]}
-     ]
-     + [ ($secondmate_current.records // [])[] as $m
-         | $m.queued[]?
-         | {id:($m.id + "/" + .id),project:canonical(.repo // "unassigned"),
-            state:(if .hold_kind != null then "held" else "queued" end),
-            title:(.title // .id),kind:(.kind // "unknown"),priority:(.priority // null),
-            blocked_by:(.blocked_by // null),blocked_reason:(.blocked_reason // null),
-            hold_reason:(.hold_reason // null),
-            branch:branch_empty,source:"secondmate",home:$m.id,
-            completed:false,
-            classification:(if .kind == "captain" and .hold_reason != null then "captain_awaited"
-                            elif .blocked_by != null then "blocked_or_held" else "queued_next" end),
-            needs_human:(.kind == "captain" and .hold_reason != null),
-            options:(if .kind == "captain" and .hold_reason != null then ["approve", "request changes", "hold"] else [] end)}
-       ]
-     + [ ($secondmate_current.records // [])[] as $m
-         | $m.landed[]?
-         | {id:($m.id + "/" + .id),project:canonical(.repo // "unassigned"),state:"done",
-            title:(.title // .id),kind:"ship",priority:(.priority // null),
-            blocked_by:null,blocked_reason:null,hold_reason:null,
-            branch:branch_empty,source:"secondmate",home:$m.id,
-            completed:true,classification:"completed",needs_human:false,options:[]}
-       ]) as $secondmate_actions
-   | ($main_actions + $secondmate_actions) as $report_actions
-   | ([ $tasks[] as $t | ($t.hints.open_decisions // [])[]
-       | {id:$t.id,key,verb,summary,reason:null,source:"status",owner:$t.project,
-          project:canonical($t.project // "unassigned"),needs_human:true,
-          options:["approve", "request changes", "hold"]} ]
-      + [ $main_actions[] | select(.state == "held" and .kind == "captain")
-          | {id,key:.id,verb:"captain-hold",summary:(.title + ": " + (.hold_reason // "captain decision pending")),
-             reason:.hold_reason,source:.source,owner:.project,project:.project,
-             needs_human:true,options:["approve", "request changes", "hold"]} ]
-      + [ ($secondmate_current.records // [])[] as $m | $m.decisions_open[]?
-          | {id:($m.id + "/" + .id),key,verb,summary,reason,source,owner:$m.id,
-             project:canonical(.project // "unassigned"),needs_human:true,
-             options:["approve", "request changes", "hold"]} ]) as $report_decisions
-   | ([ $report_actions | group_by(.project)[]
-       | . as $rows
-       | ([ $rows[] | .branch.active // empty ] | unique) as $active_branches
-       | ([ $rows[] | .branch.default // empty ] | unique) as $recorded_defaults
-       | (fallback_branch($rows[0].project)) as $fallback
-       | ([ $recorded_defaults[] ] + ($fallback.default // [])) | unique as $default_branches
-       | ([ $rows[] | .state == "done" ] | map(select(. == true)) | length) as $completed
-       | ($rows | length) as $total
-       | ([ $rows[] | select(.state != "done" and (.blocked_by != null or .classification == "blocked_or_held")) ] | length) as $blocked
-       | {id:($rows[0].project // "unassigned"),name:($rows[0].project // "unassigned"),
-          reporting_group:reporting_group($rows),
-          priority:([ $rows[] | .priority | priority_num | select(. != null) ] | if length == 0 then null else min end),
-          branch:{active:$active_branches,default:$default_branches,
-                  selected:(if ($active_branches | length) > 0 then $active_branches else $default_branches end)},
-          tasks_axi:{
-            counts:{total:$total,current:($total - $completed),completed:$completed,
-                    in_flight:([ $rows[] | select(.state == "in_flight") ] | length),
-                    queued:([ $rows[] | select(.state == "queued") ] | length),
-                    held:([ $rows[] | select(.state == "held") ] | length),
-                    blocked:$blocked},
-            progress:{completed:$completed,total:$total,
-                      percent:null,
-                      source:"unknown",
-                      evidence:{completed_records:$completed,scoped_records:null,
-                                reason:"rolling Tasks Axi records do not define a completion scope"}}},
-          current_actions:([ $rows[] | select(.state != "done") ]),
-          current_action_count:([ $rows[] | select(.state != "done") ] | length),
-          recent_completed:([ $rows[] | select(.state == "done") ]),
-          decisions_open:([ $report_decisions[] | select(.project == ($rows[0].project // "unassigned")) ]),
-          homes:([ $rows[] | .home ] | unique)}
-     ] | sort_by([.reporting_group, (.priority // 999999), .name])) as $project_rows
-   | {
+   {
      schema:"fm-fleet-snapshot.v1",
      generated:$generated,
      fm_home:$fm_home,
@@ -1558,7 +1399,6 @@ jq -n \
      tasks:($tasks | map(. + {backlog:backlog_by_id(.id)})),
      main_inventory:$main_inventory,
      scout_reports:($scout_reports | map(. + {kind:report_kind(.id)})),
-     projects:$project_rows,
      secondmate_current:$secondmate_current,
      secondmate_landed:$secondmate_landed,
      secondmate_guidance:{
