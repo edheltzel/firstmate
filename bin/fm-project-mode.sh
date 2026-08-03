@@ -40,7 +40,10 @@ FLEET_DEFAULT=${2:-$NAME}
 
 missing_project() {
   case "$WANT" in
-    fleet) printf '%s\n' "$FLEET_DEFAULT" ;;
+    fleet)
+      echo "warn: project \"$NAME\" not in registry; Fleet name defaults to \"$FLEET_DEFAULT\"" >&2
+      printf '%s\n' "$FLEET_DEFAULT"
+      ;;
     pr_identity) printf '%s\n' none ;;
     known) printf '%s\n' no ;;
     *)

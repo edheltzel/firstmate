@@ -653,7 +653,11 @@ SH
   fm_write_meta "$home/state/work-disabled.meta" \
     "window=firstmate:fm-work-disabled" "endpoint_task_id=work-disabled" \
     "worktree=$home/projects/worktree" "project=$home/projects/worktree" \
-    "kind=ship" "mode=local-only"
+    "worktree_owner_token=fmw.AAAAAAAAAAAA" "kind=ship" "mode=local-only"
+  printf 'version=1\ntask_id=work-disabled\ntoken=fmw.AAAAAAAAAAAA\n' > \
+    "$home/projects/worktree/.fm-worktree-owner"
+  mkdir -p "$home/projects/worktree/.git/info"
+  printf '%s\n' .fm-worktree-owner >> "$home/projects/worktree/.git/info/exclude"
 
   rc=0
   out=$(PATH="$home/fakebin:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" \
@@ -689,7 +693,11 @@ SH
   fm_write_meta "$child/state/work-disabled.meta" \
     "window=firstmate:fm-work-disabled" "endpoint_task_id=work-disabled" \
     "worktree=$child/projects/worktree" "project=$child/projects/worktree" \
-    "kind=ship" "mode=local-only"
+    "worktree_owner_token=fmw.AAAAAAAAAAAA" "kind=ship" "mode=local-only"
+  printf 'version=1\ntask_id=work-disabled\ntoken=fmw.AAAAAAAAAAAA\n' > \
+    "$child/projects/worktree/.fm-worktree-owner"
+  mkdir -p "$child/projects/worktree/.git/info"
+  printf '%s\n' .fm-worktree-owner >> "$child/projects/worktree/.git/info/exclude"
 
   rc=0
   out=$(PATH="$child/fakebin:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$child" \
