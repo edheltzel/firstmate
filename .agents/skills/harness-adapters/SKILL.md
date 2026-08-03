@@ -312,12 +312,12 @@ When a secondmate is launched on Pi or pi-signed, `fm-spawn.sh --secondmate` lau
 ## omp (VERIFIED)
 
 OMP launches workers with `OMP_AGENT=1 omp --auto-approve --no-prewalk`, one positional brief, any selected `--model` and `--thinking` flags, and one explicit Firstmate-generated extension path.
-That distinct `state/<id>.omp-ext.ts` extension, not Pi's worker extension, reports `agent_start` as busy and reports `agent_settled` as idle only after `ctx.isIdle()` confirms settlement, then emits the task turn-end notification.
+That distinct `state/<id>.omp-ext.ts` extension, not Pi's worker extension, listens for `turn_end` and emits the task turn-end notification only; OMP's verified extension contract provides no in-turn busy lifecycle.
 Herdr liveness relies on native agent registration, while tmux recognizes only OMP's anchored Bun process shape and leaves unrelated Bun processes unknown.
 
 | Fact | Value |
 | --- | --- |
-| Busy state | The distinct Firstmate-generated OMP extension's `agent_start` and `agent_settled` lifecycle, with `ctx.isIdle()` settlement confirmation. |
+| Busy state | The OMP-scoped rendered-tail fallback in `bin/fm-busy-lib.sh` (source `omp-regex`), because the verified extension contract is turn-end notification only: `⟨esc⟩`, the cancel hint shown iff a turn is active (default `FM_TMUX_OMP_BUSY_REGEX_DEFAULT`, globally overridden by `FM_BUSY_REGEX`). |
 | Exit command | `/exit` |
 | Interrupt | single Escape |
 | Autonomy | `--auto-approve` |
@@ -335,7 +335,7 @@ For Grok's supported reasoning-effort values and omission behavior, see the [lau
 
 | Fact | Value |
 | --- | --- |
-| Busy state | The one remaining rendered-tail fallback, isolated to Grok until its structured lifecycle is live-verified: `Ctrl+c:cancel`, the mid-turn cancel hint shown in grok's keybind bar iff a turn is running. The idle bar shows only `Shift+Tab:mode │ Ctrl+.:shortcuts`. ASCII is matched rather than the braille spinner to avoid locale fragility. |
+| Busy state | A rendered-tail fallback (the other is OMP's), isolated to Grok until its structured lifecycle is live-verified: `Ctrl+c:cancel`, the mid-turn cancel hint shown in grok's keybind bar iff a turn is running. The idle bar shows only `Shift+Tab:mode │ Ctrl+.:shortcuts`. ASCII is matched rather than the braille spinner to avoid locale fragility. |
 | Exit command | `/exit` typed into the composer exits the TUI cleanly and prints `Resume this session with: grok --resume <session-id>`; `Ctrl+Q` double-press within 1000ms remains a fallback; `Ctrl+D` is the quit key in VS Code family terminals; `Ctrl+C` is the interrupt, not the exit. |
 | Interrupt | single `Ctrl+C` (cancels the current turn; the footer shows `Ctrl+c:cancel` mid-turn). `Esc` only moves focus to the scrollback, it does NOT interrupt. |
 | Skill invocation | `/<skill>` (e.g. `/no-mistakes`), same as claude. Opens a slash-autocomplete popup, so a too-fast Enter selects the popup entry instead of sending. For an argument-taking command that first Enter does not submit at all - it expands the selection into an argument-hint placeholder in the composer (e.g. `/compact` -> `/compact compaction instructions`, live-verified), leaving real text still sitting there unsubmitted; a genuine second Enter is required. `fm-send`'s retried Enter lands it on BOTH backends, but only because each backend's own submit-verification correctly recognizes that placeholder-filled text as still-pending - see the incident below. |
