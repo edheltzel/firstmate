@@ -64,6 +64,7 @@ The detailed reconciliation and task chronology stay in the private audit report
 
 The per-adapter semantic sources behind [`bin/fm-busy-lib.sh`](../../bin/fm-busy-lib.sh) were live-verified on 2026-07-28 against firstmate-launched workers wired exactly as `fm-spawn` writes them.
 Each pass polled `state/<id>.busy-state` while a real turn ran.
+The OMP row comes from its own adapter verification pass on 2026-08-01.
 
 | Harness | Version verified | Semantic source | Observed result |
 | --- | --- | --- | --- |
@@ -73,6 +74,7 @@ Each pass polled `state/<id>.busy-state` while a real turn ran.
 | Codex | codex-cli 0.145.0 | None usable | See below; classifies `unknown codex-unverified`. |
 | Kimi (standalone) | not installed | None usable | No binary on `PATH`, so the gate stays closed and it classifies `unknown kimi-unverified`. |
 | Grok | 0.2.112 | Isolated rendered-tail fallback | Retained unconverted; the approved audit could not credit a live structured-lifecycle run. |
+| OMP | 17.2.2 | Isolated rendered-tail fallback | Retained unconverted; the verified extension contract is turn-end notification only, so there is no in-turn lifecycle to credit, and the `⟨esc⟩` cancel hint shown iff a turn is active stays the busy signal, classifying `omp-regex`. |
 
 Codex was probed two ways, both refused:
 
