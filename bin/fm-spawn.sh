@@ -161,6 +161,18 @@
 # A ship task records the explicit mode/yolo it was passed; a secondmate spawn records
 # mode=secondmate, yolo=off, home=, and projects=; a scout records neither, and both the
 # success line and state/<id>.meta omit them.
+# When the home session's frozen trace-context decision is enabled (see
+# docs/configuration.md and bin/fm-trace-context-lib.sh), the meta also records
+# one W3C traceparent= carrier, the same value injected into the pane as
+# TRACEPARENT; the default-off path writes neither, leaving the generated meta
+# and launch environment unchanged.
+#   --traceparent <carrier> delivers a carrier that a REMOTE parent already
+#   resolved and will record, instead of resolving one from this home's frozen
+#   decision. It is accepted only for --secondmate spawns, only as a strictly
+#   validated W3C traceparent, and exists because a remote secondmate's task
+#   identity is owned by the parent home that holds its task metadata, while the
+#   pane export happens on the remote host (bin/fm-remote-secondmate-control.sh).
+#   Local spawns never pass it and resolve their own carrier exactly as before.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -208,6 +220,8 @@ WORKTREE_OWNER_MARKER=".fm-worktree-owner"
 . "$SCRIPT_DIR/fm-ff-lib.sh"
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
+# shellcheck source=bin/fm-secondmate-nudge-lib.sh
+. "$SCRIPT_DIR/fm-secondmate-nudge-lib.sh"
 # shellcheck source=bin/fm-config-inherit-lib.sh
 . "$SCRIPT_DIR/fm-config-inherit-lib.sh"
 # shellcheck source=bin/fm-backend.sh
@@ -218,8 +232,16 @@ WORKTREE_OWNER_MARKER=".fm-worktree-owner"
 . "$SCRIPT_DIR/fm-busy-lib.sh"
 # shellcheck source=bin/fm-pr-lib.sh
 . "$SCRIPT_DIR/fm-pr-lib.sh"
+<<<<<<< HEAD
 # shellcheck source=bin/fm-worker-git-identity-lib.sh
 . "$SCRIPT_DIR/fm-worker-git-identity-lib.sh"
+||||||| 4ee4a0a
+=======
+# shellcheck source=bin/fm-trace-context-lib.sh
+. "$SCRIPT_DIR/fm-trace-context-lib.sh"
+# shellcheck source=bin/fm-remote-readiness-lib.sh
+. "$SCRIPT_DIR/fm-remote-readiness-lib.sh"
+>>>>>>> e5e8a671712bb8fbc3930ca0fcd182131c2a5637
 # Fail closed before any fleet mutation: a no-mistakes gate agent must never spawn
 # a direct report (see bin/fm-gate-refuse-lib.sh).
 if ! fm_worker_git_identity_load "$CONFIG"; then
@@ -238,6 +260,7 @@ BACKEND_ARG=
 PROJECT_KEY_ARG=
 MODE=
 YOLO=
+TRACEPARENT_ARG=
 HARNESS_SET=0
 MODEL_SET=0
 EFFORT_SET=0
@@ -245,6 +268,7 @@ BACKEND_SET=0
 PROJECT_KEY_SET=0
 MODE_SET=0
 YOLO_SET=0
+TRACEPARENT_SET=0
 POS=()
 want_value=
 for a in "$@"; do
@@ -260,6 +284,7 @@ for a in "$@"; do
       project-key) PROJECT_KEY_ARG=$a; PROJECT_KEY_SET=1 ;;
       mode) MODE=$a; MODE_SET=1 ;;
       yolo) YOLO=$a; YOLO_SET=1 ;;
+      traceparent) TRACEPARENT_ARG=$a; TRACEPARENT_SET=1 ;;
       *) echo "error: internal parser state for --$want_value" >&2; exit 1 ;;
     esac
     want_value=
@@ -282,6 +307,8 @@ for a in "$@"; do
     --mode=*) MODE=${a#--mode=}; MODE_SET=1 ;;
     --yolo) want_value=yolo ;;
     --yolo=*) YOLO=${a#--yolo=}; YOLO_SET=1 ;;
+    --traceparent) want_value=traceparent ;;
+    --traceparent=*) TRACEPARENT_ARG=${a#--traceparent=}; TRACEPARENT_SET=1 ;;
     *) POS+=("$a") ;;
   esac
 done
@@ -297,6 +324,20 @@ done
 [ "$PROJECT_KEY_SET" -eq 0 ] || [ "$KIND" != secondmate ] || { echo "error: --project-key does not apply to --secondmate spawns" >&2; exit 1; }
 [ "$MODE_SET" -eq 0 ] || [ -n "$MODE" ] || { echo "error: --mode requires a non-empty value" >&2; exit 1; }
 [ "$YOLO_SET" -eq 0 ] || [ -n "$YOLO" ] || { echo "error: --yolo requires a non-empty value" >&2; exit 1; }
+[ "$TRACEPARENT_SET" -eq 0 ] || [ -n "$TRACEPARENT_ARG" ] || { echo "error: --traceparent requires a non-empty value" >&2; exit 1; }
+# A parent-delivered carrier replaces this home's own resolution, so it is
+# refused unless it is a secondmate spawn carrying a strictly valid W3C value.
+# Nothing else may reach the pane's TRACEPARENT export.
+if [ "$TRACEPARENT_SET" -eq 1 ]; then
+  [ "$KIND" = secondmate ] || {
+    echo "error: --traceparent applies only to --secondmate spawns; every other spawn resolves its own carrier from this home's frozen trace-context decision" >&2
+    exit 1
+  }
+  fm_trace_context_valid "$TRACEPARENT_ARG" || {
+    echo "error: --traceparent is not a valid W3C traceparent" >&2
+    exit 1
+  }
+fi
 case "$EFFORT" in
   ''|low|medium|high|xhigh|max) ;;
   *) echo "error: --effort must be one of low, medium, high, xhigh, max" >&2; exit 1 ;;
@@ -335,6 +376,250 @@ else
     echo "error: --yolo applies only to ship spawns; a scout delivers a report and a secondmate records its own fixed posture" >&2
     exit 1
   }
+fi
+
+spawn_remote_secondmate() {
+  local id=$1 remote host root home harness positional model effort backend out rc meta tmp
+  local remote_backend remote_target remote_harness registry_lock remote_lock remote_generation
+  local remote_traceparent remote_recorded_traceparent
+  local -a launch_args
+  id=${POS[0]:-}
+  fm_task_id_creation_valid "$id" || { echo "error: invalid task id" >&2; return 2; }
+  mkdir -p "$STATE" || { echo "error: could not create parent state directory" >&2; return 1; }
+  SPAWN_TASK_LOCK="$STATE/.spawn-$id.lock"
+  if ! fm_lock_try_acquire "$SPAWN_TASK_LOCK"; then
+    echo "error: another spawn is already creating task $id" >&2
+    return 1
+  fi
+  registry_lock=$(secondmate_registry_lock_path "$STATE")
+  if ! fm_lock_acquire_wait "$registry_lock"; then
+    fm_lock_release "$SPAWN_TASK_LOCK" || true
+    echo "error: secondmate registry could not be locked for remote spawn" >&2
+    return 1
+  fi
+  remote=$(secondmate_registry_field "$DATA/secondmates.md" "$id" remote 2>/dev/null || true)
+  if [ "$remote" != 1 ]; then
+    fm_lock_release "$registry_lock" || true
+    fm_lock_release "$SPAWN_TASK_LOCK" || true
+    return 3
+  fi
+  host=$(secondmate_registry_field "$DATA/secondmates.md" "$id" host)
+  root=$(secondmate_registry_field "$DATA/secondmates.md" "$id" root)
+  home=$(secondmate_registry_field "$DATA/secondmates.md" "$id" home)
+  positional=${POS[1]:-}
+  if [ "${#POS[@]}" -gt 2 ]; then
+    fm_lock_release "$registry_lock" || true
+    fm_lock_release "$SPAWN_TASK_LOCK" || true
+    echo "error: remote secondmate spawn accepts no local home positional argument" >&2
+    return 2
+  fi
+  if [ -n "$HARNESS_ARG" ]; then
+    harness=$HARNESS_ARG
+  elif [ -n "$positional" ]; then
+    harness=$positional
+  else
+    harness=$("$FM_ROOT/bin/fm-harness.sh" secondmate)
+  fi
+  case "$harness" in
+    claude|codex|opencode|pi|pi-signed|grok|kimi) ;;
+    *)
+      fm_lock_release "$registry_lock" || true
+      fm_lock_release "$SPAWN_TASK_LOCK" || true
+      echo "error: remote secondmate spawn requires a verified harness adapter, not a raw launch command: $harness" >&2
+      return 1
+      ;;
+  esac
+  model=${MODEL:--}
+  effort=${EFFORT:--}
+  if [ -z "$HARNESS_ARG" ] && [ -z "$positional" ]; then
+    if [ "$MODEL_SET" -eq 0 ]; then
+      model=$("$SCRIPT_DIR/fm-harness.sh" secondmate-model)
+      [ -n "$model" ] || model=-
+    fi
+    if [ "$EFFORT_SET" -eq 0 ]; then
+      effort=$("$SCRIPT_DIR/fm-harness.sh" secondmate-effort)
+      [ -n "$effort" ] || effort=-
+    fi
+  fi
+  # A remote second mate always runs on Herdr: its server belongs to the host's
+  # own GUI login session, so the endpoint outlives every SSH connection that
+  # supervises it. bin/fm-remote-doctor.sh gates that host on the same
+  # requirement, and the remote home's config/backend never overrides it.
+  case "${BACKEND_ARG:--}" in
+    -|herdr) backend=herdr ;;
+    *)
+      fm_lock_release "$registry_lock" || true
+      fm_lock_release "$SPAWN_TASK_LOCK" || true
+      echo "error: a remote secondmate runs only on the herdr backend, not '$BACKEND_ARG'" >&2
+      return 1
+      ;;
+  esac
+  case "$effort" in
+    -|low|medium|high|xhigh|max) ;;
+    *)
+    fm_lock_release "$registry_lock" || true
+    fm_lock_release "$SPAWN_TASK_LOCK" || true
+      echo "error: invalid configured remote secondmate effort: $effort" >&2
+      return 1
+      ;;
+  esac
+  meta="$STATE/$id.meta"
+  if [ -e "$meta" ] || [ -L "$meta" ]; then
+    if [ ! -f "$meta" ] || [ -L "$meta" ] \
+      || [ "$(fm_meta_get "$meta" kind)" != secondmate ] \
+      || [ "$(fm_meta_get "$meta" remote_host)" != "$host" ] \
+      || [ "$(fm_meta_get "$meta" remote_root)" != "$root" ] \
+      || [ "$(fm_meta_get "$meta" home)" != "$home" ]; then
+      fm_lock_release "$registry_lock" || true
+      fm_lock_release "$SPAWN_TASK_LOCK" || true
+      echo "error: existing metadata for $id does not identify this remote secondmate route" >&2
+      return 1
+    fi
+  fi
+  # Gate the host before anything is published or transferred, so a host that
+  # cannot hold a durable Herdr endpoint refuses here rather than half-way
+  # through a launch. This is also the readiness gate every liveness relaunch
+  # passes through, because recovery respawns through this same route.
+  rc=0
+  fm_remote_readiness_ensure "$SCRIPT_DIR" "$id" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    fm_lock_release "$registry_lock" || true
+    fm_lock_release "$SPAWN_TASK_LOCK" || true
+    # Summary first, then the doctor's own text: a caller that reports only the
+    # first line, such as the startup liveness sweep, must still say something
+    # actionable.
+    if [ "$rc" -eq 255 ]; then
+      echo "error: remote secondmate $id readiness could not be confirmed; preserved route $host:$home" >&2
+    else
+      echo "error: remote secondmate $id host $host is not ready for a remote second mate; launch refused" >&2
+    fi
+    [ -z "$FM_REMOTE_READINESS_OUT" ] || printf '%s\n' "$FM_REMOTE_READINESS_OUT" >&2
+    [ "$rc" -ne 255 ] || return 255
+    return 1
+  fi
+  remote_lock=$(fm_remote_inherit_transaction_lock_path "$STATE" "$id")
+  if ! fm_lock_acquire_wait "$remote_lock"; then
+    fm_lock_release "$registry_lock" || true
+    fm_lock_release "$SPAWN_TASK_LOCK" || true
+    echo "error: remote secondmate $id inheritance transaction could not be locked" >&2
+    return 1
+  fi
+  remote_generation=$(fm_remote_inherit_generation_next "$STATE" "$id" 2>/dev/null || true)
+  if [ -z "$remote_generation" ]; then
+    fm_lock_release "$remote_lock" || true
+    fm_lock_release "$registry_lock" || true
+    fm_lock_release "$SPAWN_TASK_LOCK" || true
+    echo "error: remote secondmate $id inheritance generation could not be published" >&2
+    return 1
+  fi
+  if "$SCRIPT_DIR/fm-remote-inherit-push.sh" "$id" "$remote_generation" >/dev/null; then
+    :
+  else
+    rc=$?
+    fm_lock_release "$remote_lock" || true
+    fm_lock_release "$registry_lock" || true
+    fm_lock_release "$SPAWN_TASK_LOCK" || true
+    if [ "$rc" -eq 255 ]; then
+      echo "error: remote secondmate $id inheritance completion is unknown; launch refused and route preserved for reconciliation" >&2
+    else
+      echo "error: remote secondmate $id inheritance failed; launch refused" >&2
+    fi
+    return "$rc"
+  fi
+  # This parent home owns the remote secondmate's task identity because it holds
+  # the task metadata an observer reads, exactly as for a local spawn: the
+  # carrier is resolved against THIS task's own meta (reused verbatim on
+  # relaunch, freshly rooted otherwise, never adopting this process's ambient
+  # TRACEPARENT) under this home's frozen decision, then handed to the remote
+  # host to export into the agent's pane. Disabled resolves to empty and the
+  # remote launch call stays byte-identical to the untraced one.
+  remote_traceparent=
+  if [ "$(fm_trace_context_session_effective "$STATE/.trace-context-effective")" = on ]; then
+    remote_traceparent=$(FM_TRACE_CONTEXT=on fm_trace_context_resolve "$CONFIG" "$meta" || true)
+  fi
+  launch_args=("$id" "$harness" "$model" "$effort" "$backend")
+  [ -z "$remote_traceparent" ] || launch_args+=("$remote_traceparent")
+  if out=$("$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh launch \
+    "${launch_args[@]}" 2>&1); then
+    rc=0
+  else
+    rc=$?
+  fi
+  if [ "$rc" -ne 0 ]; then
+    fm_lock_release "$remote_lock" || true
+    fm_lock_release "$registry_lock" || true
+    fm_lock_release "$SPAWN_TASK_LOCK" || true
+    [ -z "$out" ] || printf '%s\n' "$out" >&2
+    if [ "$rc" -eq 255 ]; then
+      echo "error: remote secondmate $id is unavailable or launch completion is unknown; preserved route $host:$home" >&2
+    fi
+    return "$rc"
+  fi
+  remote_backend=$(printf '%s\n' "$out" | sed -n 's/^backend=//p' | tail -1)
+  remote_target=$(printf '%s\n' "$out" | sed -n 's/^target=//p' | tail -1)
+  remote_harness=$(printf '%s\n' "$out" | sed -n 's/^harness=//p' | tail -1)
+  if [ "$remote_backend" != herdr ]; then
+    fm_lock_release "$remote_lock" || true
+    fm_lock_release "$registry_lock" || true
+    fm_lock_release "$SPAWN_TASK_LOCK" || true
+    echo "error: remote launch returned backend '${remote_backend:-missing}', expected herdr; preserving the remote route for reconciliation" >&2
+    return 1
+  fi
+  [ -n "$remote_target" ] && [ "$remote_harness" = "$harness" ] || {
+    fm_lock_release "$remote_lock" || true
+    fm_lock_release "$registry_lock" || true
+    fm_lock_release "$SPAWN_TASK_LOCK" || true
+    echo "error: remote launch returned malformed route metadata; preserving the remote route for reconciliation" >&2
+    return 1
+  }
+  # Record what the remote endpoint ACTUALLY carries, read back from its own
+  # launch, rather than what this side hoped to deliver. That keeps the #995
+  # guarantee that the recorded carrier is the identity the child received even
+  # when the remote host already had a live agent and reused its endpoint. An
+  # off decision delivers no carrier, but an endpoint already holding one still
+  # reports it here so the parent does not deny the agent's actual identity.
+  remote_recorded_traceparent=$(printf '%s\n' "$out" | sed -n 's/^traceparent=//p' | tail -1)
+  fm_trace_context_valid "$remote_recorded_traceparent" || remote_recorded_traceparent=
+  tmp="$meta.tmp.$$"
+  {
+    echo "window=remote:$id"
+    echo "endpoint_task_id=$id"
+    echo "worktree=$home"
+    echo "project=$root"
+    echo "harness=$harness"
+    echo "kind=secondmate"
+    echo "mode=secondmate"
+    echo "yolo=off"
+    echo "tasktmp="
+    echo "model=${model#-}"
+    echo "effort=${effort#-}"
+    echo "home=$home"
+    echo "projects=$(secondmate_registry_field "$DATA/secondmates.md" "$id" projects)"
+    echo "remote_host=$host"
+    echo "remote_root=$root"
+    echo "remote_backend=$remote_backend"
+    echo "remote_target=$remote_target"
+    [ -z "$remote_recorded_traceparent" ] || echo "traceparent=$remote_recorded_traceparent"
+  } > "$tmp"
+  mv -f -- "$tmp" "$meta"
+  fm_lock_release "$remote_lock" || true
+  fm_lock_release "$registry_lock" || true
+  fm_lock_release "$SPAWN_TASK_LOCK" || true
+  if ! "$SCRIPT_DIR/fm-procevent-remote-reply.sh" arm "$id" >/dev/null; then
+    echo "error: remote secondmate $id launched, but its reply source could not be armed; endpoint metadata is preserved" >&2
+    return 1
+  fi
+  echo "spawned $id harness=$harness kind=secondmate mode=secondmate yolo=off window=remote:$id worktree=$home remote=$host backend=$remote_backend"
+  return 0
+}
+
+if [ "$KIND" = secondmate ]; then
+  if spawn_remote_secondmate "${POS[0]:-}"; then
+    exit 0
+  else
+    remote_spawn_rc=$?
+  fi
+  [ "$remote_spawn_rc" -eq 3 ] || exit "$remote_spawn_rc"
 fi
 
 # Backend selection (data/fm-backend-design-d7): explicit --backend, else
@@ -996,19 +1281,22 @@ if [ "$KIND" = secondmate ]; then
     echo "error: could not create secondmate state directory for $PROJ_ABS" >&2
     exit 1
   }
-  CONFIG_INHERIT_LOCK=$(fm_config_inherit_lock_path "$PROJ_ABS") || {
-    echo "error: could not resolve secondmate inheritance lock for $PROJ_ABS" >&2
-    exit 1
-  }
-  if ! fm_lock_acquire_wait "$CONFIG_INHERIT_LOCK"; then
-    echo "error: could not acquire secondmate inheritance lock for $PROJ_ABS" >&2
-    exit 1
+  if [ "${FM_SKIP_SECONDMATE_INHERIT:-0}" != 1 ]; then
+    CONFIG_INHERIT_LOCK=$(fm_config_inherit_lock_path "$PROJ_ABS") || {
+      echo "error: could not resolve secondmate inheritance lock for $PROJ_ABS" >&2
+      exit 1
+    }
+    if ! fm_lock_acquire_wait "$CONFIG_INHERIT_LOCK"; then
+      echo "error: could not acquire secondmate inheritance lock for $PROJ_ABS" >&2
+      exit 1
+    fi
+    CONFIG_INHERIT_LOCK_HELD=1
+    # Inheritance propagation: push the primary-authoritative live-safe local inheritance
+    # surface into this secondmate home (fm-config-inherit-lib.sh).
+    FM_CONFIG_INHERIT_LIVE=1 \
+      propagate_secondmate_inheritance "$FM_HOME" "$PROJ_ABS" "$CONFIG" "$DATA" \
+      || echo "warning: secondmate $ID inheritance failed for $PROJ_ABS" >&2
   fi
-  CONFIG_INHERIT_LOCK_HELD=1
-  # Inheritance propagation: push the primary-authoritative local inheritance
-  # surface into this secondmate home (fm-config-inherit-lib.sh).
-  propagate_secondmate_inheritance "$FM_HOME" "$PROJ_ABS" "$CONFIG" "$DATA" \
-    || echo "warning: secondmate $ID inheritance failed for $PROJ_ABS" >&2
   if [ -f "$PROJ_ABS/data/charter.md" ]; then
     BRIEF="$PROJ_ABS/data/charter.md"
   else
@@ -1475,6 +1763,11 @@ EOF
     T="$ORCA_TERMINAL"
     ;;
 esac
+if [ "$KIND" = secondmate ]; then
+  FM_INHERITABLE_CONFIG=trace-context \
+    propagate_inheritable_config "$CONFIG" "$PROJ_ABS/config" \
+    || echo "warning: secondmate $ID trace-context inheritance failed for $PROJ_ABS" >&2
+fi
 # #134 robustness: only tmux needs a worktree-detection target distinct from $T -
 # its rename-safe stable window id, set as WT_TARGET=$WID in the tmux branch above.
 # Every other backend addresses its pane/surface by the id already in $T, so default
@@ -1908,6 +2201,35 @@ elif [ "$KIND" = scout ]; then
   YOLO=
 fi
 
+# Resolve the optional default-off W3C trace context (bin/fm-trace-context-lib.sh,
+# docs/configuration.md): the one carrier both recorded in meta and injected into
+# the pane, so an observer reads exactly what the child receives. Empty only when
+# disabled or on entropy/validation failure. Reuses this task's already-recorded
+# value on relaunch; any other spawn roots a fresh trace, never adopting this
+# process's own ambient TRACEPARENT, so each routed task is its own trace
+# boundary even under a persistent supervisor. Never aborts the spawn and adds
+# only the cost of reading a few bytes of entropy.
+#
+# The session-start path owns input resolution. Spawn consumes only the frozen
+# home-session state and reuses it for the carrier and Secondmate launch prefix.
+#
+# A remote secondmate launch is the one case where this process is not the home
+# that owns the task's identity: the parent home resolved and will record the
+# carrier, and this host only delivers it. The validated --traceparent value
+# then IS the decision, so the enablement snapshot handed to the new Secondmate
+# agrees with the carrier it receives exactly as on the local path.
+if [ "$TRACEPARENT_SET" -eq 1 ]; then
+  SPAWN_TRACE_EFFECTIVE=on
+  SPAWN_TRACEPARENT=$TRACEPARENT_ARG
+else
+  SPAWN_TRACE_EFFECTIVE=$(fm_trace_context_session_effective "$STATE/.trace-context-effective")
+  if [ "$SPAWN_TRACE_EFFECTIVE" = on ]; then
+    SPAWN_TRACEPARENT=$(FM_TRACE_CONTEXT=on fm_trace_context_resolve "$CONFIG" "$STATE/$ID.meta" || true)
+  else
+    SPAWN_TRACEPARENT=
+  fi
+fi
+
 META_WINDOW=$T
 [ "$BACKEND" = orca ] && META_WINDOW=$W
 {
@@ -1933,6 +2255,7 @@ META_WINDOW=$T
   echo "model=${MODEL:-default}"
   echo "effort=${EFFORT:-default}"
   [ -z "${BUSY_GEN:-}" ] || echo "busy_gen=$BUSY_GEN"
+  # Default-off writes no traceparent= line (meta stays byte-identical).
   # backend= is written only for a non-default (non-tmux) backend, so the
   # default path's meta stays byte-identical (absent backend= means tmux;
   # data/fm-backend-design-d7's P1 compatibility contract).
@@ -2010,8 +2333,23 @@ if [ "$HARNESS" = claude ] && [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
 fi
 if [ "$KIND" = secondmate ]; then
   sq_home=$(shell_quote "$PROJ_ABS")
+<<<<<<< HEAD
 else
   sq_home=$(shell_quote "$FM_HOME")
+||||||| 4ee4a0a
+  sq_primary_home=$(shell_quote "$FM_HOME")
+  LAUNCH="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_PUBLIC_FOLLOWUP_PRIMARY_HOME=$sq_primary_home FM_HOME=$sq_home $LAUNCH"
+=======
+  sq_primary_home=$(shell_quote "$FM_HOME")
+  # Deliver the primary's EFFECTIVE trace-context decision as a normalized on/off
+  # literal (never the raw FM_TRACE_CONTEXT string) so a FM_TRACE_CONTEXT override
+  # on the primary reaches the secondmate's OWN workers, not just the copied
+  # config/trace-context file: otherwise off would not disable them and on would
+  # not enable them across the launch boundary (bin/fm-trace-context-lib.sh header).
+  # Reuse the single frozen decision from the carrier resolution above so the
+  # injected carrier and this on/off snapshot are guaranteed to agree.
+  LAUNCH="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_PUBLIC_FOLLOWUP_PRIMARY_HOME=$sq_primary_home FM_HOME=$sq_home FM_TRACE_CONTEXT=$SPAWN_TRACE_EFFECTIVE $LAUNCH"
+>>>>>>> e5e8a671712bb8fbc3930ca0fcd182131c2a5637
 fi
 launch_prefix="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home"
 if [ "$KIND" = secondmate ]; then
@@ -2026,6 +2364,22 @@ LAUNCH="$launch_prefix $LAUNCH"
 # process (go build, go test, ...) inherit it. Sent before the launch command so
 # the env is set when the agent starts; the brief sleep lets the export land.
 spawn_send_text_line "$T" "export GOTMPDIR=$TASK_TMP/gotmp"
+# Send through the exact channel that already ships GOTMPDIR, so every backend
+# and harness - ship, scout, and secondmate - gets it before launch. Skipped
+# entirely when trace context is off.
+if [ -n "$SPAWN_TRACEPARENT" ]; then
+  if spawn_send_text_line "$T" "export TRACEPARENT=$SPAWN_TRACEPARENT"; then
+    if ! echo "traceparent=$SPAWN_TRACEPARENT" >> "$STATE/$ID.meta"; then
+      LAUNCH="unset TRACEPARENT; $LAUNCH"
+    fi
+  else
+    TRACE_SEND_STATUS=$?
+    if [ "$TRACE_SEND_STATUS" -eq 2 ]; then
+      echo "error: trace-context input could not be cleared for $W; refusing to append the launch command" >&2
+      exit 1
+    fi
+  fi
+fi
 sleep 0.3
 spawn_send_literal "$T" "$LAUNCH"
 sleep 0.3
@@ -2058,7 +2412,7 @@ if [ "$HARNESS" = kimi ]; then
     exit 1
   fi
 fi
-if [ "$KIND" = secondmate ]; then
+if [ "$KIND" = secondmate ] && [ "${FM_SKIP_SECONDMATE_INHERIT:-0}" != 1 ]; then
   if ! fm_config_reread_discard_pending "$PROJ_ABS" "$ID" "$FM_HOME"; then
     if fm_config_reread_quarantine_pending "$PROJ_ABS" "$ID" "$FM_HOME"; then
       echo "CONFIG_REREAD: secondmate $ID: quarantined pre-relaunch generations after cleanup failure (destination=$PROJ_ABS/state/.fm-inherited-config-reread-quarantine source=$FM_HOME/state/.fm-inherited-config-reread-quarantine)" >&2

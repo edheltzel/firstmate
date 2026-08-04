@@ -30,7 +30,8 @@
     "docs/herdr-backend.md",
     "docs/zellij-backend.md",
     "docs/orca-backend.md",
-    "docs/cmux-backend.md"
+    "docs/cmux-backend.md",
+    "docs/remote-secondmates.md"
   ],
   "requiredOwnerPointers": [
     {
@@ -100,6 +101,10 @@
     {
       "source": "docs/codex-app-backend.md",
       "target": "docs/verification/runtime-backends.md"
+    },
+    {
+      "source": "docs/trace-context.md",
+      "target": "docs/verification/trace-context.md"
     }
   ],
   "surfaces": [
@@ -280,6 +285,7 @@
       "audience": "operator-current"
     },
     {
+<<<<<<< HEAD
       "path": "docs/plans/2026-07-26-001-feat-themis-fleet-orchestrator-plan.md",
       "audience": "maintainer-architecture"
     },
@@ -344,6 +350,13 @@
       "audience": "maintainer-verification"
     },
     {
+||||||| 4ee4a0a
+=======
+      "path": "docs/remote-secondmates.md",
+      "audience": "operator-current"
+    },
+    {
+>>>>>>> e5e8a671712bb8fbc3930ca0fcd182131c2a5637
       "path": "docs/scripts.md",
       "audience": "operator-current"
     },
@@ -388,6 +401,10 @@
       "audience": "operator-current"
     },
     {
+      "path": "docs/trace-context.md",
+      "audience": "maintainer-architecture"
+    },
+    {
       "path": "docs/turnend-guard.md",
       "audience": "operator-current"
     },
@@ -413,6 +430,10 @@
     },
     {
       "path": "docs/verification/supervision.md",
+      "audience": "maintainer-verification"
+    },
+    {
+      "path": "docs/verification/trace-context.md",
       "audience": "maintainer-verification"
     },
     {

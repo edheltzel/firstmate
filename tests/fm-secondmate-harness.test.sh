@@ -14,11 +14,21 @@
 #      explicit per-spawn harness arg still wins.
 #   B) Inheritance. The primary pushes a declared, extensible set of LOCAL
 #      (gitignored) config items - config/crew-dispatch.json, config/crew-harness,
+<<<<<<< HEAD
 #      config/backlog-backend, config/backend, config/herdr-presentation-spaces,
 #      config/startup-memory-budget, and the public config/worker-git-identity policy -
+||||||| 4ee4a0a
+#      config/backlog-backend, config/backend, config/herdr-presentation-spaces, and
+#      config/startup-memory-budget -
+=======
+#      config/backlog-backend, config/backend, config/herdr-presentation-spaces,
+#      config/startup-memory-budget, and config/trace-context -
+>>>>>>> e5e8a671712bb8fbc3930ca0fcd182131c2a5637
 #      down into each secondmate home's config/, so the secondmate's OWN crewmates,
-#      dispatch profiles, backlog backend, runtime-backend default, and Herdr
-#      presentation opt-in inherit the primary's settings. It is primary-authoritative
+#      dispatch profiles, backlog backend, runtime-backend default, Herdr
+#      presentation opt-in, startup-memory budget, and trace context inherit the
+#      primary's settings.
+#      It is primary-authoritative
 #      (re-pushed at secondmate spawn, on the bootstrap secondmate sweep, and by
 #      config push).
 #      config/secondmate-harness is deliberately NOT inherited (secondmates do
@@ -218,6 +228,7 @@ test_propagate_lib() {
   printf 'tmux\n' > "$src/backend"
   printf 'public signed worker policy v1\n' > "$src/worker-git-identity"
   : > "$src/herdr-presentation-spaces"
+  : > "$src/trace-context"
   stdout="$d/clean-copy.out"
   stderr="$d/clean-copy.err"
   propagate_inheritable_config "$src" "$dest" >"$stdout" 2>"$stderr" || fail "propagate returned non-zero"
@@ -233,6 +244,7 @@ test_propagate_lib() {
   printf 'herdr\n' > "$dest/backend"
   propagate_inheritable_config "$src" "$dest"
   [ "$(cat "$dest/backend")" = tmux ] || fail "primary backend did not overwrite a divergent destination"
+  [ -f "$dest/trace-context" ] || fail "trace-context not propagated by the default inheritable set"
 
   # 2. idempotent: an unchanged re-run does not churn the mtime
   m1=$(date -r "$dest/crew-harness" +%s 2>/dev/null || stat -c %Y "$dest/crew-harness")
@@ -272,7 +284,13 @@ test_propagate_lib() {
   # 4. removing the source mirrors absence downstream (primary-authoritative)
   printf 'herdr\n' > "$dest/backend"
   rm -f "$src/crew-dispatch.json" "$src/crew-harness" "$src/backlog-backend" \
+<<<<<<< HEAD
     "$src/backend" "$src/herdr-presentation-spaces" "$src/worker-git-identity"
+||||||| 4ee4a0a
+    "$src/backend" "$src/herdr-presentation-spaces"
+=======
+    "$src/backend" "$src/herdr-presentation-spaces" "$src/trace-context"
+>>>>>>> e5e8a671712bb8fbc3930ca0fcd182131c2a5637
   propagate_inheritable_config "$src" "$dest"
   [ -e "$dest/crew-dispatch.json" ] && fail "dispatch profile absence not mirrored downstream"
   [ -e "$dest/crew-harness" ] && fail "absence not mirrored downstream"
@@ -280,6 +298,7 @@ test_propagate_lib() {
   [ -e "$dest/backend" ] && fail "backend absence not mirrored downstream"
   [ -e "$dest/worker-git-identity" ] && fail "worker-git-identity absence not mirrored downstream"
   [ -e "$dest/herdr-presentation-spaces" ] && fail "herdr-presentation-spaces absence not mirrored downstream"
+  [ -e "$dest/trace-context" ] && fail "trace-context absence not mirrored downstream"
 
   rm -f "$dest/crew-harness"
   ln -s "$d/missing-target" "$dest/crew-harness"
@@ -1063,7 +1082,12 @@ test_bootstrap_sweep_propagates_and_reconverges() {
   printf 'codex\n' > "$w/home/config/crew-harness"
   printf 'manual\n' > "$w/home/config/backlog-backend"
   printf 'tmux\n' > "$w/home/config/backend"
+<<<<<<< HEAD
   printf 'public signed worker policy v1\n' > "$w/home/config/worker-git-identity"
+||||||| 4ee4a0a
+=======
+  : > "$w/home/config/trace-context"
+>>>>>>> e5e8a671712bb8fbc3930ca0fcd182131c2a5637
   printf 'grok\n' > "$w/home/config/secondmate-harness"
   run_bootstrap "$w" >/dev/null
   [ "$(cat "$w/sm/config/crew-harness" 2>/dev/null)" = codex ] \
@@ -1074,8 +1098,14 @@ test_bootstrap_sweep_propagates_and_reconverges() {
     || fail "sweep: backlog-backend not pushed into the live home"
   [ "$(cat "$w/sm/config/backend" 2>/dev/null)" = tmux ] \
     || fail "sweep: backend not pushed into the live home"
+<<<<<<< HEAD
   [ "$(cat "$w/sm/config/worker-git-identity" 2>/dev/null)" = 'public signed worker policy v1' ] \
     || fail "sweep: worker-git-identity policy not pushed into the live home"
+||||||| 4ee4a0a
+=======
+  [ ! -e "$w/sm/config/trace-context" ] \
+    || fail "sweep: trace-context changed a legacy live home before relaunch"
+>>>>>>> e5e8a671712bb8fbc3930ca0fcd182131c2a5637
   [ -e "$w/sm/config/secondmate-harness" ] \
     && fail "sweep: secondmate-harness was inherited (must not be)"
 
@@ -1290,6 +1320,7 @@ test_config_push_propagates_reports_without_ff_or_nudge() {
   printf 'manual\n' > "$w/home/config/backlog-backend"
   printf 'tmux\n' > "$w/home/config/backend"
   record_live_watcher_fixture "$w/home"
+  : > "$w/home/config/trace-context"
   err="$w/config-push-basic.err"
   log="$w/config-push-basic.tmux.log"
   out=$(run_config_push "$w" "$log" 2>"$err"); status=$?
@@ -1307,6 +1338,10 @@ test_config_push_propagates_reports_without_ff_or_nudge() {
     "config push did not report backlog-backend as pushed"
   assert_contains "$out" "backend: pushed" \
     "config push did not report backend as pushed"
+  assert_contains "$out" "trace-context: unchanged" \
+    "live config push must report trace-context as session-scoped and unchanged"
+  [ ! -e "$w/sm/config/trace-context" ] \
+    || fail "live config push retroactively enabled trace context in a legacy secondmate home"
   assert_contains "$out" "config-reread: sent" \
     "config push with changed config must send a literal reread instruction"
   assert_not_contains "$out" "NUDGE_SECONDMATES" \
@@ -1332,6 +1367,8 @@ test_config_push_propagates_reports_without_ff_or_nudge() {
     "idempotent config push did not report backlog-backend as unchanged"
   assert_contains "$out2" "backend: unchanged" \
     "idempotent config push did not report backend as unchanged"
+  assert_contains "$out2" "trace-context: unchanged" \
+    "idempotent config push did not preserve session-scoped trace context"
   assert_not_contains "$out2" "config-reread: sent" \
     "unchanged config must not send a reread message"
   [ ! -s "$log" ] || fail "unchanged config push still invoked tmux send: $(cat "$log")"
