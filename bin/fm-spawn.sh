@@ -2344,6 +2344,10 @@ fi
 launch_prefix="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home"
 if [ "$KIND" = secondmate ]; then
   sq_primary_home=$(shell_quote "$FM_HOME")
+  case "$HARNESS" in
+    claude) supervision_model=autoarm ;;
+    *) supervision_model=persistent ;;
+  esac
   # Deliver the primary's EFFECTIVE trace-context decision as a normalized on/off
   # literal (never the raw FM_TRACE_CONTEXT string) so a FM_TRACE_CONTEXT override
   # on the primary reaches the secondmate's OWN workers, not just the copied
@@ -2351,7 +2355,7 @@ if [ "$KIND" = secondmate ]; then
   # not enable them across the launch boundary (bin/fm-trace-context-lib.sh header).
   # Reuse the single frozen decision from the carrier resolution above so the
   # injected carrier and this on/off snapshot are guaranteed to agree.
-  launch_prefix="$launch_prefix FM_PUBLIC_FOLLOWUP_PRIMARY_HOME=$sq_primary_home FM_TRACE_CONTEXT=$SPAWN_TRACE_EFFECTIVE"
+  launch_prefix="$launch_prefix FM_PUBLIC_FOLLOWUP_PRIMARY_HOME=$sq_primary_home FM_TRACE_CONTEXT=$SPAWN_TRACE_EFFECTIVE FM_SUPERVISION_MODEL=$supervision_model"
 fi
 if [ -n "$sq_git_config" ]; then
   launch_prefix="$launch_prefix GIT_CONFIG_GLOBAL=$sq_git_config"
