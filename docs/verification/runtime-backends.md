@@ -481,7 +481,7 @@ result.runtime.state=ready
 `orca worktree create` returned `result.worktree.id` and `result.worktree.path`.
 Speculative bare ids and nested terminal fields were deliberately rejected.
 
-The worktree-id shape was verified live against `orca status --json` reporting `result.runtime.appVersion=1.4.171`.
+The worktree-id shape was verified live on 2026-08-05 against `orca status --json` reporting `result.runtime.appVersion=1.4.171`.
 
 ```sh
 orca worktree list --json
