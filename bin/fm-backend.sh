@@ -392,20 +392,21 @@ fm_backend_endpoint_atom_valid() {  # <value>
 # absolute worktree path. The path is intentionally not compared here; the
 # existing Orca id-to-path check owns that runtime consistency proof.
 fm_backend_orca_worktree_id_valid() {  # <repo-uuid>::<absolute-worktree-path>
-  local value=${1:-} repo_id worktree_path
+  local value=${1:-} repo_id repo_hex worktree_path
   case "$value" in
     ''|*$'\n'*|*$'\r'*|*$'\t'*|*[[:cntrl:]]*|*::*::*) return 1 ;;
   esac
   repo_id=${value%%::*}
   worktree_path=${value#*::}
   case "$repo_id" in
-    ????????-????-????-????-????????????)
-      case "$repo_id" in *[!0123456789abcdefABCDEF-]*) return 1 ;; esac
-      ;;
+    ????????-????-????-????-????????????) ;;
     *) return 1 ;;
   esac
+  repo_hex=${repo_id//-/}
+  case "$repo_hex" in *[!0123456789abcdefABCDEF]*) return 1 ;; esac
+  [ ${#repo_hex} -eq 32 ] || return 1
   case "$worktree_path" in
-    ''|/*/../*|*/../*|*/..|/*/./*|*/./*|*/.|*/|/) return 1 ;;
+    ''|*/../*|*/..|*/./*|*/.|*/) return 1 ;;
     /*) return 0 ;;
     *) return 1 ;;
   esac

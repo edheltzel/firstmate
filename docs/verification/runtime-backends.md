@@ -481,6 +481,21 @@ result.runtime.state=ready
 `orca worktree create` returned `result.worktree.id` and `result.worktree.path`.
 Speculative bare ids and nested terminal fields were deliberately rejected.
 
+The worktree-id shape was verified live against `orca status --json` reporting `result.runtime.appVersion=1.4.171`.
+
+```sh
+orca worktree list --json
+```
+
+Every returned worktree carried a composite id of one repository UUID, the literal `::`, and one absolute worktree path, with the sibling `repoId` byte-identical to that prefix (host paths and the UUID redacted here, as elsewhere in this file):
+
+```text
+result.worktrees[].id=<repo-uuid>::/Users/<user>/orca/workspaces/<Project>/<worktree>
+result.worktrees[].repoId=<repo-uuid>
+```
+
+Guarded cleanup in `bin/fm-backend.sh` requires that exact shape before any Orca dispatch, so a drifted or non-conforming id preserves the task instead of removing a worktree.
+
 ```sh
 tests/fm-backend-orca.test.sh
 tests/fm-backend.test.sh

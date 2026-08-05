@@ -30,7 +30,15 @@ printf ' <%s>' "$@" >> "${FM_RUNTIME_LOG:?}"
 printf '\n' >> "${FM_RUNTIME_LOG:?}"
 exit 0
 SH
-  chmod +x "$TMP_ROOT/$dir/fakebin/tmux" "$TMP_ROOT/$dir/fakebin/treehouse"
+  cat > "$TMP_ROOT/$dir/fakebin/orca" <<'SH'
+#!/usr/bin/env bash
+printf 'orca' >> "${FM_RUNTIME_LOG:?}"
+printf ' <%s>' "$@" >> "${FM_RUNTIME_LOG:?}"
+printf '\n' >> "${FM_RUNTIME_LOG:?}"
+exit 0
+SH
+  chmod +x "$TMP_ROOT/$dir/fakebin/tmux" "$TMP_ROOT/$dir/fakebin/treehouse" \
+    "$TMP_ROOT/$dir/fakebin/orca"
   printf '%s\n' "$TMP_ROOT/$dir"
 }
 
@@ -122,7 +130,15 @@ test_orca_worktree_identifier_validation() {
     "$repo_id::" \
     "$repo_id::relative/worktree" \
     "$repo_id::${dir}/one::two" \
-    "not-a-uuid::${dir}/worktree"; do
+    "not-a-uuid::${dir}/worktree" \
+    "------------------------------------::${dir}/worktree" \
+    "1-3e456--e89b-12d3-a456-42661417400f::${dir}/worktree" \
+    "$repo_id::${dir}/worktree/../../etc" \
+    "$repo_id::${dir}/worktree/.." \
+    "$repo_id::${dir}/./worktree" \
+    "$repo_id::${dir}/worktree/." \
+    "$repo_id::${dir}/worktree/" \
+    "$repo_id::/"; do
     if fm_backend_orca_worktree_id_valid "$value"; then
       fail "malformed Orca worktree id was accepted: $value"
     fi
