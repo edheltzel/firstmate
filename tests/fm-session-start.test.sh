@@ -762,15 +762,7 @@ SH
   i=1
   while [ "$i" -le 40 ]; do
     (
-<<<<<<< HEAD
-      # BASHPID does not exist on stock macOS Bash 3.2; a child's PPID is this
-      # subshell's own pid, which is the portable spelling of the same value.
-      harness_pid=$(exec sh -c 'echo "$PPID"')
-||||||| 4ee4a0a
-      harness_pid=$BASHPID
-=======
       harness_pid=$(sh -c 'printf "%s\n" "$PPID"')
->>>>>>> e5e8a671712bb8fbc3930ca0fcd182131c2a5637
       : > "$home/state/harness-$harness_pid"
       : > "$ready/$i"
       while [ "$(find "$ready" -type f | wc -l | tr -d ' ')" -lt 40 ]; do

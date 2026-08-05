@@ -14,16 +14,8 @@
 #      explicit per-spawn harness arg still wins.
 #   B) Inheritance. The primary pushes a declared, extensible set of LOCAL
 #      (gitignored) config items - config/crew-dispatch.json, config/crew-harness,
-<<<<<<< HEAD
-#      config/backlog-backend, config/backend, config/herdr-presentation-spaces,
-#      config/startup-memory-budget, and the public config/worker-git-identity policy -
-||||||| 4ee4a0a
-#      config/backlog-backend, config/backend, config/herdr-presentation-spaces, and
-#      config/startup-memory-budget -
-=======
 #      config/backlog-backend, config/backend, config/herdr-presentation-spaces,
 #      config/startup-memory-budget, and config/trace-context -
->>>>>>> e5e8a671712bb8fbc3930ca0fcd182131c2a5637
 #      down into each secondmate home's config/, so the secondmate's OWN crewmates,
 #      dispatch profiles, backlog backend, runtime-backend default, Herdr
 #      presentation opt-in, startup-memory budget, and trace context inherit the
@@ -284,13 +276,7 @@ test_propagate_lib() {
   # 4. removing the source mirrors absence downstream (primary-authoritative)
   printf 'herdr\n' > "$dest/backend"
   rm -f "$src/crew-dispatch.json" "$src/crew-harness" "$src/backlog-backend" \
-<<<<<<< HEAD
-    "$src/backend" "$src/herdr-presentation-spaces" "$src/worker-git-identity"
-||||||| 4ee4a0a
-    "$src/backend" "$src/herdr-presentation-spaces"
-=======
     "$src/backend" "$src/herdr-presentation-spaces" "$src/trace-context"
->>>>>>> e5e8a671712bb8fbc3930ca0fcd182131c2a5637
   propagate_inheritable_config "$src" "$dest"
   [ -e "$dest/crew-dispatch.json" ] && fail "dispatch profile absence not mirrored downstream"
   [ -e "$dest/crew-harness" ] && fail "absence not mirrored downstream"
@@ -1082,12 +1068,7 @@ test_bootstrap_sweep_propagates_and_reconverges() {
   printf 'codex\n' > "$w/home/config/crew-harness"
   printf 'manual\n' > "$w/home/config/backlog-backend"
   printf 'tmux\n' > "$w/home/config/backend"
-<<<<<<< HEAD
-  printf 'public signed worker policy v1\n' > "$w/home/config/worker-git-identity"
-||||||| 4ee4a0a
-=======
   : > "$w/home/config/trace-context"
->>>>>>> e5e8a671712bb8fbc3930ca0fcd182131c2a5637
   printf 'grok\n' > "$w/home/config/secondmate-harness"
   run_bootstrap "$w" >/dev/null
   [ "$(cat "$w/sm/config/crew-harness" 2>/dev/null)" = codex ] \
@@ -1098,14 +1079,8 @@ test_bootstrap_sweep_propagates_and_reconverges() {
     || fail "sweep: backlog-backend not pushed into the live home"
   [ "$(cat "$w/sm/config/backend" 2>/dev/null)" = tmux ] \
     || fail "sweep: backend not pushed into the live home"
-<<<<<<< HEAD
-  [ "$(cat "$w/sm/config/worker-git-identity" 2>/dev/null)" = 'public signed worker policy v1' ] \
-    || fail "sweep: worker-git-identity policy not pushed into the live home"
-||||||| 4ee4a0a
-=======
   [ ! -e "$w/sm/config/trace-context" ] \
     || fail "sweep: trace-context changed a legacy live home before relaunch"
->>>>>>> e5e8a671712bb8fbc3930ca0fcd182131c2a5637
   [ -e "$w/sm/config/secondmate-harness" ] \
     && fail "sweep: secondmate-harness was inherited (must not be)"
 
