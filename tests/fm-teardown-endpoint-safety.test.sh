@@ -30,7 +30,15 @@ printf ' <%s>' "$@" >> "${FM_RUNTIME_LOG:?}"
 printf '\n' >> "${FM_RUNTIME_LOG:?}"
 exit 0
 SH
-  chmod +x "$TMP_ROOT/$dir/fakebin/tmux" "$TMP_ROOT/$dir/fakebin/treehouse"
+  cat > "$TMP_ROOT/$dir/fakebin/orca" <<'SH'
+#!/usr/bin/env bash
+printf 'orca' >> "${FM_RUNTIME_LOG:?}"
+printf ' <%s>' "$@" >> "${FM_RUNTIME_LOG:?}"
+printf '\n' >> "${FM_RUNTIME_LOG:?}"
+exit 0
+SH
+  chmod +x "$TMP_ROOT/$dir/fakebin/tmux" "$TMP_ROOT/$dir/fakebin/treehouse" \
+    "$TMP_ROOT/$dir/fakebin/orca"
   printf '%s\n' "$TMP_ROOT/$dir"
 }
 
@@ -90,7 +98,61 @@ test_invalid_endpoint_records_refuse_before_mutation() {
     "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
   assert_refused_without_mutation "$dir" "$id" "duplicate task binding"
 
+  dir=$(make_case orca-malformed)
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=fm-$id" "endpoint_task_id=$id" "terminal=term-7" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout" \
+    "backend=orca" "orca_worktree_id=$dir/worktree"
+  assert_refused_without_mutation "$dir" "$id" "malformed Orca worktree id"
+
   pass "fm-teardown: missing, empty, malformed, ambiguous, and task-mismatched endpoints refuse before every mutation or runtime call"
+}
+
+test_orca_worktree_identifier_validation() {
+  local dir id value
+  local repo_id=123e4567-e89b-12d3-a456-426614174000
+  # shellcheck source=/dev/null
+  . "$ROOT/bin/fm-backend.sh"
+  dir=$(make_case orca-valid-id)
+  id=orca-valid-id
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=fm-$id" "endpoint_task_id=$id" "terminal=term-7" \
+    "worktree=$dir/worktree" "project=$dir/project" "backend=orca" \
+    "orca_worktree_id=$repo_id::$dir/worktree"
+  fm_backend_validate_task_endpoint "$dir/home/state/$id.meta" "$id" \
+    || fail "valid UUID and absolute-path Orca worktree id refused"
+  [ "$FM_BACKEND_VALIDATED_BACKEND:$FM_BACKEND_VALIDATED_TARGET" = "orca:term-7" ] \
+    || fail "valid Orca endpoint did not reach the normal terminal cleanup target"
+
+  for value in \
+    "$repo_id" \
+    "::${dir}/worktree" \
+    "$repo_id::" \
+    "$repo_id::relative/worktree" \
+    "$repo_id::${dir}/one::two" \
+    "not-a-uuid::${dir}/worktree" \
+    "------------------------------------::${dir}/worktree" \
+    "1-3e456--e89b-12d3-a456-42661417400f::${dir}/worktree" \
+    "$repo_id::${dir}/worktree/../../etc" \
+    "$repo_id::${dir}/worktree/.." \
+    "$repo_id::${dir}/./worktree" \
+    "$repo_id::${dir}/worktree/." \
+    "$repo_id::${dir}/worktree/" \
+    "$repo_id::/"; do
+    if fm_backend_orca_worktree_id_valid "$value"; then
+      fail "malformed Orca worktree id was accepted: $value"
+    fi
+  done
+  value=$'123e4567-e89b-12d3-a456-426614174000::/tmp/orca\nunsafe'
+  if fm_backend_orca_worktree_id_valid "$value"; then
+    fail "Orca worktree id containing a control character was accepted"
+  fi
+  fm_backend_endpoint_atom_valid worktree-9 \
+    || fail "generic endpoint atom validator no longer accepts its existing safe atom"
+  if fm_backend_endpoint_atom_valid "$repo_id::${dir}/worktree"; then
+    fail "generic endpoint atom validator was weakened for Orca composite ids"
+  fi
+  pass "Orca worktree ids require one UUID-style repository id and one absolute path while generic atoms remain unchanged"
 }
 
 test_supported_backend_endpoint_records_validate() {
@@ -126,7 +188,8 @@ test_supported_backend_endpoint_records_validate() {
   id=orca-task
   fm_write_meta "$dir/home/state/$id.meta" \
     "window=fm-$id" "endpoint_task_id=$id" "terminal=term-7" \
-    "worktree=$dir/worktree" "project=$dir/project" "backend=orca" "orca_worktree_id=worktree-9"
+    "worktree=$dir/worktree" "project=$dir/project" "backend=orca" \
+    "orca_worktree_id=123e4567-e89b-12d3-a456-426614174000::$dir/worktree"
   fm_backend_validate_task_endpoint "$dir/home/state/$id.meta" "$id" || fail "valid Orca endpoint refused"
   [ "$FM_BACKEND_VALIDATED_TARGET" = term-7 ] || fail "Orca validation did not select its terminal"
 
@@ -269,6 +332,7 @@ SH
 }
 
 test_invalid_endpoint_records_refuse_before_mutation
+test_orca_worktree_identifier_validation
 test_supported_backend_endpoint_records_validate
 test_tmux_empty_target_refuses_without_invocation
 test_recorded_process_identity_cleanup_is_exact

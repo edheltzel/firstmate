@@ -232,16 +232,12 @@ WORKTREE_OWNER_MARKER=".fm-worktree-owner"
 . "$SCRIPT_DIR/fm-busy-lib.sh"
 # shellcheck source=bin/fm-pr-lib.sh
 . "$SCRIPT_DIR/fm-pr-lib.sh"
-<<<<<<< HEAD
 # shellcheck source=bin/fm-worker-git-identity-lib.sh
 . "$SCRIPT_DIR/fm-worker-git-identity-lib.sh"
-||||||| 4ee4a0a
-=======
 # shellcheck source=bin/fm-trace-context-lib.sh
 . "$SCRIPT_DIR/fm-trace-context-lib.sh"
 # shellcheck source=bin/fm-remote-readiness-lib.sh
 . "$SCRIPT_DIR/fm-remote-readiness-lib.sh"
->>>>>>> e5e8a671712bb8fbc3930ca0fcd182131c2a5637
 # Fail closed before any fleet mutation: a no-mistakes gate agent must never spawn
 # a direct report (see bin/fm-gate-refuse-lib.sh).
 if ! fm_worker_git_identity_load "$CONFIG"; then
@@ -2342,13 +2338,11 @@ if [ "$HARNESS" = claude ] && [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
 fi
 if [ "$KIND" = secondmate ]; then
   sq_home=$(shell_quote "$PROJ_ABS")
-<<<<<<< HEAD
 else
   sq_home=$(shell_quote "$FM_HOME")
-||||||| 4ee4a0a
-  sq_primary_home=$(shell_quote "$FM_HOME")
-  LAUNCH="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_PUBLIC_FOLLOWUP_PRIMARY_HOME=$sq_primary_home FM_HOME=$sq_home $LAUNCH"
-=======
+fi
+launch_prefix="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home"
+if [ "$KIND" = secondmate ]; then
   sq_primary_home=$(shell_quote "$FM_HOME")
   # Deliver the primary's EFFECTIVE trace-context decision as a normalized on/off
   # literal (never the raw FM_TRACE_CONTEXT string) so a FM_TRACE_CONTEXT override
@@ -2357,13 +2351,7 @@ else
   # not enable them across the launch boundary (bin/fm-trace-context-lib.sh header).
   # Reuse the single frozen decision from the carrier resolution above so the
   # injected carrier and this on/off snapshot are guaranteed to agree.
-  LAUNCH="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_PUBLIC_FOLLOWUP_PRIMARY_HOME=$sq_primary_home FM_HOME=$sq_home FM_TRACE_CONTEXT=$SPAWN_TRACE_EFFECTIVE $LAUNCH"
->>>>>>> e5e8a671712bb8fbc3930ca0fcd182131c2a5637
-fi
-launch_prefix="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home"
-if [ "$KIND" = secondmate ]; then
-  sq_primary_home=$(shell_quote "$FM_HOME")
-  launch_prefix="$launch_prefix FM_PUBLIC_FOLLOWUP_PRIMARY_HOME=$sq_primary_home"
+  launch_prefix="$launch_prefix FM_PUBLIC_FOLLOWUP_PRIMARY_HOME=$sq_primary_home FM_TRACE_CONTEXT=$SPAWN_TRACE_EFFECTIVE"
 fi
 if [ -n "$sq_git_config" ]; then
   launch_prefix="$launch_prefix GIT_CONFIG_GLOBAL=$sq_git_config"

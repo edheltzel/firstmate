@@ -32,7 +32,7 @@ The broker refuses default-branch pushes, repository overrides, branch mismatche
 
 Before publication the broker checks the exact base-to-head commit range, the configured Atlas worker author and committer fields, and a valid SSH signature on every commit. Each signature must verify through a deterministic allowed-signers record to the configured Atlas principal and fingerprint; a `gpgsig` header alone is not sufficient.
 
-The signed worker profile is the machine-local `config/worker-git-identity` contract described in [`configuration.md`](configuration.md#fm_home). The broker requires the exact Atlas author/email, SSH principal, and public-key fingerprint from that validated profile. Repository `required_signatures` responses of `true`, `false`, or the documented absent optional subresource are compatible with this local signed profile; forbidden, authentication, malformed, server, transport, and unknown policy results refuse publication.
+The signed worker profile is the machine-local `config/worker-git-identity` contract described in [`configuration.md`](configuration.md#worker-git-identity). The broker requires the exact Atlas author/email, SSH principal, and public-key fingerprint from that validated profile. Repository `required_signatures` responses of `true`, `false`, or the documented absent optional subresource are compatible with this local signed profile; forbidden, authentication, malformed, server, transport, and unknown policy results refuse publication.
 
 PR verification checks the exact repository, Atlas-Key author and remote commit associations, task head branch, recorded base branch, head SHA, and commit set.
 

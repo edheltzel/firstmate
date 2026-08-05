@@ -386,6 +386,32 @@ fm_backend_endpoint_atom_valid() {  # <value>
   esac
 }
 
+# fm_backend_orca_worktree_id_valid: validate Orca's composite worktree id
+# without applying the generic endpoint-atom grammar. Orca writes exactly one
+# UUID-style repository id, the literal `::` separator, and one canonical
+# absolute worktree path. The path is intentionally not compared here; the
+# existing Orca id-to-path check owns that runtime consistency proof.
+fm_backend_orca_worktree_id_valid() {  # <repo-uuid>::<absolute-worktree-path>
+  local value=${1:-} repo_id repo_hex worktree_path
+  case "$value" in
+    ''|*$'\n'*|*$'\r'*|*$'\t'*|*[[:cntrl:]]*|*::*::*) return 1 ;;
+  esac
+  repo_id=${value%%::*}
+  worktree_path=${value#*::}
+  case "$repo_id" in
+    ????????-????-????-????-????????????) ;;
+    *) return 1 ;;
+  esac
+  repo_hex=${repo_id//-/}
+  case "$repo_hex" in *[!0123456789abcdefABCDEF]*) return 1 ;; esac
+  [ ${#repo_hex} -eq 32 ] || return 1
+  case "$worktree_path" in
+    ''|*/../*|*/..|*/./*|*/.|*/) return 1 ;;
+    /*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 fm_backend_validate_task_endpoint() {  # <meta-file> <task-id>
   local meta=$1 id=$2 backend_count backend window worktree project binding_count binding
   local session pane recorded_session workspace tab terminal worktree_id surface
@@ -506,7 +532,7 @@ fm_backend_validate_task_endpoint() {  # <meta-file> <task-id>
       }
       if [ "$window" != "fm-$id" ] \
         || ! fm_backend_endpoint_atom_valid "$terminal" \
-        || ! fm_backend_endpoint_atom_valid "$worktree_id"; then
+        || ! fm_backend_orca_worktree_id_valid "$worktree_id"; then
         echo "REFUSED: Orca endpoint metadata for task $id is malformed or inconsistent; preserving task state." >&2
         return 1
       fi

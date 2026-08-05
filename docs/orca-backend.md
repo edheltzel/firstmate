@@ -36,7 +36,7 @@ The normal isolation and unlanded-work refusal rules still apply.
 backend=orca
 window=fm-<id>
 terminal=<orca terminal handle>
-orca_worktree_id=<orca worktree id>
+orca_worktree_id=<orca repository uuid>::<absolute Orca worktree path>
 worktree=<absolute Orca worktree path>
 ```
 
@@ -55,6 +55,7 @@ The watcher has no native Orca busy signal, so each harness adapter's semantic l
 Grok and OMP retain their isolated rendered-tail fallbacks.
 
 Cleanup keeps all shared Firstmate safety checks.
+Before any of them, cleanup requires the recorded `orca_worktree_id=` to be exactly one UUID-style repository id, the literal `::`, and one absolute worktree path with no relative, ambiguous, trailing-separator, or control-character component; a non-conforming id is a hard refusal that preserves the task and dispatches nothing to Orca.
 A scout still requires its report and completed decision inventory.
 A ship still refuses dirty or unlanded work.
 Before release, cleanup resolves the recorded Orca worktree id and verifies its path matches the recorded worktree path.
@@ -77,6 +78,7 @@ It never raw-deletes an Orca worktree.
 tests/fm-backend-orca.test.sh
 tests/fm-backend.test.sh
 tests/fm-bootstrap.test.sh
+tests/fm-teardown-endpoint-safety.test.sh
 ```
 
 [`verification/runtime-backends.md`](verification/runtime-backends.md#orca) records the real readiness and response-shape smoke.

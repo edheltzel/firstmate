@@ -454,7 +454,7 @@ backlog_json() {  # [<backlog-path>] - defaults to this home's $BACKLOG
 task_json_lines() {
   local meta id kind harness mode yolo project worktree home projects backend target status_log report_path
   local remote_host remote_root remote_state remote_rc remote_home_present
-  local pr pr_source event_json current_json endpoint_exists agent_alive meta_json status_json report_json worktree_json home_json
+  local pr pr_source event_json current_json endpoint_exists agent_alive meta_json status_json report_json worktree_json home_json branch_json
   local last_event_raw current_state current_source pending_decision blocked_event report_present=0 pr_from_status
   local open_decisions_tsv open_decisions_json project_key
 
@@ -470,6 +470,7 @@ task_json_lines() {
     worktree=$(meta_value "$meta" worktree)
     home=$(meta_value "$meta" home)
     projects=$(meta_value "$meta" projects)
+    project_key=$(meta_value "$meta" project_key)
     remote_host=$(meta_value "$meta" remote_host)
     remote_root=$(meta_value "$meta" remote_root)
     remote_home_present=null
@@ -571,6 +572,7 @@ task_json_lines() {
     status_json=$event_json
     report_json=$(path_present_json "$report_path")
     if [ -n "$worktree" ]; then worktree_json=$(path_present_json "$worktree"); else worktree_json=$(jq -n '{path:null,present:false}'); fi
+    if [ -n "$worktree" ]; then branch_json=$(git_branch_json "$worktree"); else branch_json=$(jq -n '{active:null,default:null,selected:null}'); fi
     if [ -n "$home" ] && [ -n "$remote_host" ]; then
       home_json=$(jq -n --arg path "$home" --argjson present "$remote_home_present" '{path:$path,present:$present}')
     elif [ -n "$home" ]; then
