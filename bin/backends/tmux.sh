@@ -224,6 +224,29 @@ fm_backend_tmux_foreground_argv0s() {  # <target>
       done
 }
 
+# fm_backend_tmux_omp_foreground_alive: OMP's exact Bun foreground shape.
+# OMP 17.2.2 names nothing of its own - it keeps `bun` as the pane command and
+# in the process-group names above - so its liveness is proven structurally
+# instead: a real supervised launch showed the pane shell pid's tpgid pointing
+# at `bun bun /.../omp ...`. Match only that leading executable argument shape,
+# so an arbitrary Bun process whose later prompt text mentions omp is never
+# classified alive (docs/tmux-backend.md "Composer, busy state, and delivery").
+#
+# Like the readers above this is a RAW pane read: callers must confirm exact
+# window membership first.
+fm_backend_tmux_omp_foreground_alive() {  # <target>
+  local target=$1 pane_pid tpgid args
+  pane_pid=$(tmux display-message -p -t "$target" '#{pane_pid}' 2>/dev/null) || return 1
+  case "$pane_pid" in ''|*[!0-9]*) return 1 ;; esac
+  tpgid=$(LC_ALL=C ps -o tpgid= -p "$pane_pid" 2>/dev/null | tr -d '[:space:]')
+  case "$tpgid" in ''|*[!0-9]*|0) return 1 ;; esac
+  args=$(LC_ALL=C ps -o args= -p "$tpgid" 2>/dev/null) || return 1
+  case "$args" in
+    bun\ bun\ */omp|bun\ bun\ */omp\ *|bun\ */omp|bun\ */omp\ *) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # fm_backend_tmux_agent_state: recovery-grade harness-agent state for one
 # recorded target. See bin/fm-backend.sh's fm_backend_agent_state for the
 # shared state vocabulary and docs/tmux-backend.md "Agent liveness probe" for
@@ -300,6 +323,13 @@ EOF
     return 0
   }
   if [ "$(fm_backend_tmux_classify_process_name "$comm")" = agent ]; then
+    printf 'alive'
+    return 0
+  fi
+
+  # OMP names itself in neither source, so its structural foreground shape is
+  # the last positive proof, before any negative verdict is drawn.
+  if fm_backend_tmux_omp_foreground_alive "$target"; then
     printf 'alive'
     return 0
   fi
