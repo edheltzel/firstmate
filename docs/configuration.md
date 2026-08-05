@@ -196,7 +196,7 @@ An optional local `config/worker-git-identity` file enables one signed worker id
 The file uses Git config syntax and requires exactly one value for `worker.name`, `worker.email`, `worker.signingKey`, `worker.fingerprint`, `worker.principal`, `gpg.format`, and `commit.gpgSign`.
 `worker.signingKey` is an absolute path to one regular non-symlink public SSH key, `worker.fingerprint` must match that key's SHA-256 fingerprint, `gpg.format` must be `ssh`, and `commit.gpgSign` must be `true`.
 Firstmate copies only validated public policy and generated allowed-signers metadata into task-local configuration; the private key remains under the host signing agent's control and is never read or copied.
-The inherited-local-material path propagates this public policy file to secondmate homes while preserving the same private-key boundary.
+The file is not inherited local material: it stays machine-local to the home that owns the signing agent, so a secondmate home needs its own `config/worker-git-identity` before it can publish a signed worker identity.
 For Atlas-backed projects, `bin/fm-pr-identity.sh` binds the canonical project key, repository, branch, worker identity, and task before publication, and the PR helpers refuse missing or mismatched publication bindings.
 The helper headers own exact validation, task-local Git configuration, Atlas broker, and publication mechanics.
 
