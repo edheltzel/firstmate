@@ -34,12 +34,19 @@ Real harness credential tests remain opt-in rather than part of default CI.
 
 ## Watching and task containers
 
-The ordinary topology maintains one durable workspace per project Fleet and one task tab per endpoint.
-An ordinary ship or scout uses `<Fleet display name>-Fleet` regardless of which Firstmate home launches it.
-A persistent secondmate agent uses `Archon-<secondmate-id>`, derived from the validated `.fm-secondmate-home` marker at that secondmate home.
-The canonical project key drives both delivery-mode and Fleet lookup, while the project basename remains the display default unless `data/projects.md` supplies a `fleet=<Display>` alias.
+The ordinary flat topology maintains one durable FM-fleet or SM-fleet workspace per project in a home and one task tab per endpoint.
+An ordinary ship or scout resolves `FM-fleet-<n>` when the primary Firstmate creates its parent workspace, or `SM-fleet-<n>` when a second mate creates it.
+The suffix is a stable per-home/project assignment from one serialized registry per prefix in the shared Herdr session, so separate homes and concurrent spawns cannot mint the same label.
+If that transient registry is absent after a restart or reboot, allocation holds the same session lock and advances past the highest restored numeric workspace suffix before publishing a new assignment.
+An unreadable session snapshot, registry, or allocation lock stops the spawn before workspace creation instead of falling back to a legacy home label.
+This is never `<Project>-Fleet`.
+The primary Firstmate workspace defaults to `TheBridge`, where the existing captain tab remains `@TheHelm` and a persistent secondmate agent uses tab `Portside`.
+Spawn placement never renames or closes the existing captain tab.
+[`configuration.md`](configuration.md#runtime-backend-configbackend--fm_backend) owns the local gitignored `config/herdr-layout` fields and their current effect.
+The canonical project key drives both delivery-mode and display Fleet lookup, while the project basename remains the display default unless `data/projects.md` supplies a `fleet=<Display>` alias.
+Generic workspace numbering never replaces that project-facing identity in display metadata.
 
-Attach to the selected named Herdr session and switch to the relevant Fleet or Archon workspace to watch its task tabs.
+Attach to the selected named Herdr session and switch to the relevant Fleet or primary workspace to watch its task tabs.
 Routine supervision uses `bin/fm-peek.sh <id>` and `FM_HOME=<home> bin/fm-send.sh <id> '<text>'` without attaching.
 
 Workspace and tab creation use `--no-focus`.
@@ -52,14 +59,14 @@ The adapter resolves a claimed launcher from live pane, tab, workspace, named-se
 A stale, contradictory, cross-session, or unreadable claimed identity stops the spawn before any worker endpoint exists.
 
 Project grouping remains authoritative after launcher validation.
-When the exact launcher already belongs to the resolved Fleet or Archon workspace, that exact workspace disambiguates duplicate labels.
-When the launcher belongs to a supervisor or another project, it is validated but does not override the target project Fleet.
-A secondmate launch deliberately ignores the launcher's workspace and resolves its own Archon target.
-If no matching exact launcher selects the target, the target label must identify at most one workspace; duplicate Fleet or Archon labels refuse rather than choosing by list order.
+When the exact launcher already belongs to the resolved Fleet or primary workspace, that exact workspace disambiguates duplicate labels.
+When the launcher belongs to another project Fleet, it is validated but does not override the target.
+A secondmate launch targets the configured primary workspace, so an exact Firstmate launcher already there is reused and a Fleet launcher is not.
+If no matching exact launcher selects the target, the target label must identify at most one workspace; duplicate Fleet or primary labels refuse rather than choosing by list order.
 Recovery and list-live may retain first-match label lookup because they inspect already-recorded panes rather than selecting a destination for a new worker.
 
 Existing task operations use recorded endpoint ids and do not move a live task when labels change.
-The resolved Fleet or Archon workspace is reused while it has task tabs.
+The resolved Fleet or primary workspace is reused while it has task tabs.
 Closing its last tab can remove the workspace, and the next spawn recreates it.
 
 ## Presentation spaces
@@ -80,7 +87,8 @@ After the new workspace converges to one exact task endpoint beneath one exact p
 Another parent with the same presentation label does not prevent publication or participate in restart reclaim.
 The token is visible in the workspace title because Herdr exposes no verified hidden persistent field, but neither token, title, nor journal authorizes send, capture, task ownership, Treehouse return, or general recovery.
 
-The owning parent is the exact resolved project Fleet or secondmate Archon workspace.
+The owning parent is the exact resolved FM-fleet or SM-fleet workspace.
+A persistent secondmate agent is never presentation-eligible.
 A validated launcher identity supplies that exact parent when it already belongs to the target; otherwise the target label must resolve uniquely.
 Projected children are never collapsed back into that parent; it is the placement and ordering reference the projection is bound under.
 The normal `fm-<id>` task tab is created in the exact new workspace returned by Herdr.
@@ -90,7 +98,7 @@ An ambiguous response grants no mutation or cleanup authority.
 
 Protocol 16 exposes `workspace.move` over the named session socket but no CLI subcommand.
 `bin/backends/herdr-workspace-move.py` sends only that whitelisted method and verifies the complete returned workspace order.
-Projected children are placed in one contiguous block immediately after their owning Fleet or Archon parent when the session layout, protocol, socket, `python3`, and machine-private per-session lock are all verifiable.
+Projected children are placed in one contiguous block immediately after their owning FM-fleet or SM-fleet parent when the session layout, protocol, socket, `python3`, and machine-private per-session lock are all verifiable.
 Existing legacy child labels may extend an already adjacent block read-only but are never renamed or migrated.
 A foreign, ambiguous, detached, or manually interleaved child makes ordering skip with a warning rather than rewriting the layout.
 
@@ -145,7 +153,7 @@ Operational compromises:
 - A failed journal publication or projected workspace create stops that spawn instead of falling back flat, so a Herdr create failure surfaces as a spawn failure in every Herdr home rather than only in homes that opted in; every earlier degradation on the fresh projected-create path (no session server, contended presentation lock, absent or ambiguous parent) still warns and continues flat.
 - Recovery of an existing presentation journal deliberately refuses the spawn when the shared presentation lock is contended rather than falling back flat, and default-on makes that refusal reachable in any Herdr home.
 - Existing layouts are not force-renamed or rearranged.
-- Missing or ambiguous restart bindings fall back to the ordinary project Fleet or secondmate Archon workspace while the old projection remains untouched.
+- Missing or ambiguous restart bindings fall back to the resolved FM-fleet or SM-fleet workspace while the old projection remains untouched.
 - Crashes, lost responses, failed exact-pane cleanup, or human renames can leave quarantined spaces; session start removes only the exact home-local, uniquely journal-correlated, childless idle-shell shape above.
 - Spaces have no cross-home cleanup path, and a secondmate child can clean up only from its exact home.
 - Every stale-looking space outside that narrow startup proof still requires manual cleanup in Herdr's UI after human inspection.
@@ -195,7 +203,7 @@ The workspace receives display-only `fleet` and `what` tokens when the installed
 Workspace and tab creation forward `SSH_AUTH_SOCK` through Herdr's `--env` surface only when the launching Firstmate process names a live Unix socket.
 This gives the worker access to the captain's already-unlocked agent without copying private keys or passphrases.
 Missing or stale sockets are omitted, preserving the provider's existing environment behavior.
-The reusable Fleet layout, Archon layout, and optional presentation layout all use the same creation wrappers.
+The reusable Fleet layout, primary workspace layout, and optional presentation layout all use the same creation wrappers.
 
 ## Current transport behavior
 
@@ -303,7 +311,7 @@ Tests use thin compatibility wrappers in `tests/herdr-test-safety.sh` and never 
 
 - Herdr remains experimental.
 - Presentation ordering needs protocol 16 and Python and is best-effort only.
-- Mutable labels can collide; they are never destructive authority, and unresolved duplicate Fleet or Archon labels refuse new spawns.
+- Mutable labels can collide; they are never destructive authority, and unresolved duplicate Fleet or primary labels refuse new spawns.
 - Ghost and placeholder recognition depends on ANSI de-emphasis and fails safely to pending when unavailable.
 - Mid-session secondmate liveness is not implemented.
 - OpenCode 1.18.4 can accept Enter while busy without clearing the composer.

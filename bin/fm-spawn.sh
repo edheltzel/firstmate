@@ -47,15 +47,13 @@
 #   A backend spawn refusal (missing dependency, version gate, unauthenticated
 #   socket, or unsupported secondmate mode) is terminal for that selected backend;
 #   callers must surface it instead of silently retrying another backend.
-#   A herdr crewmate or scout is placed in the exact workspace of the firstmate
-#   or secondmate process launching it, resolved from that process's own herdr
-#   pane rather than from a workspace label (herdr enforces no label uniqueness,
-#   so a label cannot tell two "firstmate" workspaces apart). A claimed parent
-#   identity that is unreadable, contradictory, stale, or from another herdr
-#   session stops the spawn before any worker endpoint exists. A launcher
-#   outside herdr has no workspace to inherit and uses this home's own labeled
-#   workspace, which must then match exactly one. --secondmate is the deliberate
-#   exception: it stands up that secondmate home's own workspace.
+#   A herdr crewmate or scout resolves an FM/SM fleet workspace as its parent.
+#   A claimed parent identity that is unreadable, contradictory, stale, or from
+#   another herdr session stops the spawn before any worker endpoint exists.
+#   A launcher already in that fleet workspace disambiguates duplicate labels.
+#   A secondmate lands as tab Portside in the primary Firstmate workspace
+#   (TheBridge by default; config/herdr-layout can override the names).
+#   A Firstmate already in that workspace is reused; a Fleet launcher is not.
 #   Herdr additionally uses a default-on presentation-only layout unless the
 #   local config/herdr-presentation-spaces file says off. A clean fresh task first
 #   writes state/<id>.herdr-presentation atomically, then creates a disposable
@@ -72,7 +70,7 @@
 #   canonical socket, outside any home's state/) through launch handoff. Lock
 #   contention warns and falls back to the ordinary flat layout before any
 #   projection mutation. The exact response-derived new workspace is inserted
-#   immediately after its owning parent (the project's Fleet or Archon-<id>) contiguous
+#   immediately after its owning FM/SM fleet parent's contiguous
 #   child block. Ordering never authorizes lifecycle cleanup, and any
 #   unavailable, ambiguous, or failed move warns while the spawn continues.
 #   Every projected create, prune, and move captures and verifies the named
@@ -1366,7 +1364,8 @@ PROJ_ABS_REAL=$(cd "$PROJ_ABS" 2>/dev/null && pwd -P) || PROJ_ABS_REAL="$PROJ_AB
 # Canonical project identity for a ship/scout spawn (the --secondmate branch never
 # reaches here; its identity is its home and it records mode=secondmate). The
 # registry KEY is the one identity used for BOTH the delivery-mode lookup and the
-# herdr Fleet-label lookup, so they cannot disagree. An explicit --project-key
+# herdr fleet-workspace allocation and display-Fleet lookup, so they cannot
+# disagree. An explicit --project-key
 # wins; otherwise the repository basename, which preserves back-compat for callers
 # that pass only a project directory (and is correct whenever the registry key
 # equals the clone directory name). An unknown key still falls back to
@@ -1435,9 +1434,9 @@ real_path_or_raw() {  # <path>
 
 # Session-provider container-ensure + task creation. tmux stays exactly as P1
 # left it (same session-name / new-window sequence, see bin/backends/tmux.sh);
-# a herdr spawn goes through the version-gated, project-keyed workspace,
-# tab-per-task sequence in bin/backends/herdr.sh instead (D4/D5 as refined by
-# docs/herdr-backend.md's project-keyed Fleet contract, AGENTS.md task
+# a herdr spawn goes through the version-gated, numbered per-home fleet
+# workspace and tab-per-task sequence in bin/backends/herdr.sh instead (D4/D5
+# as refined by docs/herdr-backend.md's placement contract, AGENTS.md task
 # herdr-sm-spaces-k4). Both branches converge on the same $T ("target") string
 # that every downstream operation (send/capture/kill) already treats as opaque
 # per-backend routing (fm_backend_resolve_selector).
@@ -1550,36 +1549,25 @@ case "$BACKEND" in
     WT_TARGET="$WID"
     ;;
   herdr)
-    # fm_backend_herdr_workspace_label resolves the target workspace from
-    # FM_HOME. For every KIND except secondmate, this process's own FM_HOME is
-    # already the right home (the primary spawning its own crewmate/scout, or
-    # a secondmate spawning ITS OWN crewmate/scout from its own process's
-    # FM_HOME - the latter needs no glue at all). A --secondmate spawn is the
-    # one case that does: it is the PRIMARY's own fm-spawn.sh process
-    # launching a DIFFERENT home (PROJ_ABS, already validated above as the
-    # secondmate's home), so FM_HOME here still names the primary. Shadow it
-    # to PROJ_ABS for just these two calls (bash restores it automatically
-    # after each prefixed simple-command call) so the secondmate's tab lands
-    # in the secondmate's own workspace, not the primary's "firstmate" one.
-    #
-    # Placement, separately from labeling: a crewmate/scout belongs in the
-    # EXACT herdr workspace this launching process is itself running in, which
-    # only its own herdr pane identity can name (a same-labeled sibling
-    # workspace must never be adopted). A --secondmate launch is the exception -
-    # it stands up a DIFFERENT home's own workspace by design - so it asks for
-    # the per-home container instead of inheriting this launcher's.
+    # Ordinary workers use this process's FM_HOME and resolve an FM/SM fleet parent.
+    # A secondmate reads the primary home's herdr-layout (default TheBridge /
+    # Portside) and uses launcher-home so an already-open TheBridge is reused.
+    # A Fleet launcher does not capture the secondmate: only a launcher whose
+    # live workspace label matches the primary workspace is adopted.
     HERDR_LABEL_HOME=$FM_HOME
     HERDR_LAUNCHER_RELATIONSHIP=launcher-home
-    if [ "$KIND" = secondmate ]; then
-      HERDR_LABEL_HOME=$PROJ_ABS
-      HERDR_LAUNCHER_RELATIONSHIP=other-home
-    fi
-    HERDR_FLEET_LABEL=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_workspace_label "$KIND" "$PROJ_ABS" "${PROJ_KEY:-}")
+    W=$(fm_backend_herdr_task_tab_label "$KIND" "$ID")
+    HERDR_SES=$(fm_backend_herdr_session)
+    fm_backend_herdr_version_check || exit 1
+    fm_backend_herdr_server_ensure "$HERDR_SES" || exit 1
+    HERDR_WORKSPACE_LABEL=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_workspace_label \
+      "$KIND" "$PROJ_ABS" "${PROJ_KEY:-}" "$HERDR_SES") || exit 1
+    HERDR_DISPLAY_FLEET_LABEL=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_display_fleet_label \
+      "$PROJ_ABS" "${PROJ_KEY:-}") || exit 1
     HERDR_PRESENTATION_JOURNAL=$(fm_backend_herdr_projection_journal_path "$STATE" "$ID")
     HERDR_PROJECTED=0
     if [ "$KIND" != secondmate ] && fm_backend_herdr_presentation_enabled "$CONFIG"; then
-      HERDR_SES=$(fm_backend_herdr_session)
-      HERDR_PARENT_LABEL=$HERDR_FLEET_LABEL
+      HERDR_PARENT_LABEL=$HERDR_WORKSPACE_LABEL
       if [ -e "$HERDR_PRESENTATION_JOURNAL" ] || [ -L "$HERDR_PRESENTATION_JOURNAL" ]; then
         fm_backend_herdr_server_ensure "$HERDR_SES" || {
           echo "error: herdr presentation recovery could not ensure its exact named session" >&2
@@ -1651,7 +1639,7 @@ case "$BACKEND" in
             HERDR_PROJECTION_LABEL=$(fm_backend_herdr_projection_workspace_label "$ID" "$HERDR_PROJECTION_ID")
             if ! FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_projection_create_task \
               "$PROJ_ABS" "$HERDR_PROJECTION_LABEL" "$W" \
-              "$ID" "${PROJ_KEY:-}" "$HARNESS" "$HERDR_FLEET_LABEL"; then
+              "$ID" "${PROJ_KEY:-}" "$HARNESS" "$HERDR_DISPLAY_FLEET_LABEL"; then
               if [ "${FM_BACKEND_HERDR_PROJECTION_CLEANUP_SAFE:-0}" = 1 ]; then
                 HERDR_PROJECTION_ABORT_CLEANUP=1
                 HERDR_PROJECTION_ABORT_SESSION=$FM_BACKEND_HERDR_PROJECTION_SESSION
@@ -1707,7 +1695,7 @@ case "$BACKEND" in
       HERDR_WORKSPACE_ID=${CONTAINER#*:}
       HERDR_TASK_IDS=$(fm_backend_herdr_create_task \
         "$CONTAINER" "$W" "$PROJ_ABS" "$HERDR_SEEDED_DEFAULT_TAB_ID" \
-        "$ID" "${PROJ_KEY:-}" "$HARNESS" "$HERDR_FLEET_LABEL") || exit 1
+        "$ID" "${PROJ_KEY:-}" "$HARNESS" "$HERDR_DISPLAY_FLEET_LABEL") || exit 1
       read -r HERDR_TAB_ID HERDR_PANE_ID <<EOF
 $HERDR_TASK_IDS
 EOF

@@ -3,13 +3,12 @@
 # end-to-end real-Herdr test for worker PLACEMENT with presentation spaces
 # disabled.
 #
-# The guarantee under test: a crewmate or scout is created in the exact Herdr
-# workspace of the firstmate or secondmate process that launched it, identified
-# from that process's own Herdr pane rather than from a workspace label. Herdr
-# enforces no workspace-label uniqueness, so two workspaces can both be labeled
-# "firstmate", and the previous label-first-match resolution put the worker in
-# whichever one sorted first - visibly the wrong space whenever the launcher was
-# not in it.
+# The guarantee under test: a crewmate or scout resolves its home-specific
+# FM/SM fleet label first, and an exact launcher identity disambiguates only a
+# live workspace carrying that same target label. Herdr enforces no
+# workspace-label uniqueness, so label-only selection can choose the wrong
+# same-labeled workspace while stale or cross-home launcher identity must never
+# override the resolved target.
 #
 # This drives the REAL bin/fm-spawn.sh and bin/fm-teardown.sh, because the
 # guarantee spans the whole spawn handoff (fm-spawn.sh's herdr arm ->
@@ -191,11 +190,10 @@ mkdir -p "$PRIMARY_HOME/data/$SM2_ID"
 printf 'trivial secondmate charter brief: nothing to do.\n' > "$PRIMARY_HOME/data/$SM2_ID/brief.md"
 
 PROJ="$TMP_ROOT/scratch-project"; make_scratch_project "$PROJ"
-# The merged model groups ordinary workers by PROJECT: the reusable
-# "<repo-basename>-Fleet" workspace (fm_backend_herdr_workspace_label), not a
-# per-home "firstmate" label. Exact launcher identity still disambiguates
-# same-labeled duplicates of that Fleet label.
-PROJ_FLEET="$(basename "$PROJ")-Fleet"
+# The merged model assigns the primary home's project `FM-fleet-1` in this
+# isolated session. Exact launcher identity still disambiguates same-labeled
+# duplicates of that resolved fleet label.
+PROJ_FLEET="FM-fleet-1"
 
 # One unrelated workspace, kept FOCUSED throughout, so every placement result
 # below is also evidence that the globally focused workspace is never the target.
@@ -384,12 +382,8 @@ STALE_TABS=$(lab tab list --workspace "$WS_PRIMARY_DUP" 2>/dev/null | jq -r '[.r
 [ "$STALE_TABS" = 0 ] || fail "a refused spawn created a worker endpoint anyway"
 pass "real herdr E2E: a launcher pane that no longer exists refuses before any worker endpoint exists"
 
-# --- 6. a secondmate launching its own worker gets the same guarantee -------
+# --- 6. a secondmate-home worker uses SM-fleet-1, not the FM-fleet launcher ---
 
-# Ordinary workers group by PROJECT even from a secondmate home, so the same
-# exact-launcher guarantee is exercised against the duplicated Fleet label: the
-# secondmate's launcher pane sits in the SECOND Fleet workspace and its worker
-# must land exactly there, leaving the first untouched.
 WS_SM_SIBLING_TABS_BEFORE=$(tab_labels_of_workspace "$WS_PRIMARY")
 read -r _ _ LAUNCH_SM_PANE <<EOF
 $(lab tab create --workspace "$WS_PRIMARY_DUP" --cwd "$TMP_ROOT" --label secondmate-shell --no-focus 2>/dev/null \
@@ -403,13 +397,15 @@ SME_META="$SM_HOME/state/smE.meta"
 record_worktree "$SME_META"
 SME_PANE=$(grep '^herdr_pane_id=' "$SME_META" | cut -d= -f2-)
 SME_WS=$(workspace_of_pane "$SME_PANE")
-[ "$SME_WS" = "$WS_PRIMARY_DUP" ] \
-  || fail "a secondmate home's worker must land in its launcher's exact Fleet workspace ($WS_PRIMARY_DUP), got '$SME_WS'"
+[ "$SME_WS" != "$WS_PRIMARY_DUP" ] \
+  || fail "a secondmate-home worker must not join the FM-fleet launcher workspace"
+[ "$(label_of_workspace "$SME_WS")" = "SM-fleet-1" ] \
+  || fail "a secondmate-home worker should land in SM-fleet-1, got '$(label_of_workspace "$SME_WS")'"
 [ "$(tab_labels_of_workspace "$WS_PRIMARY")" = "$WS_SM_SIBLING_TABS_BEFORE" ] \
   || fail "the same-labeled sibling Fleet workspace was mutated"
-pass "real herdr E2E: a secondmate home launching its own worker gets the same exact-workspace guarantee, and its same-labeled sibling is untouched"
+pass "real herdr E2E: a secondmate-home worker lands in SM-fleet-1 and leaves the FM-fleet sibling untouched"
 
-# --- 7. a --secondmate launch is NOT collapsed into the launcher's workspace -
+# --- 7. a --secondmate launch does not join a Fleet launcher; it uses TheBridge -
 
 spawn_from_launcher "$LAUNCH_DUP_PANE" "$PRIMARY_HOME" "$SM2_ID" "$SM2_HOME" --secondmate
 [ "$SPAWN_RC" -eq 0 ] || fail "the primary's --secondmate launch failed"$'\n'"$(cat "$SPAWN_ERR")"
@@ -417,10 +413,13 @@ SM2_META="$PRIMARY_HOME/state/$SM2_ID.meta"
 SM2_PANE=$(grep '^herdr_pane_id=' "$SM2_META" | cut -d= -f2-)
 SM2_WS=$(workspace_of_pane "$SM2_PANE")
 [ "$SM2_WS" != "$WS_PRIMARY_DUP" ] \
-  || fail "a --secondmate launch must stand up the secondmate's own workspace, not join the launcher's"
-[ "$(label_of_workspace "$SM2_WS")" = "Archon-$SM2_ID" ] \
-  || fail "a --secondmate launch should land in 'Archon-$SM2_ID', got '$(label_of_workspace "$SM2_WS")'"
-pass "real herdr E2E: a --secondmate launch still stands up that secondmate's own workspace instead of inheriting the launcher's"
+  || fail "a --secondmate launch must not join the Fleet launcher workspace"
+[ "$(label_of_workspace "$SM2_WS")" = "TheBridge" ] \
+  || fail "a --secondmate launch should land in TheBridge, got '$(label_of_workspace "$SM2_WS")'"
+SM2_TAB=$(lab pane get "$SM2_PANE" | jq -r '.result.pane.tab_id // empty')
+SM2_TAB_LABEL=$(lab tab list --workspace "$SM2_WS" | jq -r --arg t "$SM2_TAB" '.result.tabs[]? | select(.tab_id == $t) | .label')
+[ "$SM2_TAB_LABEL" = "Portside" ] || fail "a --secondmate launch should use tab Portside, got '$SM2_TAB_LABEL'"
+pass "real herdr E2E: a --secondmate launch lands as Portside in TheBridge instead of joining a Fleet launcher"
 
 # --- 8. teardown closes only the worker's own pane --------------------------
 

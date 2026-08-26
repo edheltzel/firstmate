@@ -5,8 +5,8 @@
 # decisions D1-D6) and the empirical verification recorded in
 # data/fm-backend-design-d7/herdr-verification-p2.md (real herdr v0.7.1,
 # protocol 14, macOS aarch64), with current protocol-17 metadata evidence in
-# docs/herdr-backend.md, and refined by that document's
-# project-keyed Fleet workspace pass (AGENTS.md task herdr-sm-spaces-k4). Herdr is a
+# docs/herdr-backend.md, and refined by that document's numbered per-home fleet
+# workspace pass (AGENTS.md task herdr-sm-spaces-k4). Herdr is a
 # session provider ONLY (D3): the worktree provider stays treehouse, exactly
 # like tmux. Sourced only through bin/fm-backend.sh's fm_backend_source in
 # normal operation; the unit tests source it directly, so the FM_HOME fallback
@@ -14,9 +14,10 @@
 #
 # Default container shape (D4, decided empirically - see
 # herdr-verification-p2.md "Task container shape", refined by
-# docs/herdr-backend.md "Task container shape"): ONE herdr workspace PER
-# PROJECT for ordinary workers, with the secondmate agent in its own Archon
-# supervisor workspace, and ONE herdr TAB per task inside that workspace. The
+# docs/herdr-backend.md "Watching and task containers"): ONE herdr workspace PER
+# PROJECT for ordinary workers, with the secondmate agent as a tab in the
+# primary Firstmate workspace (TheBridge / @TheHelm / Portside by default), and ONE herdr
+# TAB per task inside that workspace. The
 # default-on presentation projection creates a disposable workspace for a clean
 # fresh task instead unless the home opts out. That
 # workspace is a non-authoritative visual projection containing only the normal
@@ -25,8 +26,8 @@
 # A version 2 journal can participate in replacing only its exact same-identity
 # endpoint after metadata, home, session, workspace, tab, pane, parent, shape,
 # focus, and agent-absence checks all agree under the session lock.
-# Every ambiguous recovered launch uses the default flat project Fleet or
-# secondmate Archon workspace when duplicate-agent risk is independently absent.
+# Every ambiguous recovered launch uses the default flat FM/SM fleet or
+# primary Firstmate workspace when duplicate-agent risk is independently absent.
 # Target resolution stays parallel to the tmux adapter in both layouts.
 # Projected create, move, and cleanup operations capture the named session's
 # exact active workspace and tab. On Herdr 0.7.5, an explicit close that
@@ -68,7 +69,7 @@
 # default (the firstmate repo root). FM_HOME no longer selects the workspace
 # label - fm_backend_herdr_workspace_label takes <kind> and <project-abs>
 # explicitly - but it still names the home whose data/projects.md registry the
-# Fleet-name lookup (fm-project-mode.sh --fleet) reads for an ordinary worker.
+# display-Fleet-name lookup (fm-project-mode.sh --fleet) reads for an ordinary worker.
 FM_BACKEND_HERDR_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-${FM_ROOT:-$FM_BACKEND_HERDR_ROOT}}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
@@ -123,6 +124,11 @@ FM_BACKEND_HERDR_PRESENTATION_JOURNAL_SUFFIX=".herdr-presentation"
 
 # The config item a home writes to opt OUT of the projection.
 FM_BACKEND_HERDR_PRESENTATION_CONFIG="herdr-presentation-spaces"
+# Optional home-local Herdr layout parser. Absent values use TheBridge / @TheHelm / Portside.
+FM_BACKEND_HERDR_LAYOUT_CONFIG="herdr-layout"
+FM_BACKEND_HERDR_DEFAULT_PRIMARY_WORKSPACE="TheBridge"
+FM_BACKEND_HERDR_DEFAULT_FIRSTMATE_TAB="@TheHelm"
+FM_BACKEND_HERDR_DEFAULT_SECONDMATE_TAB="Portside"
 
 # fm_backend_herdr_presentation_enabled <config-dir>: true when this home's
 # children should be projected into disposable one-task workspaces
@@ -149,6 +155,50 @@ fm_backend_herdr_presentation_enabled() {  # <config-dir>
       return 0
       ;;
   esac
+}
+
+# fm_backend_herdr_layout_config_file: the optional gitignored layout file.
+fm_backend_herdr_layout_config_file() {
+  local dir=${FM_CONFIG_OVERRIDE:-${FM_HOME:+$FM_HOME/config}}
+  [ -n "$dir" ] || return 0
+  printf '%s/%s' "$dir" "$FM_BACKEND_HERDR_LAYOUT_CONFIG"
+}
+
+# fm_backend_herdr_layout_value: workspace, firstmate-tab, or secondmate-tab.
+# Reads key=value lines from config/herdr-layout; unknown keys and comments are
+# ignored. An absent file or blank value keeps the built-in default.
+fm_backend_herdr_layout_value() {  # workspace|firstmate-tab|secondmate-tab
+  local key=$1 file value line k v
+  case "$key" in
+    workspace) value=$FM_BACKEND_HERDR_DEFAULT_PRIMARY_WORKSPACE ;;
+    firstmate-tab) value=$FM_BACKEND_HERDR_DEFAULT_FIRSTMATE_TAB ;;
+    secondmate-tab) value=$FM_BACKEND_HERDR_DEFAULT_SECONDMATE_TAB ;;
+    *) return 1 ;;
+  esac
+  file=$(fm_backend_herdr_layout_config_file)
+  if [ -n "$file" ] && [ -f "$file" ] && [ -r "$file" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in
+        ''|\#*) continue ;;
+      esac
+      k=${line%%=*}
+      [ "$k" = "$key" ] || continue
+      v=${line#*=}
+      v=$(printf '%s' "$v" | tr -d '[:space:]')
+      [ -n "$v" ] || continue
+      value=$v
+    done < "$file"
+  fi
+  printf '%s' "$value"
+}
+
+# fm_backend_herdr_task_tab_label: Portside for a secondmate, else fm-<id>.
+fm_backend_herdr_task_tab_label() {  # <kind> <task-id>
+  if [ "$1" = secondmate ]; then
+    fm_backend_herdr_layout_value secondmate-tab
+    return 0
+  fi
+  printf 'fm-%s' "$2"
 }
 
 
@@ -180,53 +230,217 @@ fm_backend_herdr_tab_create() {  # <session> <workspace-id> <cwd> <label>
   fi
 }
 
-# fm_backend_herdr_workspace_label: the herdr workspace label for a spawn, the
-# SINGLE owner of the worker/secondmate workspace name (docs/herdr-backend.md
-# "Fleet workspaces"). Resolved from the spawn KIND and the project/home path,
-# never from FM_HOME, so two workers for the SAME project share one workspace no
-# matter which home spawned them, and two DIFFERENT projects never share one:
-#   - An ordinary worker (kind ship or scout) lands in its PROJECT's reusable
-#     "<Fleet display name>-Fleet" workspace. The Fleet display name is resolved
-#     by bin/fm-project-mode.sh --fleet, the single registry parser
-#     (data/projects.md): the fleet= alias on the canonical project KEY's entry
-#     if present, else the repository basename DEFAULT. The optional third
-#     argument is that canonical key (the same identity fm-spawn.sh uses for the
-#     delivery-mode lookup), so mode and Fleet resolution agree even when the key
-#     differs from the repository basename; it defaults to the basename when the
-#     caller passes only <project-abs> (back-compat). The basename stays the
-#     display default, so a key that differs from it never renames the workspace
-#     unless the registry carries an explicit fleet= alias.
-#   - The persistent SECONDMATE agent (kind secondmate) lands in its own
-#     "Archon-<secondmate-id>" supervisor workspace, read from the
-#     .fm-secondmate-home marker at <project-abs> (the secondmate's home); an
-#     empty or unreadable marker fails closed to the bare "Archon" supervisor
-#     label, never a worker/Fleet label.
-# "Themis" is the primary supervisor identity and "Archon" the secondmate
-# identity; NEITHER is ever an ordinary worker workspace label. Resolution is
-# deterministic, so creation, reuse, respawn, and recovery all agree, and the
-# resolved label is injected into workspace_find/_ensure/list_live rather than
-# each re-deriving it. Superseded labels (never emitted now): the home-keyed
-# "Atlas"/"Themis"/"Themis-<id>" primary/secondmate labels from commit 989bea45
-# and the prior a5b0cfa customization.
-fm_backend_herdr_workspace_label() {  # <kind> <project-abs> [<project-key>]
-  local kind=$1 project_abs=$2 project_key=${3:-} marker id name key fleet
-  if [ "$kind" = secondmate ]; then
-    marker="$project_abs/$FM_BACKEND_HERDR_SECONDMATE_MARKER"
-    if [ -f "$marker" ] && [ -r "$marker" ]; then
-      id=$(tr -d '[:space:]' < "$marker" 2>/dev/null)
-      if [ -n "$id" ]; then
-        printf 'Archon-%s' "$id"
-        return 0
-      fi
-    fi
-    printf 'Archon'
+# fm_backend_herdr_fleet_home_prefix: FM from a primary home, SM from a
+# secondmate home. The marker is on FM_HOME, the spawning home.
+fm_backend_herdr_fleet_home_prefix() {
+  local marker="${FM_HOME:-}/$FM_BACKEND_HERDR_SECONDMATE_MARKER"
+  if [ -n "${FM_HOME:-}" ] && [ -f "$marker" ]; then
+    printf 'SM'
     return 0
   fi
+  printf 'FM'
+}
+
+fm_backend_herdr_hash_values() {
+  local value
+  if command -v shasum >/dev/null 2>&1; then
+    { for value in "$@"; do printf '%s\0' "$value"; done; } \
+      | shasum -a 256 2>/dev/null \
+      | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    { for value in "$@"; do printf '%s\0' "$value"; done; } \
+      | sha256sum 2>/dev/null \
+      | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
+fm_backend_herdr_fleet_namespace() {
+  printf '%s' "${FM_BACKEND_HERDR_FLEET_NAMESPACE_ROOT:-/tmp/firstmate-herdr-fleets}"
+}
+
+fm_backend_herdr_fleet_registry_paths() {  # <session>
+  local session=$1 socket hash key dir
+  socket=$(fm_backend_herdr_presentation_session_socket_path "$session") || return 1
+  hash=$(fm_backend_herdr_hash_values "$session" "$socket") || return 1
+  [ -n "$hash" ] || return 1
+  key=${hash:0:32}
+  dir=$(fm_backend_herdr_fleet_namespace) || return 1
+  [ -n "$dir" ] || return 1
+  if [ ! -e "$dir" ] && [ ! -L "$dir" ]; then
+    if ! mkdir -m 700 "$dir" 2>/dev/null; then
+      fm_backend_herdr_presentation_lock_namespace_valid "$dir" || return 1
+    fi
+  fi
+  fm_backend_herdr_presentation_lock_namespace_valid "$dir" || return 1
+  FM_BACKEND_HERDR_FLEET_MAP="$dir/labels-$key"
+  FM_BACKEND_HERDR_FLEET_LOCK="$dir/labels-$key.lock"
+  if [ -e "$FM_BACKEND_HERDR_FLEET_MAP" ] || [ -L "$FM_BACKEND_HERDR_FLEET_MAP" ]; then
+    [ -f "$FM_BACKEND_HERDR_FLEET_MAP" ] \
+      && [ ! -L "$FM_BACKEND_HERDR_FLEET_MAP" ] \
+      && [ -r "$FM_BACKEND_HERDR_FLEET_MAP" ] \
+      || return 1
+  fi
+}
+
+fm_backend_herdr_fleet_lock_acquire() {  # <lock-path>
+  local lock_path=$1 attempt=0 pid
+  FM_BACKEND_HERDR_FLEET_LOCK_HELD=0
+  while [ "$attempt" -lt 50 ]; do
+    if declare -F fm_lock_try_acquire >/dev/null 2>&1; then
+      fm_lock_try_acquire "$lock_path" && break
+    elif mkdir "$lock_path" 2>/dev/null; then
+      printf '%s\n' "${BASHPID:-$$}" > "$lock_path/pid" || {
+        rmdir "$lock_path" 2>/dev/null || true
+        return 1
+      }
+      break
+    else
+      pid=$(cat "$lock_path/pid" 2>/dev/null || true)
+      if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+        rm -f "$lock_path/pid"
+        rmdir "$lock_path" 2>/dev/null || true
+      fi
+    fi
+    sleep 0.1
+    attempt=$((attempt + 1))
+  done
+  [ "$attempt" -lt 50 ] || return 1
+  FM_BACKEND_HERDR_FLEET_LOCK_HELD=1
+}
+
+fm_backend_herdr_fleet_lock_release() {
+  [ "${FM_BACKEND_HERDR_FLEET_LOCK_HELD:-0}" = 1 ] || return 0
+  if declare -F fm_lock_release >/dev/null 2>&1; then
+    fm_lock_release "$FM_BACKEND_HERDR_FLEET_LOCK" || true
+  else
+    rm -f "$FM_BACKEND_HERDR_FLEET_LOCK/pid"
+    rmdir "$FM_BACKEND_HERDR_FLEET_LOCK" 2>/dev/null || true
+  fi
+  FM_BACKEND_HERDR_FLEET_LOCK_HELD=0
+}
+
+fm_backend_herdr_fleet_live_max() {  # <session> <prefix>
+  local session=$1 prefix=$2 list
+  case "$prefix" in FM|SM) ;; *) return 1 ;; esac
+  list=$(fm_backend_herdr_cli "$session" workspace list 2>/dev/null) || return 1
+  printf '%s' "$list" | jq -er --arg prefix "$prefix-fleet-" '
+    .result.workspaces
+    | if type == "array" then . else error("invalid workspace list") end
+    | [
+        .[]?
+        | .label?
+        | select(type == "string" and startswith($prefix))
+        | ltrimstr($prefix)
+        | select(test("^[1-9][0-9]*$"))
+        | tonumber
+      ]
+    | max // 0
+  ' 2>/dev/null
+}
+
+# fm_backend_herdr_fleet_suffix: stable per-home per-project number from the
+# shared named-session registry. A missing registry continues after the live
+# numeric high-water mark. FM and SM use independent sequences.
+fm_backend_herdr_fleet_suffix() {  # <session> <prefix> <project-key>
+  local session=$1 prefix=$2 project_key=$3 home identity map_key map lock
+  local line key value max=0 live_max suffix tmp status=0
+  [ -n "$session" ] && [ -n "$project_key" ] || return 1
+  case "$prefix" in FM|SM) ;; *) return 1 ;; esac
+  home=$(fm_backend_herdr_projection_home_identity "${FM_HOME:-$FM_BACKEND_HERDR_ROOT}") || return 1
+  identity=$(fm_backend_herdr_hash_values "$prefix" "$home" "$project_key") || return 1
+  [ -n "$identity" ] || return 1
+  map_key="$prefix:$identity"
+  fm_backend_herdr_fleet_registry_paths "$session" || return 1
+  map=$FM_BACKEND_HERDR_FLEET_MAP
+  lock=$FM_BACKEND_HERDR_FLEET_LOCK
+  fm_backend_herdr_fleet_lock_acquire "$lock" || return 1
+  if [ -f "$map" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in
+        ''|\#*) continue ;;
+        *=*) ;;
+        *) status=1; break ;;
+      esac
+      key=${line%%=*}
+      value=${line#*=}
+      case "$value" in
+        ''|*[!0-9]*) status=1; break ;;
+      esac
+      [ "$value" -gt 0 ] || { status=1; break; }
+      if [ "$key" = "$map_key" ]; then
+        suffix=$value
+        break
+      fi
+      case "$key" in
+        "$prefix":*) [ "$value" -gt "$max" ] && max=$value ;;
+      esac
+    done < "$map" || status=1
+  else
+    live_max=$(fm_backend_herdr_fleet_live_max "$session" "$prefix") || status=1
+    if [ "$status" -eq 0 ]; then
+      case "$live_max" in ''|*[!0-9]*) status=1 ;; esac
+    fi
+    if [ "$status" -eq 0 ] && [ "$live_max" -gt "$max" ]; then
+      max=$live_max
+    fi
+  fi
+  if [ "$status" -eq 0 ] && [ -z "${suffix:-}" ]; then
+    suffix=$((max + 1))
+    tmp=$(mktemp "${map}.tmp.XXXXXX") || status=1
+    if [ "$status" -eq 0 ]; then
+      chmod 0600 "$tmp" || status=1
+    fi
+    if [ "$status" -eq 0 ] && [ -f "$map" ]; then
+      cat "$map" > "$tmp" || status=1
+    fi
+    if [ "$status" -eq 0 ]; then
+      printf '%s=%s\n' "$map_key" "$suffix" >> "$tmp" || status=1
+    fi
+    if [ "$status" -eq 0 ]; then
+      mv "$tmp" "$map" || status=1
+    fi
+    [ "$status" -eq 0 ] || rm -f "${tmp:-}"
+  fi
+  fm_backend_herdr_fleet_lock_release
+  [ "$status" -eq 0 ] || return 1
+  printf '%s' "$suffix"
+}
+
+fm_backend_herdr_display_fleet_label() {  # <project-abs> [<project-key>]
+  local project_abs=$1 project_key=${2:-} name key fleet
   name=${project_abs##*/}
   key=${project_key:-$name}
   fleet=$(FM_HOME="$FM_HOME" "$FM_BACKEND_HERDR_ROOT/bin/fm-project-mode.sh" --fleet "$key" "$name" 2>/dev/null) || fleet=$name
   [ -n "$fleet" ] || fleet=$name
   printf '%s-Fleet' "$fleet"
+}
+
+# fm_backend_herdr_workspace_label: the herdr workspace label for a spawn, the
+# SINGLE owner of the worker/secondmate workspace name (docs/herdr-backend.md
+# "Watching and task containers").
+#   - An ordinary worker (kind ship or scout) lands in FM-fleet-<n> when the
+#     spawning home is the primary, or SM-fleet-<n> when it is a secondmate
+#     home. <n> is allocated in the shared named-session namespace so separate
+#     homes and concurrent spawns never share a label. The same home/project
+#     pair reuses its assigned suffix. This is never "<Project>-Fleet".
+#   - The persistent SECONDMATE agent lands in the primary Firstmate workspace
+#     from config/herdr-layout (default TheBridge), as the configured secondmate
+#     tab (Portside by default).
+# The primary workspace and secondmate tab are never ordinary worker labels.
+fm_backend_herdr_workspace_label() {  # <kind> <project-abs> [<project-key>] [<session>]
+  local kind=$1 project_abs=$2 project_key=${3:-} session=${4:-} name key prefix suffix
+  if [ "$kind" = secondmate ]; then
+    fm_backend_herdr_layout_value workspace
+    return 0
+  fi
+  [ -n "$session" ] || session=$(fm_backend_herdr_session)
+  name=${project_abs##*/}
+  key=${project_key:-$name}
+  prefix=$(fm_backend_herdr_fleet_home_prefix)
+  suffix=$(fm_backend_herdr_fleet_suffix "$session" "$prefix" "$key") || return 1
+  printf '%s-fleet-%s' "$prefix" "$suffix"
 }
 
 # fm_backend_herdr_cli: run `herdr <args...>` scoped to <session>, setting
@@ -1287,10 +1501,10 @@ fm_backend_herdr_pane_idle_shell_sample() {  # <session> <pane-id>
 # returned by THIS projected create immediately after its owning parent's
 # contiguous child block and before the next parent.
 #
-# <parent-label> is the owning project Fleet or Archon label.
+# <parent-label> is the owning FM/SM fleet label.
 # Optional <parent-workspace-id> is that parent's EXACT id, resolved from the
-# validated launcher identity when it already belongs to the target Fleet or
-# Archon workspace. When given it anchors the owning parent by id, so duplicate
+# validated launcher identity when it already belongs to the target fleet
+# workspace. When given it anchors the owning parent by id, so duplicate
 # labels do not make the layout ambiguous; otherwise the parent label must be
 # unique exactly as before.
 # New-format └ ... · p:<token> children and, for compatibility only, already
@@ -1309,7 +1523,7 @@ fm_backend_herdr_pane_idle_shell_sample() {  # <session> <pane-id>
 # the new id must be byte-identical to the pre-move sequence.
 fm_backend_herdr_projection_order_best_effort() {  # <session> <created-workspace-id> <parent-label> [<parent-workspace-id>]
   local session=$1 created=$2 parent=$3 parent_ws=${4:-} list analysis current desired socket mover response move_status focus_before move_capable
-  local before_existing after_existing
+  local before_existing after_existing primary
   [ -n "$parent" ] || {
     echo "warning: herdr presentation ordering missing owning parent label; leaving worker in Herdr's current order" >&2
     return 0
@@ -1318,7 +1532,8 @@ fm_backend_herdr_projection_order_best_effort() {  # <session> <created-workspac
     echo "warning: herdr presentation ordering could not list workspaces; leaving worker in Herdr's current order" >&2
     return 0
   }
-  analysis=$(printf '%s' "$list" | jq -c --arg created "$created" --arg parent "$parent" --arg parent_ws "$parent_ws" '
+  primary=$(fm_backend_herdr_layout_value workspace)
+  analysis=$(printf '%s' "$list" | jq -c --arg created "$created" --arg parent "$parent" --arg parent_ws "$parent_ws" --arg primary "$primary" '
     def is_parent:
       if ($parent_ws | length) > 0
       then .workspace_id == $parent_ws
@@ -1328,8 +1543,10 @@ fm_backend_herdr_projection_order_best_effort() {  # <session> <created-workspac
       (.label | type) == "string"
       and (
         (.label == "firstmate")
+        or (.label == $primary)
         or (.label | test("^2ndmate-[^/]+$"))
         or (.label | test("^.+-Fleet$"))
+        or (.label | test("^(FM|SM)-fleet-[0-9A-Za-z]+$"))
         or (.label | test("^Archon(?:-[^/]+)?$"))
       );
     def is_new_child:
@@ -1499,8 +1716,8 @@ fm_backend_herdr_server_ensure() {  # <session>
 }
 
 # fm_backend_herdr_home_workspace_label: compatibility label for direct adapter
-# callers that predate project Fleet grouping. Real spawn paths always inject a
-# project Fleet or Archon label explicitly.
+# callers that predate project Fleet grouping. Real spawn paths always inject an
+# FM/SM fleet or primary workspace label explicitly.
 fm_backend_herdr_home_workspace_label() {
   local marker="$FM_HOME/$FM_BACKEND_HERDR_SECONDMATE_MARKER" id
   if [ -f "$marker" ]; then
@@ -1729,7 +1946,7 @@ fm_backend_herdr_workspace_prune_seeded_default_tab() {  # <session> <workspace_
   fi
 }
 
-# fm_backend_herdr_workspace_ensure: the resolved project Fleet or Archon
+# fm_backend_herdr_workspace_ensure: the resolved project Fleet or primary
 # workspace this spawn's task tab belongs in inside <session>. An exact matching
 # launcher workspace wins; otherwise the injected label must resolve uniquely or
 # a fresh workspace is created in <cwd>. Must be called as a PLAIN STATEMENT,
@@ -1767,13 +1984,15 @@ fm_backend_herdr_workspace_prune_seeded_default_tab() {  # <session> <workspace_
 # attach to). --no-focus is passed unconditionally anyway, for defense in
 # depth and because it is a no-op in the already-safe case.
 #
-# <label> is the resolved project Fleet or Archon label. A missing label is a
-# compatibility path for direct adapter callers and uses the legacy home label.
-# For launcher-home, an exact launcher identity is mandatory when claimed. It
-# disambiguates duplicates only when the launcher's live workspace has the same
-# target label; a launcher in a supervisor or another project's workspace is
-# validated but never overrides project grouping. other-home skips launcher
-# inheritance for a secondmate container.
+# <label> is the resolved project Fleet or primary workspace label. A missing
+# label is a compatibility path for direct adapter callers and uses the legacy
+# home label. For launcher-home, an exact launcher identity is mandatory when
+# claimed. It disambiguates duplicates only when the launcher's live workspace
+# has the same target label; a launcher in another project's Fleet is validated
+# but never overrides project grouping. A secondmate uses launcher-home against
+# the primary workspace label, so a Firstmate already in TheBridge is reused
+# and a Fleet launcher does not capture the secondmate. other-home skips
+# launcher inheritance for callers that still need a label-only container.
 #
 # Returns 0 on success, 3 for a refusal whose exact reason is already on
 # stderr, and 1 for a failed or unparseable Herdr call.
@@ -1834,9 +2053,9 @@ fm_backend_herdr_workspace_ensure() {  # <session> <cwd> [<label>] [<launcher-re
 # sequence (version gate, server, workspace). Takes <kind>, <project-abs>, and
 # the optional canonical <project-key> (defaulting to the basename), and
 # resolves the workspace label ONCE (fm_backend_herdr_workspace_label) so an
-# ordinary worker lands in its project's "<Fleet display name>-Fleet" workspace
-# and the secondmate agent in its "Archon-<id>" one; the project directory is
-# also the fresh workspace's cwd. Echoes
+# ordinary worker lands in its assigned FM-fleet-<n> or SM-fleet-<n> workspace
+# and the secondmate agent in the primary Firstmate workspace; the project
+# directory is also the fresh workspace's cwd. Echoes
 # "<session>:<workspace_id>\t<seeded_default_tab_id>" - a single TAB character
 # always separates the two fields (the second is empty for an ADOPTED
 # workspace) so a caller can split unambiguously with
@@ -1847,14 +2066,19 @@ fm_backend_herdr_workspace_ensure() {  # <session> <cwd> [<label>] [<launcher-re
 # supported, but real spawn paths use `<kind> <project-abs> [project-key]`.
 fm_backend_herdr_container_ensure() {
   local first=${1:-} kind cwd project_key relationship label session status
+  fm_backend_herdr_version_check || return 1
+  session=$(fm_backend_herdr_session)
+  fm_backend_herdr_server_ensure "$session" || return 1
   case "$first" in
     ship|scout|secondmate)
       kind=$first
       cwd=$2
       project_key=${3:-}
       relationship=${4:-launcher-home}
-      [ "$kind" != secondmate ] || relationship=other-home
-      label=$(fm_backend_herdr_workspace_label "$kind" "$cwd" "$project_key")
+      if ! label=$(fm_backend_herdr_workspace_label "$kind" "$cwd" "$project_key" "$session"); then
+        echo "error: failed to resolve herdr workspace label for '$kind' in session '$session'" >&2
+        return 1
+      fi
       ;;
     *)
       kind=ship
@@ -1864,9 +2088,10 @@ fm_backend_herdr_container_ensure() {
       label=$(fm_backend_herdr_home_workspace_label)
       ;;
   esac
-  fm_backend_herdr_version_check || return 1
-  session=$(fm_backend_herdr_session)
-  fm_backend_herdr_server_ensure "$session" || return 1
+  if [ -z "$label" ]; then
+    echo "error: resolved an empty herdr workspace label for '$kind' in session '$session'" >&2
+    return 1
+  fi
   fm_backend_herdr_workspace_ensure "$session" "$cwd" "$label" "$relationship" >/dev/null && status=0 || status=$?
   # A 3 already reported the exact placement it refused to guess at; adding the
   # generic message here would bury it.
@@ -3286,11 +3511,12 @@ EOF
 }
 
 # fm_backend_herdr_list_live: recovery/orphan discovery. Lists every tab whose
-# label looks like a firstmate task window (fm-<id>) in <session>'s workspace
-# whose label is the injected <label> - the PROJECT's own "<Fleet>-Fleet"
-# workspace for an ordinary worker, or the secondmate's "Archon-<id>" one - by
-# LABEL, never by trusting a stored pane id, since ids are not guaranteed stable
-# across every server lifecycle (see herdr-verification-p2.md "ID stability").
+# label looks like a firstmate task window (fm-<id>) or the configured secondmate
+# tab (Portside by default) in <session>'s workspace whose label is the injected
+# <label> - the assigned FM/SM fleet workspace for an ordinary worker,
+# or the primary Firstmate workspace for a secondmate - by LABEL, never by
+# trusting a stored pane id, since ids are not guaranteed stable across every
+# server lifecycle (see herdr-verification-p2.md "ID stability").
 # The caller resolves the workspace label from the task's own KIND + project
 # (fm_backend_herdr_workspace_label) and passes it, so recovery scopes to the
 # same workspace creation used - workers for different projects are separate
@@ -3298,7 +3524,8 @@ EOF
 # exist yet simply lists nothing. One "<session>:<pane_id>\t<label>" line per
 # live task tab.
 fm_backend_herdr_list_live() {  # <session> <label>
-  local session=$1 label=$2 wsid tabs tab_id tlabel pane_id
+  local session=$1 label=$2 wsid tabs tab_id tlabel pane_id secondmate_tab
+  secondmate_tab=$(fm_backend_herdr_layout_value secondmate-tab)
   wsid=$(fm_backend_herdr_workspace_find "$session" "$label") || return 0
   [ -n "$wsid" ] || return 0
   tabs=$(fm_backend_herdr_cli "$session" tab list --workspace "$wsid" 2>/dev/null) || return 0
@@ -3307,7 +3534,7 @@ fm_backend_herdr_list_live() {  # <session> <label>
     pane_id=$(fm_backend_herdr_pane_for_tab "$session" "$wsid" "$tab_id") || continue
     [ -n "$pane_id" ] || continue
     printf '%s:%s\t%s\n' "$session" "$pane_id" "$tlabel"
-  done < <(printf '%s' "$tabs" | jq -r '.result.tabs[]? | select(.label | startswith("fm-")) | "\(.tab_id)\t\(.label)"' 2>/dev/null)
+  done < <(printf '%s' "$tabs" | jq -r --arg secondmate_tab "$secondmate_tab" '.result.tabs[]? | select((.label | startswith("fm-")) or (.label == $secondmate_tab)) | "\(.tab_id)\t\(.label)"' 2>/dev/null)
 }
 
 # --- native event push: pane.agent_status_changed subscriber -----------------

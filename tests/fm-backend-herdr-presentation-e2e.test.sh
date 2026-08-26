@@ -474,7 +474,8 @@ printf 'Projection abort fixture B.\n' > "$HOME_DIR/data/abort-b/brief.md"
 printf 'Projection lock contention fixture.\n' > "$HOME_DIR/data/lock-contended/brief.md"
 printf 'Projection default-on fixture.\n' > "$HOME_DIR/data/default-on/brief.md"
 make_project "$PROJECT_DIR"
-PROJECT_FLEET="$(basename "$PROJECT_DIR")-Fleet"
+PROJECT_FLEET="FM-fleet-1"
+SM_FLEET="SM-fleet-1"
 ARCHON_ALPHA=Archon-alpha
 ARCHON_BRAVO=Archon-bravo
 
@@ -934,8 +935,8 @@ SECOND_META="$HOME_DIR/state/alpha.meta"
   || fail "secondmate spawn did not record kind=secondmate"
 SECOND_WSID=$(grep '^herdr_workspace_id=' "$SECOND_META" | cut -d= -f2-)
 SECOND_LABEL=$(lab workspace get "$SECOND_WSID" | jq -r '.result.workspace.label')
-[ "$SECOND_LABEL" = "$ARCHON_ALPHA" ] \
-  || fail "secondmate spawn did not use its flat Archon parent workspace: $SECOND_LABEL"
+[ "$SECOND_LABEL" = "TheBridge" ] \
+  || fail "secondmate spawn did not use TheBridge: $SECOND_LABEL"
 [ -z "$(projection_labels_from_log "$SECOND_SPAWN_LOG_START")" ] \
   || fail "secondmate spawn created a corner projection workspace"
 if sed -n "$((SECOND_SPAWN_LOG_START + 1)),\$p" "$HERDR_CALL_LOG" \
@@ -954,7 +955,8 @@ propagate_inheritable_config "$HOME_DIR/config" "$SECOND_HOME_B/config" \
   || fail "primary presentation setting did not reach secondmate B"
 pass "real Herdr lab: the primary presentation setting inherits into real secondmate homes"
 
-# Keep the pre-existing Archon-alpha/bravo workspaces as supervisor parents and captain focus.
+# Keep the pre-existing legacy Archon-alpha/bravo workspaces as foreign ordering
+# sentinels and captain focus; new spawn paths never select them as parents.
 assert_focus_is "$CAPTAIN_FOCUS" "multi-home captain focus"
 
 mkdir -p "$SECOND_HOME_A/data/a1" "$SECOND_HOME_A/data/a2" \
@@ -1048,8 +1050,8 @@ PCW_LABEL=$(lab workspace get "$(grep '^herdr_workspace_id=' "$HOME_DIR/state/pc
 ACW_LABEL=$(lab workspace get "$(grep '^herdr_workspace_id=' "$SECOND_HOME_A/state/acw.meta" | cut -d= -f2-)" | jq -r '.result.workspace.label')
 BCW_LABEL=$(lab workspace get "$(grep '^herdr_workspace_id=' "$SECOND_HOME_B/state/bcw.meta" | cut -d= -f2-)" | jq -r '.result.workspace.label')
 case "$PCW_LABEL" in $'└ pcw · p:'*|"$PROJECT_FLEET") ;; *) fail "cross-home primary label wrong: $PCW_LABEL" ;; esac
-case "$ACW_LABEL" in $'└ acw · p:'*|"$PROJECT_FLEET") ;; *) fail "cross-home A label wrong: $ACW_LABEL" ;; esac
-case "$BCW_LABEL" in $'└ bcw · p:'*|"$PROJECT_FLEET") ;; *) fail "cross-home B label wrong: $BCW_LABEL" ;; esac
+case "$ACW_LABEL" in $'└ acw · p:'*|"$PROJECT_FLEET"|"$SM_FLEET") ;; *) fail "cross-home A label wrong: $ACW_LABEL" ;; esac
+case "$BCW_LABEL" in $'└ bcw · p:'*|"$PROJECT_FLEET"|"$SM_FLEET") ;; *) fail "cross-home B label wrong: $BCW_LABEL" ;; esac
 pass "real Herdr lab: concurrent primary/A/B project workers preserve Fleet grouping and exact focus, allowing documented flat fallback"
 
 # Hold the shared session lock from a different home and force flat fallback.
@@ -1083,8 +1085,8 @@ grep -F "presentation focus lock unavailable; using the ordinary flat layout wit
 remember_meta_worktree "$SECOND_HOME_A/state/aflat.meta" >/dev/null
 AFLAT_WSID=$(grep '^herdr_workspace_id=' "$SECOND_HOME_A/state/aflat.meta" | cut -d= -f2-)
 AFLAT_LABEL=$(lab workspace get "$AFLAT_WSID" | jq -r '.result.workspace.label')
-[ "$AFLAT_LABEL" = "$PROJECT_FLEET" ] \
-  || fail "cross-home lock contention did not use the ordinary project Fleet workspace: $AFLAT_LABEL"
+[ "$AFLAT_LABEL" = "$SM_FLEET" ] \
+  || fail "cross-home lock contention did not use SM-fleet-1: $AFLAT_LABEL"
 [ ! -e "$SECOND_HOME_A/state/aflat.herdr-presentation" ] \
   || fail "cross-home lock contention published a projection journal"
 assert_focus_is "$CAPTAIN_FOCUS" "cross-home lock contention flat fallback"

@@ -57,9 +57,8 @@ pass "real herdr: version_check accepts the installed binary's protocol"
 # one - docs/herdr-backend.md "Default-tab prune"). Split on the guaranteed
 # single tab character; only fm_backend_herdr_create_task is ever allowed to
 # act on the seeded tab id, and only for the container that just created it.
-# An ordinary worker (kind ship) for a project lands in that project's own
-# "<Fleet display name>-Fleet" workspace. cwd /tmp -> basename "tmp"; with no
-# registry the Fleet name defaults to the repo name, so the label is "tmp-Fleet".
+# An ordinary worker from this primary home lands in a numbered FM-fleet
+# workspace. In this empty isolated namespace, `/tmp` receives `FM-fleet-1`.
 CONTAINER_RAW=$(fm_backend_herdr_container_ensure ship /tmp) || fail "container_ensure failed"
 CONTAINER=${CONTAINER_RAW%%$'\t'*}
 SEEDED_TAB_ID=${CONTAINER_RAW#*$'\t'}
@@ -69,8 +68,8 @@ case "$CONTAINER" in
 esac
 [ -n "$SEEDED_TAB_ID" ] || fail "the first container_ensure in a brand-new isolated session must CREATE the workspace and report its seeded default tab id"
 CONTAINER_LABEL=$(herdr workspace list --session "$SESSION" 2>&1 | jq -r --arg id "${CONTAINER#*:}" '.result.workspaces[]? | select(.workspace_id == $id) | .label')
-[ "$CONTAINER_LABEL" = "tmp-Fleet" ] || fail "the ordinary worker's real herdr workspace label should be 'tmp-Fleet', got '$CONTAINER_LABEL'"
-pass "real herdr: container_ensure starts the isolated session's server, creates the project 'tmp-Fleet' worker workspace ($CONTAINER), and reports its seeded default tab id ($SEEDED_TAB_ID)"
+[ "$CONTAINER_LABEL" = "FM-fleet-1" ] || fail "the ordinary worker's real herdr workspace label should be 'FM-fleet-1', got '$CONTAINER_LABEL'"
+pass "real herdr: container_ensure starts the isolated session's server, creates the project 'FM-fleet-1' worker workspace ($CONTAINER), and reports its seeded default tab id ($SEEDED_TAB_ID)"
 
 # A second container_ensure for the SAME project must reuse (ADOPT) the same
 # workspace (multi-task reuse) and report an EMPTY seeded tab id - the
@@ -82,12 +81,11 @@ CONTAINER2=${CONTAINER2_RAW%%$'\t'*}
 SEEDED_TAB_ID2=${CONTAINER2_RAW#*$'\t'}
 [ "$CONTAINER2" = "$CONTAINER" ] || fail "container_ensure is not idempotent: '$CONTAINER' vs '$CONTAINER2'"
 [ -z "$SEEDED_TAB_ID2" ] || fail "an ADOPTED (reused) workspace must report an EMPTY seeded default tab id, got '$SEEDED_TAB_ID2'"
-pass "real herdr: container_ensure is idempotent (a second task for one project reuses its 'tmp-Fleet' workspace, reports no seeded default tab on adoption)"
+pass "real herdr: container_ensure is idempotent (a second task for one project reuses its 'FM-fleet-1' workspace, reports no seeded default tab on adoption)"
 
-# --- cross-project separation + configurable Fleet alias ---------------------
-# Two DIFFERENT projects must land in two DIFFERENT workspaces, and a configured
-# fleet= alias must override the repo-name default. Uses a scratch FM_HOME with
-# a registry so the alias flows through fm-project-mode.sh --fleet end to end.
+# --- cross-project separation -----------------------------------------------
+# Two different projects in one primary home must receive different sequential
+# FM-fleet labels; a fleet= display alias must never become the workspace name.
 XP_SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/fm-herdr-smoke-xp.XXXXXX")
 XP_HOME="$XP_SCRATCH/home"
 mkdir -p "$XP_HOME/data" "$XP_HOME/projects/Echo" "$XP_HOME/projects/atlas-config"
@@ -98,11 +96,11 @@ XP_ATLAS_RAW=$(FM_HOME="$XP_HOME" fm_backend_herdr_container_ensure ship "$XP_HO
 XP_ATLAS_WS=${XP_ATLAS_RAW%%$'\t'*}; XP_ATLAS_WS=${XP_ATLAS_WS#*:}
 XP_ECHO_LABEL=$(herdr workspace list --session "$SESSION" 2>&1 | jq -r --arg id "$XP_ECHO_WS" '.result.workspaces[]? | select(.workspace_id == $id) | .label')
 XP_ATLAS_LABEL=$(herdr workspace list --session "$SESSION" 2>&1 | jq -r --arg id "$XP_ATLAS_WS" '.result.workspaces[]? | select(.workspace_id == $id) | .label')
-[ "$XP_ECHO_LABEL" = "Echo-Fleet" ] || fail "the Echo worker workspace should be 'Echo-Fleet', got '$XP_ECHO_LABEL'"
-[ "$XP_ATLAS_LABEL" = "Atlas-Fleet" ] || fail "the atlas-config worker workspace should use the fleet=Atlas alias -> 'Atlas-Fleet', got '$XP_ATLAS_LABEL'"
+[ "$XP_ECHO_LABEL" = "FM-fleet-1" ] || fail "the Echo worker workspace should be FM-fleet-1, got '$XP_ECHO_LABEL'"
+[ "$XP_ATLAS_LABEL" = "FM-fleet-2" ] || fail "the atlas-config worker workspace should be FM-fleet-2, got '$XP_ATLAS_LABEL'"
 [ "$XP_ECHO_WS" != "$XP_ATLAS_WS" ] || fail "two different projects must never share a workspace, both got '$XP_ECHO_WS'"
 rm -rf "$XP_SCRATCH"
-pass "real herdr: different projects get distinct workspaces (Echo-Fleet vs Atlas-Fleet) and a configured fleet= alias overrides the repo-name default, end to end"
+pass "real herdr: different projects get distinct FM-fleet suffixes, never Project-Fleet names"
 
 # --- create_task + duplicate refusal + default-tab prune ---------------------
 
@@ -194,13 +192,12 @@ printf '%s' "$HUSK_WS_TABS" | jq -e --arg t "$NEW_HUSK_TAB_ID" '.result.tabs[] |
 pass "real herdr: create_task closes and replaces a same-labeled tab whose pane hosts no registered agent (the restored-husk shape), leaving the workspace intact"
 fm_backend_herdr_kill "$SESSION:$NEW_HUSK_PANE_ID"
 
-# --- workspace-per-home: a secondmate-shaped home gets its OWN space --------
-# (docs/herdr-backend.md "Task container shape", AGENTS.md task
-# herdr-sm-spaces-k4). Reuses this suite's own isolated $SESSION - a SECOND,
-# distinct workspace inside the SAME session, never a second session. Placed
-# here (both workspaces' tabs still alive) so the restart-stability check
-# right after it exercises the true multi-workspace shape, not a
-# possibly-emptied-and-auto-closed primary workspace.
+# --- workspace-per-home: a secondmate-shaped home uses TheBridge ------------
+# Reuses this suite's own isolated $SESSION - a SECOND, distinct workspace
+# inside the SAME session, never a second session. Placed here (both
+# workspaces' tabs still alive) so the restart-stability check right after it
+# exercises the true multi-workspace shape, not a possibly-emptied-and-auto-closed
+# primary workspace.
 
 SM_SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/fm-herdr-smoke-sm.XXXXXX")
 SM_HOME="$SM_SCRATCH/secondmate-home"
@@ -215,15 +212,15 @@ case "$SM_CONTAINER" in
   *) fail "secondmate container_ensure returned an unexpected shape: $SM_CONTAINER" ;;
 esac
 [ "$SM_CONTAINER" != "$CONTAINER" ] || fail "the secondmate agent must get a DIFFERENT workspace than the worker's, got the same: $SM_CONTAINER"
-[ -n "$SM_SEEDED_TAB_ID" ] || fail "the secondmate agent's container_ensure must CREATE its own workspace and report its seeded default tab id"
-pass "real herdr: a --secondmate spawn gets its OWN herdr workspace, distinct from the worker's, in the SAME session"
+[ -n "$SM_SEEDED_TAB_ID" ] || fail "the secondmate agent's container_ensure must CREATE TheBridge and report its seeded default tab id"
+pass "real herdr: a --secondmate spawn gets TheBridge, distinct from the worker Fleet, in the SAME session"
 
 SM_WSID=${SM_CONTAINER#*:}
 SM_LABEL_REAL=$(herdr workspace list --session "$SESSION" 2>&1 | jq -r --arg id "$SM_WSID" '.result.workspaces[]? | select(.workspace_id == $id) | .label')
-[ "$SM_LABEL_REAL" = "Archon-smoketest-sm1" ] || fail "the secondmate workspace's real herdr label should be Archon-smoketest-sm1, got '$SM_LABEL_REAL'"
-pass "real herdr: the secondmate agent's workspace is labeled Archon-<secondmate-id> in herdr itself (never a Fleet worker label)"
+[ "$SM_LABEL_REAL" = "TheBridge" ] || fail "the secondmate workspace's real herdr label should be TheBridge, got '$SM_LABEL_REAL'"
+pass "real herdr: the secondmate agent's workspace is labeled TheBridge in herdr itself (never a Fleet worker label)"
 
-SM_TASK_LABEL="fm-smtask1"
+SM_TASK_LABEL="Portside"
 SM_TASK_IDS=$(fm_backend_herdr_create_task "$SM_CONTAINER" "$SM_TASK_LABEL" "$SM_HOME" "$SM_SEEDED_TAB_ID") || fail "secondmate create_task failed"
 read -r SM_TAB_ID SM_PANE_ID <<EOF
 $SM_TASK_IDS
@@ -231,16 +228,16 @@ EOF
 if [ -z "$SM_TAB_ID" ] || [ -z "$SM_PANE_ID" ]; then
   fail "secondmate create_task did not return tab/pane ids"
 fi
-pass "real herdr: a task spawned into the secondmate agent lands as a tab inside the secondmate's OWN Archon workspace"
+pass "real herdr: a task spawned into the secondmate agent lands as a tab inside TheBridge"
 
 # list_live is scoped to the injected label: the worker project's Fleet must
-# never see the secondmate's task, and the secondmate's Archon workspace must
-# see only its own task, never the worker project's.
-PRIMARY_LIVE=$(fm_backend_herdr_list_live "$SESSION" tmp-Fleet)
+# never see the secondmate's task, and TheBridge must see only its own task,
+# never the worker project's.
+PRIMARY_LIVE=$(fm_backend_herdr_list_live "$SESSION" FM-fleet-1)
 case "$PRIMARY_LIVE" in
   *"$SM_TASK_LABEL"*) fail "the worker project's list_live must not see the secondmate's task"$'\n'"$PRIMARY_LIVE" ;;
 esac
-SM_LIVE=$(fm_backend_herdr_list_live "$SESSION" Archon-smoketest-sm1)
+SM_LIVE=$(fm_backend_herdr_list_live "$SESSION" TheBridge)
 case "$SM_LIVE" in
   *"$SM_TASK_LABEL"*) : ;;
   *) fail "the secondmate's list_live did not see its own task"$'\n'"$SM_LIVE" ;;
@@ -262,8 +259,8 @@ sleep 0.5
 fm_backend_herdr_server_ensure "$SESSION" || fail "the isolated session's server did not come back up after the stop"
 
 POST_LIST=$(herdr workspace list --session "$SESSION" 2>&1)
-POST_PRIMARY_ID=$(printf '%s' "$POST_LIST" | jq -r '.result.workspaces[]? | select(.label == "tmp-Fleet") | .workspace_id')
-POST_SM_ID=$(printf '%s' "$POST_LIST" | jq -r --arg l "Archon-smoketest-sm1" '.result.workspaces[]? | select(.label == $l) | .workspace_id')
+POST_PRIMARY_ID=$(printf '%s' "$POST_LIST" | jq -r '.result.workspaces[]? | select(.label == "FM-fleet-1") | .workspace_id')
+POST_SM_ID=$(printf '%s' "$POST_LIST" | jq -r --arg l "TheBridge" '.result.workspaces[]? | select(.label == $l) | .workspace_id')
 [ "$POST_PRIMARY_ID" = "${CONTAINER#*:}" ] || fail "the primary workspace id did not survive the restart: before=${CONTAINER#*:} after=$POST_PRIMARY_ID"
 [ "$POST_SM_ID" = "$SM_WSID" ] || fail "the secondmate workspace id did not survive the restart: before=$SM_WSID after=$POST_SM_ID"
 
@@ -371,7 +368,7 @@ TASK_IDS2=$(fm_backend_herdr_create_task "$CONTAINER" "$LABEL2" /tmp "$SEEDED_TA
 read -r _TAB_ID2 PANE_ID2 <<EOF
 $TASK_IDS2
 EOF
-live=$(fm_backend_herdr_list_live "$SESSION" tmp-Fleet)
+live=$(fm_backend_herdr_list_live "$SESSION" FM-fleet-1)
 assert_contains_local() { case "$1" in *"$2"*) : ;; *) fail "$3"$'\n'"--- got ---"$'\n'"$1" ;; esac; }
 assert_contains_local "$live" "$LABEL2" "list_live did not report the freshly created task tab by label"
 pass "real herdr: list_live discovers a live task tab by fm-<id> label"
