@@ -549,6 +549,82 @@ SH
   pass "but safety rechecks before detaching or deleting the task branch"
 }
 
+test_teardown_but_revalidates_owner_after_safety() {
+  local home proj wt fakebin id out status real_git count_file exclude_file
+  id=but-owner-race-c7
+  home="$TMP_ROOT/td-owner-race/home"
+  proj="$TMP_ROOT/td-owner-race/project"
+  wt="$TMP_ROOT/td-owner-race/wt"
+  fakebin="$TMP_ROOT/td-owner-race/fakebin"
+  count_file="$TMP_ROOT/td-owner-race/status-count"
+  mkdir -p "$home/data" "$home/state" "$home/config" "$fakebin"
+  fm_git_init_commit "$proj"
+  git -C "$proj" branch -M main
+  git -C "$proj" worktree add --quiet -b "fm/$id" "$wt" main
+  printf 'version=1\ntask_id=%s\ntoken=%s\n' "$id" fmw.GGGGGGGGGGGG > "$wt/.fm-worktree-owner"
+  exclude_file=$(git -C "$wt" rev-parse --git-path info/exclude)
+  case "$exclude_file" in
+    /*) ;;
+    *) exclude_file="$wt/$exclude_file" ;;
+  esac
+  printf '%s\n' .fm-worktree-owner >> "$exclude_file"
+  fm_write_meta "$home/state/$id.meta" \
+    "window=firstmate:fm-$id" \
+    "endpoint_task_id=$id" \
+    "worktree=$wt" \
+    "project=$proj" \
+    "kind=ship" \
+    "mode=local-only" \
+    "worktree_provider=but" \
+    "worktree_owner_token=fmw.GGGGGGGGGGGG"
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+  fm_fake_exit0 "$fakebin" no-mistakes
+  real_git=$(command -v git)
+  cat > "$fakebin/git" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -C ] && [ "${2:-}" = "${FM_OWNER_RACE_WORKTREE:?}" ] \
+   && [ "${3:-}" = status ] && [ "${4:-}" = --porcelain ]; then
+  count=$(cat "${FM_OWNER_RACE_COUNT_FILE:?}" 2>/dev/null || printf '0')
+  count=$((count + 1))
+  printf '%s\n' "$count" > "$FM_OWNER_RACE_COUNT_FILE"
+  if [ "$count" -eq 2 ]; then
+    printf 'version=1\ntask_id=%s\ntoken=%s\n' \
+      "${FM_OWNER_RACE_TASK_ID:?}" fmw.HHHHHHHHHHHH \
+      > "$FM_OWNER_RACE_WORKTREE/.fm-worktree-owner"
+  fi
+fi
+exec "${FM_REAL_GIT:?}" "$@"
+SH
+  chmod +x "$fakebin/tmux" "$fakebin/git"
+  set +e
+  out=$(
+    FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" \
+      FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
+      FM_CONFIG_OVERRIDE="$home/config" FM_TEARDOWN_GUARD_DONE=1 \
+      FM_OWNER_RACE_WORKTREE="$wt" FM_OWNER_RACE_COUNT_FILE="$count_file" \
+      FM_OWNER_RACE_TASK_ID="$id" FM_REAL_GIT="$real_git" \
+      PATH="$fakebin:$PATH" \
+      "$TEARDOWN" "$id" 2>&1
+  )
+  status=$?
+  set -e
+  expect_code 1 "$status" "recycled lease should fail the post-safety ownership proof"
+  assert_contains "$out" "under a different lease" \
+    "recycled lease did not trigger the ownership refusal"
+  assert_present "$wt" "recycled-lease refusal removed the but worktree"
+  assert_present "$home/state/$id.meta" "recycled-lease refusal removed task metadata"
+  assert_grep "token=fmw.HHHHHHHHHHHH" "$wt/.fm-worktree-owner" \
+    "ownership race fixture did not replace the lease marker"
+  [ "$(git -C "$wt" symbolic-ref --quiet --short HEAD)" = "fm/$id" ] \
+    || fail "recycled-lease refusal detached the replacement task branch"
+  git -C "$proj" show-ref --verify --quiet "refs/heads/fm/$id" \
+    || fail "recycled-lease refusal deleted the replacement task branch"
+  pass "but teardown revalidates ownership after the safety check"
+}
+
 test_forced_secondmate_but_child_runs_full_cleanup() {
   local home subhome proj wt fakebin parent_id child_id pid out status head nm_log
   parent_id=but-parent-d4
@@ -723,6 +799,7 @@ test_teardown_but_removes_git_worktree
 test_teardown_but_missing_path_preserves_registration_recovery
 test_teardown_but_still_requires_owner
 test_teardown_but_rechecks_before_branch_mutation
+test_teardown_but_revalidates_owner_after_safety
 test_forced_secondmate_but_child_runs_full_cleanup
 test_forced_secondmate_refuses_unknown_child_provider_before_cleanup
 
