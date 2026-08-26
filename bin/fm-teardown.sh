@@ -2298,6 +2298,13 @@ preflight_firstmate_home_herdr_children() {  # <home>
   done
 }
 
+cleanup_child_task_worktree_processes() {  # <task-id> <kind> <backend> <target> <worktree> <tasktmp>
+  local ID=$1 KIND=$2 BACKEND=$3 T=$4 wt=$5 tasktmp=$6
+  local TASK_RUN_ID='' TASK_PIDS='' TASK_PIDS_FAILED_DIR=''
+  conclude_task_no_mistakes_run "$wt"
+  reap_task_worktree_processes worktree "$wt" "$tasktmp"
+}
+
 cleanup_firstmate_home_children() {
   local home=$1 sub_state child_meta child_id child_t child_wt child_proj child_kind child_home child_backend child_orca_worktree_id child_owner_token child_return_rc child_busy_gen child_provider child_tasktmp
   sub_state="$home/state"
@@ -2329,14 +2336,8 @@ cleanup_firstmate_home_children() {
     if [ "$child_kind" != secondmate ] && [ "$child_backend" != orca ] \
        && [ "$child_provider" = but ] && [ -n "$child_wt" ] && [ -d "$child_wt" ]; then
       child_tasktmp=$(meta_value "$child_meta" tasktmp)
-      (
-        ID=$child_id
-        KIND=$child_kind
-        BACKEND=$child_backend
-        T=$child_t
-        conclude_task_no_mistakes_run "$child_wt"
-        reap_task_worktree_processes worktree "$child_wt" "$child_tasktmp"
-      ) || return 1
+      cleanup_child_task_worktree_processes \
+        "$child_id" "$child_kind" "$child_backend" "$child_t" "$child_wt" "$child_tasktmp" || return 1
     fi
     if [ -n "$child_t" ]; then
       if [ "$child_backend" = herdr ]; then
