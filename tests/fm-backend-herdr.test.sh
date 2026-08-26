@@ -433,7 +433,7 @@ test_workspace_label_concurrent_same_home_projects_are_unique() {
   while [ "$i" -le 12 ]; do
     mkdir -p "$home/projects/P$i"
     _wslabel_shared_session "$home" ship "$home/projects/P$i" "P$i" "$socket" > "$dir/$i.out" &
-    pids[$i]=$!
+    pids[i]=$!
     i=$((i + 1))
   done
   i=1

@@ -113,7 +113,6 @@ PROJ2="$TMP_ROOT/scratch-project-2"; make_scratch_project "$PROJ2"
 # Ordinary workers land in FM-fleet-<n> from the primary and SM-fleet-<n>
 # from a secondmate home. Same home, different projects get different suffixes.
 PROJ1_FLEET="FM-fleet-1"
-PROJ2_FLEET="FM-fleet-2"
 SM_PROJ1_FLEET="SM-fleet-1"
 SM_PROJ2_FLEET="SM-fleet-2"
 
