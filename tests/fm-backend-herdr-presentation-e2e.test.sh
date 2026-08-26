@@ -955,7 +955,8 @@ propagate_inheritable_config "$HOME_DIR/config" "$SECOND_HOME_B/config" \
   || fail "primary presentation setting did not reach secondmate B"
 pass "real Herdr lab: the primary presentation setting inherits into real secondmate homes"
 
-# Keep the pre-existing Archon-alpha/bravo workspaces as supervisor parents and captain focus.
+# Keep the pre-existing legacy Archon-alpha/bravo workspaces as foreign ordering
+# sentinels and captain focus; new spawn paths never select them as parents.
 assert_focus_is "$CAPTAIN_FOCUS" "multi-home captain focus"
 
 mkdir -p "$SECOND_HOME_A/data/a1" "$SECOND_HOME_A/data/a2" \

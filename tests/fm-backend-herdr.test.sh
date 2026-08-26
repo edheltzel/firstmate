@@ -83,7 +83,7 @@ SH
 # make_herdr_statefake: a STATEFUL `herdr` stub that models the parts of herdr's
 # real container behavior the workspace-leak fix (and the default-tab-prune
 # safety fix) depend on, so a full spawn->teardown cycle can be replayed
-# repeatedly and the "one persistent <name>-Fleet workspace, no orphans"
+# repeatedly and the "one persistent numbered fleet workspace, no orphans"
 # invariant asserted end to end (the canned, call-numbered make_herdr_fakebin
 # above cannot model state carried ACROSS calls). Backed by a JSON state file
 # ($FM_FAKE_HERDR_STATE) mutated with real jq. Modeled behaviors, all
@@ -290,7 +290,7 @@ test_workspace_label_alias_overrides_repo_name() {
 
 test_workspace_label_missing_alias_uses_repo_name() {
   local home
-  # No registry file at all: the Fleet name must still default to the repo name.
+  # No registry file at all: the first primary project still receives suffix 1.
   home="$TMP_ROOT/fleet-noreg"; mkdir -p "$home/projects/MyChron"
   out=$(_wslabel "$home" ship "$home/projects/MyChron")
   [ "$out" = "FM-fleet-1" ] || fail "a project with no registry should still get FM-fleet-1, got '$out'"
@@ -310,9 +310,9 @@ test_workspace_label_different_projects_get_distinct_fleets() {
 
 test_workspace_label_from_clone_basename_not_worktree_path() {
   local home
-  # DISCONFIRMING (brief step 5): the label derives from the project CLONE
-  # basename, never the per-task treehouse worktree path. Two tasks for Echo in
-  # different worktree parents must both resolve to Echo-Fleet.
+  # DISCONFIRMING (brief step 5): the allocation key derives from the project
+  # clone basename, never the per-task Treehouse worktree path. Two tasks for
+  # Echo in different worktree parents must both reuse FM-fleet-1.
   home="$TMP_ROOT/fleet-basename"; mkdir -p "$home/.treehouse/pool-a/Echo" "$home/.treehouse/pool-b/Echo"
   a=$(_wslabel "$home" ship "$home/.treehouse/pool-a/Echo")
   b=$(_wslabel "$home" ship "$home/.treehouse/pool-b/Echo")
@@ -339,9 +339,9 @@ _display_fleet_label() {  # <home> <project-abs> <project-key>
 
 test_workspace_label_key_differs_from_basename_no_alias() {
   local home
-  # The delivery-identity key differs from the clone basename and carries NO
-  # fleet= alias: the workspace must stay '<basename>-Fleet', NEVER be renamed to
-  # '<key>-Fleet' (bin/fm-project-mode.sh header; the AgentThemis/Themis case).
+  # The delivery-identity key differs from the clone basename and carries no
+  # fleet= alias: the workspace remains a generic FM-fleet label while display
+  # metadata keeps the project-facing identity.
   home="$TMP_ROOT/fleet-key-noalias"; mkdir -p "$home/data" "$home/projects/Themis"
   printf -- '- AgentThemis [local-only] - key differs from clone dir (added 2026-07-20)\n' > "$home/data/projects.md"
   out=$(_wslabel_key "$home" ship "$home/projects/Themis" AgentThemis)
@@ -514,14 +514,14 @@ test_workspace_label_secondmate_home_worker_uses_sm_fleet() {
 }
 
 test_workspace_label_no_supervisor_or_superseded_leak() {
-  # Guard (brief regression): a worker label is NEVER a supervisor identity
-  # ("Themis"/"Atlas"/"Archon"/"Archon-*") and NEVER a superseded home-keyed
-  # label; a secondmate label is NEVER a "<...>-Fleet" worker label.
+  # Guard (brief regression): a worker label is always FM-fleet-* or SM-fleet-*,
+  # never a supervisor, legacy Archon, or project-display identity; a
+  # secondmate label is the configured primary workspace.
   local home
   home="$TMP_ROOT/leak-guard"; mkdir -p "$home/data" "$home/projects/Echo" "$home/projects/Themis" "$home/projects/Atlas"
   printf -- '- Echo [no-mistakes] - voice (added 2026-07-17)\n' > "$home/data/projects.md"
-  # Even a project literally named "Themis" or "Atlas" produces a *-Fleet worker
-  # label, never the bare supervisor identity.
+  # Even a project literally named "Themis" or "Atlas" produces a numbered
+  # FM-fleet label, never the bare project or legacy supervisor identity.
   expected=1
   for p in Echo Themis Atlas; do
     out=$(_wslabel "$home" ship "$home/projects/$p")
@@ -735,8 +735,8 @@ test_workspace_ensure_refuses_an_ambiguous_label_with_no_launcher() {
 test_workspace_ensure_other_home_ignores_the_launcher_identity() {
   local dir log resp fb out
   dir="$TMP_ROOT/ensure-other-home"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
-  # Only a workspace list: the launcher's own pane is never consulted, because a
-  # --secondmate launch stands up a different home's workspace by design.
+  # Only a workspace list: this legacy other-home compatibility path deliberately
+  # resolves the supplied home label without consulting launcher identity.
   printf '{"result":{"workspaces":[{"workspace_id":"w1","label":"firstmate"}]}}\n' > "$resp/1.out"
   fb=$(make_herdr_fakebin "$dir")
   out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
@@ -3165,9 +3165,8 @@ test_projection_recovery_is_read_only_and_refuses_live_duplicate_risk() {
 test_workspace_find_matches_the_injected_label() {
   local dir log resp fb out
   dir="$TMP_ROOT/find-scoped"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
-  # Several projects' Fleet workspaces plus a secondmate's Archon space coexist
-  # in one herdr session - find must return the one matching the INJECTED label
-  # (project isolation), never a different project's Fleet.
+  # Several numbered fleet workspaces plus TheBridge coexist in one Herdr
+  # session. Find must return the injected label, never another project's fleet.
   printf '{"result":{"workspaces":[{"workspace_id":"w1","label":"FM-fleet-1"},{"workspace_id":"w2","label":"FM-fleet-2"},{"workspace_id":"w3","label":"TheBridge"}]}}\n' > "$resp/1.out"
   fb=$(make_herdr_fakebin "$dir")
   out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
@@ -3181,9 +3180,9 @@ test_workspace_find_matches_the_injected_label() {
 test_list_live_scoped_to_the_given_projects_workspace() {
   local dir log resp fb out
   dir="$TMP_ROOT/list-live-scoped"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
-  # 1: workspace_find's `workspace list` - Echo-Fleet is w1, another project w2
+  # 1: workspace_find's `workspace list` - FM-fleet-1 is w1, another project w2
   printf '{"result":{"workspaces":[{"workspace_id":"w1","label":"FM-fleet-1"},{"workspace_id":"w2","label":"FM-fleet-2"}]}}\n' > "$resp/1.out"
-  # 2: tab list --workspace w1 (Echo-Fleet's own tabs only)
+  # 2: tab list --workspace w1 (FM-fleet-1's own tabs only)
   printf '{"result":{"tabs":[{"tab_id":"w1:t1","label":"fm-echotask"}]}}\n' > "$resp/2.out"
   # 3: pane_for_tab's `pane list --workspace w1`
   printf '{"result":{"panes":[{"pane_id":"w1:p1","tab_id":"w1:t1"}]}}\n' > "$resp/3.out"
@@ -4210,13 +4209,13 @@ test_label_collision_startup_workspace_leaves_live_tab_alone() {
   # The live-fire incident on 2026-07-02 used the then-current "firstmate"
   # primary label because a captain launched herdr inside a directory with
   # that basename. The structural risk is unchanged under the current
-  # "<name>-Fleet" worker label: a pre-existing workspace with the derived
+  # `FM-fleet-<n>` worker label: a pre-existing workspace with the allocated
   # label and one auto-created tab can still be adopted, so the tab must remain
   # untouched. The next worker spawn must adopt-and-leave-alone, never prune.
   local dir log state fb raw container seeded ids pane
   dir="$TMP_ROOT/label-collision"; mkdir -p "$dir"; log="$dir/log"; state="$dir/state.json"; : > "$log"
   fb=$(make_herdr_statefake "$dir")
-  # Model a pre-existing workspace carrying today's exact primary label.
+  # Model a pre-existing workspace carrying today's exact worker label.
   # Its single auto-created tab is labeled "1" and hosts a live agent
   # (agent_status=working), matching the incident's structural collision.
   jq -n '{next:2,workspaces:[{workspace_id:"w1",label:"FM-fleet-1"}],tabs:[{tab_id:"w1:t1",label:"1",workspace_id:"w1",pane_id:"w1:p1"}],agent_status:{"w1:p1":"working"}}' > "$state"

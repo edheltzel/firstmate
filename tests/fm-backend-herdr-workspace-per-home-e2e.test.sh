@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # tests/fm-backend-herdr-workspace-per-home-e2e.test.sh - mandatory ISOLATED
-# end-to-end real-herdr test for the project-keyed "<name>-Fleet" worker
-# workspace contract. Drives the REAL bin/fm-spawn.sh and bin/fm-teardown.sh
-# (not just adapter primitives), because the requirements under test - a worker
-# landing in its PROJECT's Fleet workspace regardless of spawning home, two
-# projects never sharing a workspace, and a --secondmate spawn landing as
-# Portside in TheBridge - only exist at fm-spawn.sh's herdr case arm and
+# end-to-end real-herdr test for the numbered per-home fleet workspace
+# contract. Drives the REAL bin/fm-spawn.sh and bin/fm-teardown.sh (not just
+# adapter primitives), because the requirements under test - primary workers
+# using FM-fleet, secondmate-home workers using SM-fleet, distinct project
+# suffixes, and a --secondmate spawn landing as Portside in TheBridge - exist
+# at fm-spawn.sh's herdr case arm and
 # fm_backend_herdr_workspace_label's KIND + project resolution; none is
 # exercised by the adapter-primitive smoke test.
 #
@@ -18,14 +18,13 @@
 # stop`.
 #
 # Covers, at minimum (per the task brief):
-#   - an ordinary worker landing in its PROJECT's own "<name>-Fleet" workspace
-#   - two workers for the SAME project sharing one workspace even when spawned
-#     from DIFFERENT homes (project-keyed, not home-keyed)
-#   - two DIFFERENT projects never sharing a workspace
+#   - a primary-home worker landing in `FM-fleet-<n>`
+#   - a secondmate-home worker landing in `SM-fleet-<n>`, separate from FM-fleet
+#   - two different projects in one home receiving different suffixes
 #   - a --secondmate spawn landing as tab Portside in TheBridge,
 #     never a Fleet worker label
-#   - teardown closing the right tab (and no other) within a shared workspace
-#   - list-live recovery scoped to a given project's Fleet, across homes
+#   - teardown closing only the recorded pane across separate workspaces
+#   - list-live recovery scoped to one resolved fleet or primary workspace
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -125,7 +124,7 @@ ws_label_of_pane() {  # <pane_id> -> the herdr workspace label hosting that pane
   herdr workspace list --session "$SESSION" 2>&1 | jq -r --arg id "$wsid" '.result.workspaces[]? | select(.workspace_id == $id) | .label'
 }
 
-# --- 1. an ordinary worker lands in its PROJECT's own "<name>-Fleet" space ---
+# --- 1. a primary-home worker lands in FM-fleet-1 ---------------------------
 
 CM1_OUT="$TMP_ROOT/cm1.out"; CM1_ERR="$TMP_ROOT/cm1.err"
 FM_SPAWN_NO_GUARD=1 FM_HOME="$PRIMARY_HOME" FM_ROOT_OVERRIDE="$ROOT" \
@@ -250,10 +249,9 @@ assert_not_contains_local "$SM_LIVE" "fm-cm1" "TheBridge list_live must not see 
 assert_not_contains_local "$SM_LIVE" "fm-cm2" "TheBridge list_live must not see a worker's task"
 pass "real herdr E2E: list_live for TheBridge sees Portside and never Fleet workers"
 
-# --- 6. teardown closes the RIGHT tab, and no other ------------------------
-# cm1 and cm2 share one PROJ1 Fleet workspace, so tearing down one must leave
-# the other's tab (same workspace) untouched - the prune-only-the-right-tab
-# property now within a genuinely shared workspace.
+# --- 6. teardown closes the RIGHT pane, and no other -----------------------
+# cm1 and cm2 occupy separate FM/SM fleet workspaces, so each teardown must
+# leave every endpoint outside the recorded workspace untouched.
 
 TD1_OUT="$TMP_ROOT/td1.out"
 FM_ROOT_OVERRIDE="$ROOT" FM_STATE_OVERRIDE="$PRIMARY_HOME/state" FM_DATA_OVERRIDE="$PRIMARY_HOME/data" \

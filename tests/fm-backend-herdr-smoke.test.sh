@@ -57,9 +57,8 @@ pass "real herdr: version_check accepts the installed binary's protocol"
 # one - docs/herdr-backend.md "Default-tab prune"). Split on the guaranteed
 # single tab character; only fm_backend_herdr_create_task is ever allowed to
 # act on the seeded tab id, and only for the container that just created it.
-# An ordinary worker (kind ship) for a project lands in that project's own
-# "<Fleet display name>-Fleet" workspace. cwd /tmp -> basename "tmp"; with no
-# registry the Fleet name defaults to the repo name, so the label is "FM-fleet-1".
+# An ordinary worker from this primary home lands in a numbered FM-fleet
+# workspace. In this empty isolated namespace, `/tmp` receives `FM-fleet-1`.
 CONTAINER_RAW=$(fm_backend_herdr_container_ensure ship /tmp) || fail "container_ensure failed"
 CONTAINER=${CONTAINER_RAW%%$'\t'*}
 SEEDED_TAB_ID=${CONTAINER_RAW#*$'\t'}
@@ -84,10 +83,9 @@ SEEDED_TAB_ID2=${CONTAINER2_RAW#*$'\t'}
 [ -z "$SEEDED_TAB_ID2" ] || fail "an ADOPTED (reused) workspace must report an EMPTY seeded default tab id, got '$SEEDED_TAB_ID2'"
 pass "real herdr: container_ensure is idempotent (a second task for one project reuses its 'FM-fleet-1' workspace, reports no seeded default tab on adoption)"
 
-# --- cross-project separation + configurable Fleet alias ---------------------
-# Two DIFFERENT projects must land in two DIFFERENT workspaces, and a configured
-# fleet= alias must override the repo-name default. Uses a scratch FM_HOME with
-# a registry so the alias flows through fm-project-mode.sh --fleet end to end.
+# --- cross-project separation -----------------------------------------------
+# Two different projects in one primary home must receive different sequential
+# FM-fleet labels; a fleet= display alias must never become the workspace name.
 XP_SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/fm-herdr-smoke-xp.XXXXXX")
 XP_HOME="$XP_SCRATCH/home"
 mkdir -p "$XP_HOME/data" "$XP_HOME/projects/Echo" "$XP_HOME/projects/atlas-config"

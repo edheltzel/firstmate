@@ -6,7 +6,7 @@
 #
 # Reproduces the incident's structural collision shape against a private,
 # throwaway HERDR_SESSION (never the captain's default): one tab labeled "1"
-# in a pre-existing workspace carrying today's primary label, `Themis`, with a
+# in a pre-existing workspace carrying today's worker label, `FM-fleet-1`, with a
 # live long-running process in that pane. The 2026-07-02 incident itself used
 # the then-current `firstmate` label; docs/herdr-backend.md preserves that
 # historical fact. This test then drives the real spawn-time container_ensure +
@@ -55,8 +55,8 @@ fm_backend_source herdr || fail "fm_backend_source herdr failed"
 fm_backend_herdr_version_check || fail "version_check failed against the real installed herdr"
 
 # --- 1. reproduce the label-collision startup-workspace shape ---------------
-# Explicitly label the startup workspace with the project's own derived
-# "<name>-Fleet" label to create today's collision deterministically. Herdr's
+# Explicitly label the startup workspace with the allocated `FM-fleet-1` label
+# to create today's collision deterministically. Herdr's
 # unlabeled workspace-label derivation is not a stable test contract, while the
 # adopted-workspace state is the behavior this regression must exercise. The
 # project basename "proj" has no registry alias, so its worker label is

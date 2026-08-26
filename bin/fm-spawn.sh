@@ -47,10 +47,10 @@
 #   A backend spawn refusal (missing dependency, version gate, unauthenticated
 #   socket, or unsupported secondmate mode) is terminal for that selected backend;
 #   callers must surface it instead of silently retrying another backend.
-#   A herdr crewmate or scout is placed in the project's Fleet workspace.
+#   A herdr crewmate or scout resolves an FM/SM fleet workspace as its parent.
 #   A claimed parent identity that is unreadable, contradictory, stale, or from
 #   another herdr session stops the spawn before any worker endpoint exists.
-#   A launcher already in that Fleet workspace disambiguates duplicate labels.
+#   A launcher already in that fleet workspace disambiguates duplicate labels.
 #   A secondmate lands as tab Portside in the primary Firstmate workspace
 #   (TheBridge by default; config/herdr-layout can override the names).
 #   A Firstmate already in that workspace is reused; a Fleet launcher is not.
@@ -70,7 +70,7 @@
 #   canonical socket, outside any home's state/) through launch handoff. Lock
 #   contention warns and falls back to the ordinary flat layout before any
 #   projection mutation. The exact response-derived new workspace is inserted
-#   immediately after its owning parent (the project's Fleet workspace) contiguous
+#   immediately after its owning FM/SM fleet parent's contiguous
 #   child block. Ordering never authorizes lifecycle cleanup, and any
 #   unavailable, ambiguous, or failed move warns while the spawn continues.
 #   Every projected create, prune, and move captures and verifies the named
@@ -1364,7 +1364,8 @@ PROJ_ABS_REAL=$(cd "$PROJ_ABS" 2>/dev/null && pwd -P) || PROJ_ABS_REAL="$PROJ_AB
 # Canonical project identity for a ship/scout spawn (the --secondmate branch never
 # reaches here; its identity is its home and it records mode=secondmate). The
 # registry KEY is the one identity used for BOTH the delivery-mode lookup and the
-# herdr Fleet-label lookup, so they cannot disagree. An explicit --project-key
+# herdr fleet-workspace allocation and display-Fleet lookup, so they cannot
+# disagree. An explicit --project-key
 # wins; otherwise the repository basename, which preserves back-compat for callers
 # that pass only a project directory (and is correct whenever the registry key
 # equals the clone directory name). An unknown key still falls back to
@@ -1433,9 +1434,9 @@ real_path_or_raw() {  # <path>
 
 # Session-provider container-ensure + task creation. tmux stays exactly as P1
 # left it (same session-name / new-window sequence, see bin/backends/tmux.sh);
-# a herdr spawn goes through the version-gated, project-keyed workspace,
-# tab-per-task sequence in bin/backends/herdr.sh instead (D4/D5 as refined by
-# docs/herdr-backend.md's project-keyed Fleet contract, AGENTS.md task
+# a herdr spawn goes through the version-gated, numbered per-home fleet
+# workspace and tab-per-task sequence in bin/backends/herdr.sh instead (D4/D5
+# as refined by docs/herdr-backend.md's placement contract, AGENTS.md task
 # herdr-sm-spaces-k4). Both branches converge on the same $T ("target") string
 # that every downstream operation (send/capture/kill) already treats as opaque
 # per-backend routing (fm_backend_resolve_selector).
@@ -1548,7 +1549,7 @@ case "$BACKEND" in
     WT_TARGET="$WID"
     ;;
   herdr)
-    # Ordinary workers use this process's FM_HOME and land in the project Fleet.
+    # Ordinary workers use this process's FM_HOME and resolve an FM/SM fleet parent.
     # A secondmate reads the primary home's herdr-layout (default TheBridge /
     # Portside) and uses launcher-home so an already-open TheBridge is reused.
     # A Fleet launcher does not capture the secondmate: only a launcher whose

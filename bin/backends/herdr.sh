@@ -5,8 +5,8 @@
 # decisions D1-D6) and the empirical verification recorded in
 # data/fm-backend-design-d7/herdr-verification-p2.md (real herdr v0.7.1,
 # protocol 14, macOS aarch64), with current protocol-17 metadata evidence in
-# docs/herdr-backend.md, and refined by that document's
-# project-keyed Fleet workspace pass (AGENTS.md task herdr-sm-spaces-k4). Herdr is a
+# docs/herdr-backend.md, and refined by that document's numbered per-home fleet
+# workspace pass (AGENTS.md task herdr-sm-spaces-k4). Herdr is a
 # session provider ONLY (D3): the worktree provider stays treehouse, exactly
 # like tmux. Sourced only through bin/fm-backend.sh's fm_backend_source in
 # normal operation; the unit tests source it directly, so the FM_HOME fallback
@@ -14,9 +14,9 @@
 #
 # Default container shape (D4, decided empirically - see
 # herdr-verification-p2.md "Task container shape", refined by
-# docs/herdr-backend.md "Task container shape"): ONE herdr workspace PER
+# docs/herdr-backend.md "Watching and task containers"): ONE herdr workspace PER
 # PROJECT for ordinary workers, with the secondmate agent as a tab in the
-# primary Firstmate workspace (TheBridge / Portside by default), and ONE herdr
+# primary Firstmate workspace (TheBridge / @TheHelm / Portside by default), and ONE herdr
 # TAB per task inside that workspace. The
 # default-on presentation projection creates a disposable workspace for a clean
 # fresh task instead unless the home opts out. That
@@ -26,7 +26,7 @@
 # A version 2 journal can participate in replacing only its exact same-identity
 # endpoint after metadata, home, session, workspace, tab, pane, parent, shape,
 # focus, and agent-absence checks all agree under the session lock.
-# Every ambiguous recovered launch uses the default flat project Fleet or
+# Every ambiguous recovered launch uses the default flat FM/SM fleet or
 # primary Firstmate workspace when duplicate-agent risk is independently absent.
 # Target resolution stays parallel to the tmux adapter in both layouts.
 # Projected create, move, and cleanup operations capture the named session's
@@ -69,7 +69,7 @@
 # default (the firstmate repo root). FM_HOME no longer selects the workspace
 # label - fm_backend_herdr_workspace_label takes <kind> and <project-abs>
 # explicitly - but it still names the home whose data/projects.md registry the
-# Fleet-name lookup (fm-project-mode.sh --fleet) reads for an ordinary worker.
+# display-Fleet-name lookup (fm-project-mode.sh --fleet) reads for an ordinary worker.
 FM_BACKEND_HERDR_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-${FM_ROOT:-$FM_BACKEND_HERDR_ROOT}}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
@@ -124,7 +124,7 @@ FM_BACKEND_HERDR_PRESENTATION_JOURNAL_SUFFIX=".herdr-presentation"
 
 # The config item a home writes to opt OUT of the projection.
 FM_BACKEND_HERDR_PRESENTATION_CONFIG="herdr-presentation-spaces"
-# Optional home-local Herdr layout. Absent file uses TheBridge / @TheHelm / Portside.
+# Optional home-local Herdr layout parser. Absent values use TheBridge / @TheHelm / Portside.
 FM_BACKEND_HERDR_LAYOUT_CONFIG="herdr-layout"
 FM_BACKEND_HERDR_DEFAULT_PRIMARY_WORKSPACE="TheBridge"
 FM_BACKEND_HERDR_DEFAULT_FIRSTMATE_TAB="@TheHelm"
@@ -419,14 +419,15 @@ fm_backend_herdr_display_fleet_label() {  # <project-abs> [<project-key>]
 
 # fm_backend_herdr_workspace_label: the herdr workspace label for a spawn, the
 # SINGLE owner of the worker/secondmate workspace name (docs/herdr-backend.md
-# "Fleet workspaces").
+# "Watching and task containers").
 #   - An ordinary worker (kind ship or scout) lands in FM-fleet-<n> when the
 #     spawning home is the primary, or SM-fleet-<n> when it is a secondmate
 #     home. <n> is allocated in the shared named-session namespace so separate
 #     homes and concurrent spawns never share a label. The same home/project
 #     pair reuses its assigned suffix. This is never "<Project>-Fleet".
 #   - The persistent SECONDMATE agent lands in the primary Firstmate workspace
-#     from config/herdr-layout (default TheBridge), as tab Portside.
+#     from config/herdr-layout (default TheBridge), as the configured secondmate
+#     tab (Portside by default).
 # The primary workspace and secondmate tab are never ordinary worker labels.
 fm_backend_herdr_workspace_label() {  # <kind> <project-abs> [<project-key>] [<session>]
   local kind=$1 project_abs=$2 project_key=${3:-} session=${4:-} name key prefix suffix
@@ -1500,10 +1501,10 @@ fm_backend_herdr_pane_idle_shell_sample() {  # <session> <pane-id>
 # returned by THIS projected create immediately after its owning parent's
 # contiguous child block and before the next parent.
 #
-# <parent-label> is the owning project Fleet or Archon label.
+# <parent-label> is the owning FM/SM fleet label.
 # Optional <parent-workspace-id> is that parent's EXACT id, resolved from the
-# validated launcher identity when it already belongs to the target Fleet or
-# Archon workspace. When given it anchors the owning parent by id, so duplicate
+# validated launcher identity when it already belongs to the target fleet
+# workspace. When given it anchors the owning parent by id, so duplicate
 # labels do not make the layout ambiguous; otherwise the parent label must be
 # unique exactly as before.
 # New-format └ ... · p:<token> children and, for compatibility only, already
@@ -1715,8 +1716,8 @@ fm_backend_herdr_server_ensure() {  # <session>
 }
 
 # fm_backend_herdr_home_workspace_label: compatibility label for direct adapter
-# callers that predate project Fleet grouping. Real spawn paths always inject a
-# project Fleet or Archon label explicitly.
+# callers that predate project Fleet grouping. Real spawn paths always inject an
+# FM/SM fleet or primary workspace label explicitly.
 fm_backend_herdr_home_workspace_label() {
   local marker="$FM_HOME/$FM_BACKEND_HERDR_SECONDMATE_MARKER" id
   if [ -f "$marker" ]; then
@@ -2052,7 +2053,7 @@ fm_backend_herdr_workspace_ensure() {  # <session> <cwd> [<label>] [<launcher-re
 # sequence (version gate, server, workspace). Takes <kind>, <project-abs>, and
 # the optional canonical <project-key> (defaulting to the basename), and
 # resolves the workspace label ONCE (fm_backend_herdr_workspace_label) so an
-# ordinary worker lands in its project's "<Fleet display name>-Fleet" workspace
+# ordinary worker lands in its assigned FM-fleet-<n> or SM-fleet-<n> workspace
 # and the secondmate agent in the primary Firstmate workspace; the project
 # directory is also the fresh workspace's cwd. Echoes
 # "<session>:<workspace_id>\t<seeded_default_tab_id>" - a single TAB character
@@ -3512,7 +3513,7 @@ EOF
 # fm_backend_herdr_list_live: recovery/orphan discovery. Lists every tab whose
 # label looks like a firstmate task window (fm-<id>) or the configured secondmate
 # tab (Portside by default) in <session>'s workspace whose label is the injected
-# <label> - the PROJECT's own "<Fleet>-Fleet" workspace for an ordinary worker,
+# <label> - the assigned FM/SM fleet workspace for an ordinary worker,
 # or the primary Firstmate workspace for a secondmate - by LABEL, never by
 # trusting a stored pane id, since ids are not guaranteed stable across every
 # server lifecycle (see herdr-verification-p2.md "ID stability").

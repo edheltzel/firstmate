@@ -3,13 +3,12 @@
 # end-to-end real-Herdr test for worker PLACEMENT with presentation spaces
 # disabled.
 #
-# The guarantee under test: a crewmate or scout is created in the exact Herdr
-# workspace of the firstmate or secondmate process that launched it, identified
-# from that process's own Herdr pane rather than from a workspace label. Herdr
-# enforces no workspace-label uniqueness, so two workspaces can both be labeled
-# "firstmate", and the previous label-first-match resolution put the worker in
-# whichever one sorted first - visibly the wrong space whenever the launcher was
-# not in it.
+# The guarantee under test: a crewmate or scout resolves its home-specific
+# FM/SM fleet label first, and an exact launcher identity disambiguates only a
+# live workspace carrying that same target label. Herdr enforces no
+# workspace-label uniqueness, so label-only selection can choose the wrong
+# same-labeled workspace while stale or cross-home launcher identity must never
+# override the resolved target.
 #
 # This drives the REAL bin/fm-spawn.sh and bin/fm-teardown.sh, because the
 # guarantee spans the whole spawn handoff (fm-spawn.sh's herdr arm ->
@@ -191,10 +190,9 @@ mkdir -p "$PRIMARY_HOME/data/$SM2_ID"
 printf 'trivial secondmate charter brief: nothing to do.\n' > "$PRIMARY_HOME/data/$SM2_ID/brief.md"
 
 PROJ="$TMP_ROOT/scratch-project"; make_scratch_project "$PROJ"
-# The merged model groups ordinary workers by PROJECT: the reusable
-# "<repo-basename>-Fleet" workspace (fm_backend_herdr_workspace_label), not a
-# per-home "firstmate" label. Exact launcher identity still disambiguates
-# same-labeled duplicates of that Fleet label.
+# The merged model assigns the primary home's project `FM-fleet-1` in this
+# isolated session. Exact launcher identity still disambiguates same-labeled
+# duplicates of that resolved fleet label.
 PROJ_FLEET="FM-fleet-1"
 
 # One unrelated workspace, kept FOCUSED throughout, so every placement result
