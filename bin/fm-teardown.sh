@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Tear down a finished task: return the treehouse worktree, release the Orca
-# worktree, or retire a secondmate home; kill the recorded runtime endpoint,
+# Tear down a finished task: remove or return the Firstmate-allocated worktree,
+# release the Orca worktree, or retire a secondmate home; kill the recorded
+# runtime endpoint,
 # clear volatile state, refresh/prune the project's clone for PR-based ship
 # tasks, then print a backlog-refresh reminder for ship and scout teardowns
 # (a secondmate teardown prints none, since secondmates are not backlog items).
-# Before inspecting or changing any existing Treehouse-backed ship/scout
+# Before inspecting or changing any existing Firstmate-allocated ship/scout
 # worktree, teardown requires its ordinary readable .fm-worktree-owner marker
 # to match both the task id and per-spawn ownership token recorded in metadata.
 # Missing markers, including tasks spawned before this contract, refuse rather
@@ -62,8 +63,8 @@
 # Usage: fm-teardown.sh <task-id> [--force]
 #   --force skips ordinary-task dirty and landed-work checks, skips scout report
 #   checks, and discards secondmate child work for kind=secondmate. It never
-#   bypasses Treehouse, Orca, or secondmate-home ownership proofs. Only use it
-#   when the captain has explicitly said to discard the work.
+#   bypasses Firstmate-worktree, Orca, or secondmate-home ownership proofs.
+#   Only use it when the captain has explicitly said to discard the work.
 #
 # Transient / stale worktree git lock recovery (teardown-lock-race): a crew process
 # killed mid-git-operation can leave a .git/worktrees/<wt>/index.lock (or, for a

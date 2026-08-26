@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Spawn a direct report: a crewmate in a treehouse or Orca worktree, or a
-# secondmate in its isolated firstmate home.
+# Spawn a direct report: a crewmate in a GitButler, Treehouse, or Orca worktree,
+# or a secondmate in its isolated firstmate home.
 # Usage: fm-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--project-key <key>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>]
 #        fm-spawn.sh <task-id> <project-dir> --scout [--project-key <key>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>]
 #        fm-spawn.sh <task-id> [<firstmate-home>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] --secondmate
@@ -37,8 +37,8 @@
 #   then tmux.
 #   Spawn-capable backends are the reference tmux adapter and experimental
 #   herdr, zellij, orca, and cmux. Orca owns both the task worktree and
-#   terminal, so ship/scout Orca spawns do not allocate a firstmate worktree; cmux is a
-#   session provider only, exactly like herdr/zellij, so it does.
+#   terminal, so ship/scout Orca spawns do not allocate a Firstmate worktree;
+#   cmux is a session provider only, exactly like herdr/zellij, so it does.
 #   Non-orca ship/scout isolation uses GitButler worktrees when but is present
 #   and capable, else treehouse get (bin/fm-worktree-lib.sh). An
 #   auto-detected herdr or cmux spawn prints a loud stderr notice;
@@ -65,8 +65,8 @@
 #   plus authoritative metadata may replace one exact agent-free husk in place.
 #   The journal, visible token, and labels alone are never endpoint or ownership
 #   authority, and every ambiguous recovery stays on the flat fallback after
-#   duplicate-agent risk is independently absent. Treehouse allocation and task
-#   metadata are unchanged.
+#   duplicate-agent risk is independently absent. Worktree-provider allocation
+#   and task metadata are unchanged by this presentation projection.
 #   A clean projected create or exact resume makes one bounded attempt to hold
 #   the one session-scoped presentation-order lock (keyed by named session plus
 #   canonical socket, outside any home's state/) through launch handoff. Lock
@@ -147,8 +147,10 @@
 # .fm-worktree-owner marker immediately after validating the allocated path and
 # before publishing metadata or launching the worker. The marker and metadata
 # share a per-spawn token, so teardown can reject a recycled path even when a
-# later task reuses the same id. Orca worktrees keep their backend id/path proof,
-# and secondmate homes keep their .fm-secondmate-home proof instead.
+# later task reuses the same id. GitButler worktrees additionally record
+# worktree_provider=but; its absence means the Treehouse compatibility path.
+# Orca worktrees keep their backend id/path proof, and secondmate homes keep
+# their .fm-secondmate-home proof instead.
 # Per-harness turn-end hooks are installed automatically; some live outside the worktree.
 # a firstmate-owned global hook and registry, and a gitignored per-task pointer.
 # grok uses a firstmate-owned global hook under ${GROK_HOME:-$HOME/.grok}/hooks
@@ -1640,9 +1642,10 @@ case "$BACKEND" in
     # #134 robustness (tmux): fm_backend_tmux_create_task captures a stable window
     # id and pins the window name (automatic-rename/allow-rename off) so a captain's
     # non-default tmux config cannot rename the window away from fm-<id> once
-    # treehouse cd's into the worktree. WT_TARGET carries that stable id for the
-    # rename-critical worktree-detection steps below; the persisted window= handle
-    # stays $T (the name form), which is safe now that rename is disabled.
+    # the provider moves the shell into the worktree. WT_TARGET carries that
+    # stable id for the rename-critical worktree-detection steps below; the
+    # persisted window= handle stays $T (the name form), which is safe now that
+    # rename is disabled.
     WID=$(fm_backend_tmux_create_task "$SES" "$W" "$PROJ_ABS") || exit 1
     WT_TARGET="$WID"
     ;;
@@ -1862,8 +1865,9 @@ fi
 # #134 robustness: only tmux needs a worktree-detection target distinct from $T -
 # its rename-safe stable window id, set as WT_TARGET=$WID in the tmux branch above.
 # Every other backend addresses its pane/surface by the id already in $T, so default
-# WT_TARGET to $T for them (and for any future backend) - the shared treehouse-get +
-# worktree-detection steps below must never reference an unbound WT_TARGET under set -u.
+# WT_TARGET to $T for them (and for any future backend) - the shared provider
+# transition and worktree-detection steps below must never reference an unbound
+# WT_TARGET under set -u.
 : "${WT_TARGET:=$T}"
 spawn_send_text_line() {  # <target> <text>
   case "$BACKEND" in

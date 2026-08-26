@@ -3,10 +3,11 @@
 # Usage: . bin/fm-worktree-lib.sh
 #
 # Firstmate prefers GitButler-linked git worktrees when `but` is present and
-# git worktrees work. GitButler 0.22 has no worktree-create CLI, so the
-# but path creates and removes those worktrees with `git worktree add/remove`.
-# Treehouse remains the fallback when `but` is missing or git worktrees cannot
-# be created, and it still owns durable secondmate home leases.
+# Git exposes its worktree command. GitButler 0.22 has no worktree-create CLI,
+# so the but path creates and removes those worktrees with
+# `git worktree add/remove`.
+# Treehouse remains the fallback when `but` is missing or Git does not expose
+# its worktree command, and it still owns durable secondmate home leases.
 # FM_WORKTREE_PROVIDER=but|treehouse pins the choice (tests); unset is auto.
 # FM_BUT_WORKTREE_ROOT overrides the but-path pool (tests).
 # This file is the single owner of provider selection, but-path add/remove,

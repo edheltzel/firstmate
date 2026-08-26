@@ -136,7 +136,7 @@ Codex App support is recorded in `docs/codex-app-backend.md`; it is not selectab
 
 ## Worktrees, not branches in your checkout
 
-Crewmates never intentionally touch your project clone; [treehouse](https://github.com/kunchenguid/treehouse) pools clean worktrees for tmux, herdr, zellij, and cmux tasks, while Orca creates its own worktrees for `backend=orca`.
+Crewmates never intentionally touch your project clone; Firstmate allocates clean disposable worktrees for tmux, herdr, zellij, and cmux tasks according to the provider selection owned by [`configuration.md`](configuration.md#runtime-backend-configbackend--fm_backend), while Orca creates its own worktrees for `backend=orca`.
 For ship and scout work, `fm-spawn.sh` refuses to launch unless the resolved task path is a real git worktree root that is distinct from the project primary checkout.
 
 The firstmate repo has one extra exposure because it can dispatch crewmates to work on itself.
@@ -148,7 +148,7 @@ Only a named non-default branch checked out in `FM_ROOT` is a worktree tangle.
 `fm-guard.sh` prints the repair command on the next mutable fleet action, while `bin/fm-session-start.sh` reports the same condition through bootstrap as a `TANGLE:` line at session start.
 If another live session holds the fleet lock, both surfaces keep the alarm but switch to read-only wording with no repair command.
 Ship briefs also tell the crewmate to verify `pwd -P` and `git rev-parse --show-toplevel` before creating `fm/<id>`, then stop with a blocked status if it landed in the primary checkout.
-Teardown verifies that a pooled Treehouse worktree still belongs to the exact task before returning it, so a recycled or mismatched worktree refuses even when discard was authorized.
+Teardown verifies that every Firstmate-allocated ship or scout worktree still belongs to the exact task before provider-specific removal or return, so a recycled or mismatched worktree refuses even when discard was authorized.
 
 ## No-mistakes gate authority boundary
 

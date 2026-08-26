@@ -2,9 +2,10 @@
 # Shared worktree-tangle guard for the firstmate-on-itself case.
 # Usage: . bin/fm-tangle-lib.sh
 #
-# Firstmate is a treehouse-pooled git repo of itself: crewmate worktrees and
-# secondmate homes are all linked `git worktree`s of the same repo, while the
-# PRIMARY checkout (the repo root firstmate operates from) is a normal checkout
+# Firstmate can manage linked git worktrees of itself: disposable crewmate
+# worktrees use the selected provider, and Treehouse-leased secondmate homes are
+# linked worktrees of the same repo, while the PRIMARY checkout (the repo root
+# firstmate operates from) is a normal checkout
 # on a real branch - normally the default branch, main. The "worktree tangle"
 # failure mode is a crewmate spawned to work on firstmate ITSELF branching and
 # committing in the primary checkout instead of its own disposable worktree,
