@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Observational Memory — Planetarium</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --font-display: "Fraunces", "Iowan Old Style", Georgia, serif;
+    --font-body: "Fraunces", Georgia, serif;
+    --font-mono: "IBM Plex Mono", "SF Mono", Consolas, monospace;
+    --bg: #071018;
+    --bg-2: #0c1824;
+    --surface: #101c2a;
+    --surface-elevated: #162433;
+    --surface-recessed: #0a141e;
+    --border: rgba(212, 167, 58, 0.14);
+    --border-bright: rgba(232, 214, 176, 0.22);
+    --text: #f3ead6;
+    --text-dim: #9a8f78;
+    --gold: #d4a73a;
+    --gold-dim: rgba(212, 167, 58, 0.12);
+    --cream: #e8d6b0;
+    --ring-outer: #6b8ca8;
+    --ring-mid: #d4a73a;
+    --ring-core: #c45c26;
+    --ok: #7ea36a;
+    --warn: #c9a227;
+    --bad: #c45c26;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4efe4;
+      --bg-2: #ebe3d2;
+      --surface: #fffaf0;
+      --surface-elevated: #fffdf8;
+      --surface-recessed: #e7ddc8;
+      --border: rgba(48, 36, 16, 0.12);
+      --border-bright: rgba(48, 36, 16, 0.22);
+      --text: #1d170e;
+      --text-dim: #6b5d45;
+      --gold: #8a6914;
+      --gold-dim: rgba(138, 105, 20, 0.1);
+      --cream: #3b2f18;
+      --ring-outer: #3d5a73;
+      --ring-mid: #8a6914;
+      --ring-core: #9a3d14;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    min-height: 100vh;
+    color: var(--text);
+    font-family: var(--font-body);
+    background:
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(212,167,58,0.08), transparent 50%),
+      radial-gradient(ellipse 60% 40% at 80% 80%, rgba(61,90,115,0.18), transparent 45%),
+      var(--bg);
+    overflow-x: hidden;
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image: radial-gradient(1px 1px at 12% 18%, var(--cream) 50%, transparent 51%),
+      radial-gradient(1px 1px at 28% 72%, var(--cream) 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 63% 22%, var(--gold) 50%, transparent 51%),
+      radial-gradient(1px 1px at 81% 58%, var(--cream) 50%, transparent 51%),
+      radial-gradient(1px 1px at 44% 41%, var(--cream) 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 7% 88%, var(--gold) 50%, transparent 51%),
+      radial-gradient(1px 1px at 92% 12%, var(--cream) 50%, transparent 51%);
+    opacity: 0.35;
+    z-index: 0;
+  }
+  .wrap { position: relative; z-index: 1; max-width: 1120px; margin: 0 auto; padding: 36px 24px 80px; }
+  .wrap > * { min-width: 0; }
+  header.hero { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 40px; align-items: center; margin-bottom: 56px; }
+  .kicker {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 14px;
+  }
+  h1 {
+    font-family: var(--font-display);
+    font-size: clamp(40px, 6vw, 68px);
+    font-weight: 600;
+    line-height: 0.95;
+    letter-spacing: -0.03em;
+    margin-bottom: 16px;
+  }
+  .lead { font-size: 20px; line-height: 1.45; color: var(--cream); max-width: 34ch; }
+  .lead em { font-style: italic; color: var(--gold); }
+  nav.toc {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 28px;
+  }
+  nav.toc a {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    text-decoration: none;
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    border-radius: 999px;
+  }
+  nav.toc a:hover { color: var(--gold); border-color: var(--gold); }
+  .dome {
+    position: relative;
+    aspect-ratio: 1;
+    max-width: 460px;
+    margin: 0 auto;
+  }
+  .dome svg { width: 100%; height: 100%; display: block; }
+  .ring-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    fill: var(--text-dim);
+  }
+  section { margin: 56px 0; }
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--gold);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .section-label::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  h2 {
+    font-size: clamp(28px, 4vw, 40px);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    margin-bottom: 18px;
+    max-width: 22ch;
+  }
+  p.body { font-size: 17px; line-height: 1.65; color: var(--text-dim); max-width: 68ch; margin-bottom: 16px; }
+  .ve-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 20px;
+    min-width: 0;
+    overflow-wrap: break-word;
+  }
+  .ve-card--hero {
+    background: color-mix(in srgb, var(--surface) 88%, var(--gold) 12%);
+    border-color: color-mix(in srgb, var(--border) 40%, var(--gold) 60%);
+    box-shadow: 0 18px 50px rgba(0,0,0,0.18);
+  }
+  .ve-card--recessed {
+    background: var(--surface-recessed);
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
+  }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid-3 > *, .grid-2 > * { min-width: 0; }
+  .ve-card h3 { font-size: 20px; margin-bottom: 8px; }
+  .ve-card p, .ve-card li { font-size: 14px; line-height: 1.55; color: var(--text-dim); }
+  .ve-card ul { list-style: none; }
+  .ve-card li { padding-left: 14px; position: relative; margin: 6px 0; }
+  .ve-card li::before { content: "·"; position: absolute; left: 0; color: var(--gold); }
+  .mono { font-family: var(--font-mono); font-size: 12px; color: var(--gold); }
+  .orbit {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    overflow-x: auto;
+    padding-bottom: 6px;
+  }
+  .orbit-step {
+    min-width: 148px;
+    flex-shrink: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    text-align: left;
+  }
+  .orbit-step small { display: block; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold); margin-bottom: 6px; }
+  .orbit-step strong { display: block; font-size: 15px; margin-bottom: 6px; }
+  .orbit-step span { display: block; font-size: 12px; color: var(--text-dim); line-height: 1.45; }
+  .orbit-arrow { display: flex; align-items: center; color: var(--gold); padding: 0 8px; flex-shrink: 0; font-size: 18px; }
+  .log {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: var(--surface-recessed);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    color: var(--cream);
+  }
+  .pri-hi { color: #e07a3d; }
+  .pri-mid { color: var(--gold); }
+  .table-wrap { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .table-scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    text-align: left;
+    padding: 12px 14px;
+    background: var(--surface-elevated);
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--border-bright);
+  }
+  td { padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:nth-child(even) td { background: color-mix(in srgb, var(--surface) 88%, var(--gold) 12%); }
+  tr:last-child td { border-bottom: none; }
+  .status {
+    display: inline-flex;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+  .status--om { background: var(--gold-dim); color: var(--gold); }
+  .status--rag { background: rgba(107,140,168,0.16); color: var(--ring-outer); }
+  .reading a { color: var(--gold); }
+  .reading ol { padding-left: 1.4em; }
+  .reading li { margin: 8px 0; font-size: 15px; line-height: 1.5; }
+  .callout {
+    border-left: 3px solid var(--gold);
+    background: var(--surface);
+    padding: 16px 18px;
+    border-radius: 0 10px 10px 0;
+    color: var(--text-dim);
+    font-size: 15px;
+    line-height: 1.55;
+  }
+  footer { margin-top: 72px; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  .hero, section { animation: fadeUp 0.55s ease both; }
+  section { animation-delay: calc(var(--i, 0) * 0.05s); }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+  @media (max-width: 860px) {
+    header.hero, .grid-3, .grid-2 { grid-template-columns: 1fr; }
+    .orbit-arrow { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div>
+      <p class="kicker">Mastra · planetarium</p>
+      <h1>A sky of what already happened.</h1>
+      <p class="lead">Observational Memory does not search the dark. It <em>keeps a star chart</em>: dated notes stay in the prompt, raw history burns off, and the prefix stays cacheable.</p>
+      <nav class="toc" aria-label="Sections">
+        <a href="#dome">The dome</a>
+        <a href="#cycle">The cycle</a>
+        <a href="#log">The log</a>
+        <a href="#vs">Versus RAG</a>
+        <a href="#recall">Versus Recall</a>
+        <a href="#read">Reading</a>
+      </nav>
+    </div>
+    <div class="dome" id="dome" aria-hidden="true">
+      <svg viewBox="0 0 400 400">
+        <defs>
+          <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#d4a73a" stop-opacity="0.18"/>
+            <stop offset="70%" stop-color="#d4a73a" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <circle cx="200" cy="200" r="190" fill="url(#glow)"/>
+        <circle cx="200" cy="200" r="168" fill="none" stroke="#6b8ca8" stroke-width="1.2" stroke-dasharray="3 7" opacity="0.7"/>
+        <circle cx="200" cy="200" r="118" fill="none" stroke="#d4a73a" stroke-width="1.6"/>
+        <circle cx="200" cy="200" r="68" fill="none" stroke="#c45c26" stroke-width="2"/>
+        <circle cx="200" cy="200" r="18" fill="#d4a73a"/>
+        <circle cx="318" cy="112" r="2.4" fill="#e8d6b0"/>
+        <circle cx="286" cy="278" r="2" fill="#e8d6b0"/>
+        <circle cx="124" cy="86" r="1.8" fill="#d4a73a"/>
+        <circle cx="92" cy="230" r="2.2" fill="#e8d6b0"/>
+        <circle cx="248" cy="154" r="2" fill="#d4a73a"/>
+        <circle cx="168" cy="292" r="1.6" fill="#e8d6b0"/>
+        <text x="200" y="38" text-anchor="middle" class="ring-label">raw history · 30k</text>
+        <text x="200" y="96" text-anchor="middle" class="ring-label">observations · 40k</text>
+        <text x="200" y="148" text-anchor="middle" class="ring-label">reflector core</text>
+      </svg>
+    </div>
+  </header>
+
+  <section style="--i:1">
+    <p class="section-label">Three orbits</p>
+    <h2>The agent never remembers every word.</h2>
+    <p class="body">Mastra (often heard as Maestra) ships Observational Memory in <span class="mono">@mastra/memory</span> 1.1.0. Two background agents watch the thread. The main model sees a stable log, not a retrieved pile.</p>
+    <div class="grid-3">
+      <article class="ve-card">
+        <p class="mono">Outer ring</p>
+        <h3>Recent messages</h3>
+        <p>Exact turns still in play. Grows toward ~30k tokens, then most of it is burned into notes.</p>
+      </article>
+      <article class="ve-card ve-card--hero">
+        <p class="mono">Middle ring</p>
+        <h3>Observations</h3>
+        <p>The Observer writes dated, prioritized notes. Those notes stay in context. The raw messages they came from are dropped.</p>
+      </article>
+      <article class="ve-card">
+        <p class="mono">Core</p>
+        <h3>Reflections</h3>
+        <p>At ~40k observation tokens the Reflector rewrites the whole log. Not a third growing layer. A reset that keeps recent detail.</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="cycle" style="--i:2">
+    <p class="section-label">Observe, shrink, repeat</p>
+    <h2>The context window oscillates. It does not sprawl.</h2>
+    <div class="orbit">
+      <div class="orbit-step"><small>0–30k</small><strong>History grows</strong><span>Observer buffers in the background every ~6k tokens.</span></div>
+      <div class="orbit-arrow" aria-hidden="true">→</div>
+      <div class="orbit-step"><small>30k</small><strong>Activate</strong><span>Notes append. Only ~6k recent history remains.</span></div>
+      <div class="orbit-arrow" aria-hidden="true">→</div>
+      <div class="orbit-step"><small>Repeat</small><strong>Slow log</strong><span>Each cycle adds a thin band of observations, not another transcript.</span></div>
+      <div class="orbit-arrow" aria-hidden="true">→</div>
+      <div class="orbit-step"><small>40k</small><strong>Reflect</strong><span>The entire observation block is rewritten. Cache misses here, rarely.</span></div>
+    </div>
+    <p class="body" style="margin-top:20px">Prompt cache is the architecture. New user text appends: full prefix hit. Observation appends notes: partial hit. Reflection rewrites the sky: miss. RAG injects a new constellation every turn, so the prefix never stays still.</p>
+  </section>
+
+  <section id="log" style="--i:3">
+    <p class="section-label">Text is the interface</p>
+    <h2>Not a graph. A night log.</h2>
+    <pre class="log"><span class="pri-hi">Date: 2026-01-15</span>
+- <span class="pri-hi">●</span> 12:10 User is building a Next.js app with Supabase auth, due in 1 week (22 Jan)
+  - <span class="pri-hi">●</span> 12:10 App uses server components with client-side hydration
+  - <span class="pri-mid">●</span> 12:12 User asked about middleware for protected routes
+  - <span class="pri-hi">●</span> 12:15 User stated the app name is "Acme Dashboard"</pre>
+    <div class="grid-2" style="margin-top:16px">
+      <article class="ve-card">
+        <h3>Three dates</h3>
+        <ul>
+          <li>When the note was written</li>
+          <li>The date mentioned in the content</li>
+          <li>A relative offset (“2 days from today”)</li>
+        </ul>
+      </article>
+      <article class="ve-card">
+        <h3>Priority as log level</h3>
+        <ul>
+          <li>High: keep through reflection</li>
+          <li>Maybe: useful now</li>
+          <li>Info: fine to compress later</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <section id="vs" style="--i:4">
+    <p class="section-label">Trade</p>
+    <h2>Stay on task, or search a corpus.</h2>
+    <div class="table-wrap">
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Need</th>
+              <th>Observational Memory</th>
+              <th>Classic RAG / Recall-style search</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Long tool-heavy session</td>
+              <td><span class="status status--om">Designed for this</span></td>
+              <td><span class="status status--rag">Retrieves, does not compress</span></td>
+            </tr>
+            <tr>
+              <td>Prompt cache</td>
+              <td><span class="status status--om">Stable prefix</span></td>
+              <td><span class="status status--rag">New chunks every turn</span></td>
+            </tr>
+            <tr>
+              <td>Facts the agent never saw</td>
+              <td><span class="status status--rag">Blind</span></td>
+              <td><span class="status status--om">This is the job</span></td>
+            </tr>
+            <tr>
+              <td>Verbatim quotes</td>
+              <td>Gone unless <code>retrieval: true</code></td>
+              <td>Can return the source chunk</td>
+            </tr>
+            <tr>
+              <td>Debuggability</td>
+              <td>Read the log</td>
+              <td>Inspect hits and ranks</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="recall" style="--i:5">
+    <p class="section-label">Your stack</p>
+    <h2>Recall is a library. OM is a sky chart.</h2>
+    <p class="body">Atlas Recall is a searchable memory store: extract, embed, frecency, skills, dump, doctor. OM is an in-prompt compressor. A scout is scoring the overlap now. Early read: do not replace Recall with OM. Steal the observation log for live session rot; keep Recall for cross-session search.</p>
+    <div class="callout">Workers still out: a plugin hunt on Pi / Oh My Pi, and a Recall eval. This dome is the learning surface from Mastra’s own docs and research writeup. I will fold their findings in when they land.</div>
+  </section>
+
+  <section id="read" class="reading" style="--i:6">
+    <p class="section-label">Continue</p>
+    <h2>Read in this order.</h2>
+    <ol>
+      <li><a href="https://mastra.ai/docs/memory/observational-memory">Official docs</a></li>
+      <li><a href="https://mastra.ai/blog/observational-memory">Announcement, Tyler Barnes, 9 Feb 2026</a></li>
+      <li><a href="https://mastra.ai/research/observational-memory">LongMemEval research page</a></li>
+      <li><a href="https://github.com/mastra-ai/mastra/tree/main/packages/memory/src/processors/observational-memory">Implementation</a></li>
+      <li><a href="https://arxiv.org/abs/2410.10813">LongMemEval paper</a></li>
+      <li><a href="https://venturebeat.com/data/observational-memory-cuts-ai-agent-costs-10x-and-outscores-rag-on-long">VentureBeat</a></li>
+      <li>Local notes: <span class="mono">/Users/ed/Developer/Research/mastra-observational-memory/notes.md</span></li>
+    </ol>
+  </section>
+
+  <footer>
+    Built from Mastra docs, blog, and research page. Plugin and Recall reports are still in flight. Dark-first planetarium, gold on navy.
+  </footer>
+</div>
+</body>
+</html>
