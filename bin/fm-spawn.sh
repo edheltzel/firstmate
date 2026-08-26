@@ -37,8 +37,10 @@
 #   then tmux.
 #   Spawn-capable backends are the reference tmux adapter and experimental
 #   herdr, zellij, orca, and cmux. Orca owns both the task worktree and
-#   terminal, so ship/scout Orca spawns do not run treehouse get; cmux is a
-#   session provider only, exactly like herdr/zellij, so it does. An
+#   terminal, so ship/scout Orca spawns do not allocate a firstmate worktree; cmux is a
+#   session provider only, exactly like herdr/zellij, so it does.
+#   Non-orca ship/scout isolation uses GitButler worktrees when but is present
+#   and capable, else treehouse get (bin/fm-worktree-lib.sh). An
 #   auto-detected herdr or cmux spawn prints a loud stderr notice;
 #   auto-detected tmux stays silent; zellij and orca are never auto-detected.
 #   codex-app is not a known backend yet; docs/codex-app-backend.md owns that
@@ -141,7 +143,7 @@
 #     __OPINPUT__   absolute path to the canonical operational-input encoder
 # Verified per-harness turn-end hooks are installed automatically where enabled; some live outside the worktree.
 # Kimi uses one surgically installed Firstmate region in $HOME/.kimi-code/config.toml,
-# Every Treehouse-backed ship/scout spawn writes a gitignored
+# Every firstmate-allocated ship/scout spawn writes a gitignored
 # .fm-worktree-owner marker immediately after validating the allocated path and
 # before publishing metadata or launching the worker. The marker and metadata
 # share a per-spawn token, so teardown can reject a recycled path even when a
@@ -222,6 +224,8 @@ WORKTREE_OWNER_MARKER=".fm-worktree-owner"
 . "$SCRIPT_DIR/fm-secondmate-nudge-lib.sh"
 # shellcheck source=bin/fm-config-inherit-lib.sh
 . "$SCRIPT_DIR/fm-config-inherit-lib.sh"
+# shellcheck source=bin/fm-worktree-lib.sh
+. "$SCRIPT_DIR/fm-worktree-lib.sh"
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
 # shellcheck source=bin/fm-gate-refuse-lib.sh
@@ -651,6 +655,8 @@ if [ "$BACKEND" = orca ]; then
   fm_backend_orca_runtime_check || exit 1
 fi
 ORCA_ABORT_CLEANUP=0
+BUT_WORKTREE_CREATED=0
+WORKTREE_PROVIDER=
 ORCA_WORKTREE_ID=
 ORCA_TERMINAL=
 HERDR_PROJECTION_ABORT_CLEANUP=0
@@ -730,6 +736,10 @@ spawn_abort_cleanup() {
   if [ "$HERDR_PRESENTATION_ORDER_LOCK_HELD" = 1 ]; then
     HERDR_PRESENTATION_ORDER_LOCK_HELD=0
     fm_lock_release "$HERDR_PRESENTATION_ORDER_LOCK" || true
+  fi
+  if [ "$status" -ne 0 ] && [ "${BUT_WORKTREE_CREATED:-0}" = 1 ]      && [ -n "${WT:-}" ] && [ -n "${PROJ_ABS:-}" ]; then
+    BUT_WORKTREE_CREATED=0
+    fm_worktree_but_remove "$PROJ_ABS" "$WT" 2>/dev/null || true
   fi
   if [ "$ORCA_ABORT_CLEANUP" = 1 ]; then
     ORCA_ABORT_CLEANUP=0
@@ -1855,8 +1865,43 @@ kimi_spawn_fail() {  # <detail>
 }
 
 if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
-  spawn_send_text_line "$WT_TARGET" 'treehouse get'
+  WORKTREE_PROVIDER=$(fm_worktree_provider) || exit 1
+  if [ "$WORKTREE_PROVIDER" = but ]; then
+    WT=$(fm_worktree_but_add "$PROJ_ABS" "$ID") || exit 1
+    BUT_WORKTREE_CREATED=1
+    spawn_send_text_line "$WT_TARGET" "cd $(shell_quote "$WT")"
+  else
+    spawn_send_text_line "$WT_TARGET" 'treehouse get'
+  fi
 
+  if [ "$WORKTREE_PROVIDER" = but ]; then
+    wt_expect=$(real_path_or_raw "$WT")
+    settled=
+    candidate=""
+    for _ in $(seq 1 60); do
+      p=$(spawn_current_path "$WT_TARGET" || true)
+      if [ -n "$p" ]; then
+        p_real=$(real_path_or_raw "$p")
+        if [ "$p_real" = "$wt_expect" ]; then
+          if [ -n "$candidate" ] && [ "$p_real" = "$candidate" ]; then
+            settled=1
+            break
+          fi
+          candidate="$p_real"
+        else
+          candidate=""
+        fi
+      else
+        candidate=""
+      fi
+      sleep 1
+    done
+    if [ -z "$settled" ]; then
+      echo "error: but worktree did not enter $WT within 60s; inspect window $T" >&2
+      exit 1
+    fi
+    validate_spawn_worktree "but worktree" "$T"
+  else
   # Wait for the treehouse subshell: the pane's cwd moves from the project to the worktree.
   # Target the stable window id, not the name: if the name is ever lost (e.g. an
   # automatic-rename slips through), display-message -t <bad-name> falls back to the
@@ -1902,6 +1947,7 @@ if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   fi
 
   validate_spawn_worktree "treehouse get" "$T"
+  fi
   publish_treehouse_worktree_owner || exit 1
 fi
 
@@ -2245,6 +2291,7 @@ META_WINDOW=$T
   [ -z "$YOLO" ] || echo "yolo=$YOLO"
   echo "tasktmp=$TASK_TMP"
   [ -z "$WORKTREE_OWNER_TOKEN" ] || echo "worktree_owner_token=$WORKTREE_OWNER_TOKEN"
+  [ "${WORKTREE_PROVIDER:-}" = but ] && echo "worktree_provider=but"
   echo "model=${MODEL:-default}"
   echo "effort=${EFFORT:-default}"
   [ -z "${BUSY_GEN:-}" ] || echo "busy_gen=$BUSY_GEN"
@@ -2288,6 +2335,7 @@ META_WINDOW=$T
   exit 1
 }
 [ "$BACKEND" = orca ] && ORCA_ABORT_CLEANUP=0
+BUT_WORKTREE_CREATED=0
 
 sq_brief=$(shell_quote "$BRIEF")
 sq_turnend=$(shell_quote "$TURNEND")

@@ -7,8 +7,8 @@
 # protocol 14, macOS aarch64), with current protocol-17 metadata evidence in
 # docs/herdr-backend.md, and refined by that document's numbered per-home fleet
 # workspace pass (AGENTS.md task herdr-sm-spaces-k4). Herdr is a
-# session provider ONLY (D3): the worktree provider stays treehouse, exactly
-# like tmux. Sourced only through bin/fm-backend.sh's fm_backend_source in
+# session provider ONLY (D3): worktree isolation is owned by
+# bin/fm-worktree-lib.sh, exactly like tmux. Sourced only through bin/fm-backend.sh's fm_backend_source in
 # normal operation; the unit tests source it directly, so the FM_HOME fallback
 # below keeps that path sane without fm-backend.sh's preamble.
 #

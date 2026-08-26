@@ -413,6 +413,8 @@ if [ -z "$BUSY_GEN" ]; then
 fi
 ORCA_WORKTREE_ID=$(fm_meta_get "$META" orca_worktree_id)
 WORKTREE_OWNER_TOKEN=$(fm_meta_get "$META" worktree_owner_token)
+WORKTREE_PROVIDER=$(fm_meta_get "$META" worktree_provider)
+[ -n "$WORKTREE_PROVIDER" ] || WORKTREE_PROVIDER=treehouse
 ORCA_PATH_MATCH_VERIFIED=0
 ATLAS_VERIFY_OUTPUT=
 
@@ -2251,7 +2253,12 @@ cleanup_firstmate_home_children() {
       rm -f "$child_wt/.claude/settings.local.json" "$child_wt/.opencode/plugins/fm-turn-end.js" \
         "$child_wt/.opencode/plugins/fm-busy-state.js" \
         "$child_wt/.fm-grok-turnend" "$child_wt/.fm-kimi-turnend"
-      if [ -n "$child_proj" ] && [ -d "$child_proj" ] && command -v treehouse >/dev/null 2>&1; then
+      child_provider=$(meta_value "$child_meta" worktree_provider)
+      [ -n "$child_provider" ] || child_provider=treehouse
+      if [ "$child_provider" = but ]; then
+        require_treehouse_worktree_owner "$child_wt" "$child_id" "$child_owner_token" || return 1
+        fm_worktree_but_remove "$child_proj" "$child_wt" || return 1
+      elif [ -n "$child_proj" ] && [ -d "$child_proj" ] && command -v treehouse >/dev/null 2>&1; then
         CHILD_TREEHOUSE_WORKTREE=$child_wt
         CHILD_TREEHOUSE_TASK_ID=$child_id
         CHILD_TREEHOUSE_OWNER_TOKEN=$child_owner_token
@@ -2470,10 +2477,22 @@ elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
   if [ "$FORCE" != "--force" ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ]; then
     post_lock_cleanup_check=validate_worktree_teardown_safety
   fi
+  if [ "$WORKTREE_PROVIDER" = but ]; then
+    if [ -n "$post_lock_cleanup_check" ] && ! "$post_lock_cleanup_check"; then
+      echo "error: GitButler worktree safety check failed for $WT; teardown aborted" >&2
+      exit 1
+    fi
+    require_current_treehouse_worktree_owner || exit 1
+    fm_worktree_but_remove "$PROJ" "$WT" || {
+      echo "error: git worktree remove failed for worktree $WT; teardown aborted" >&2
+      exit 1
+    }
+  else
   teardown_treehouse_return "$WT" "$PROJ" "worktree" "$post_lock_cleanup_check" require_current_treehouse_worktree_owner || {
     echo "error: treehouse return failed for worktree $WT; teardown aborted" >&2
     exit 1
   }
+  fi
 fi
 
 HERDR_PRESENTATION_JOURNAL="$STATE/$ID.herdr-presentation"
