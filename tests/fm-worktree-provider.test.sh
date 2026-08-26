@@ -243,6 +243,55 @@ SH
   pass "but spawn abort reports cleanup failure and preserves recovery metadata"
 }
 
+test_spawn_but_preserves_endpoint_recovery_after_remove() {
+  local rec home proj id fakebin wt log out status tasktmp teardown_out
+  id=but-abort-endpoint-c4
+  rec=$(make_home spawn-but-endpoint-abort "$id")
+  IFS='|' read -r home proj <<EOF
+$rec
+EOF
+  wt="$TMP_ROOT/but-endpoint-abort-wts/$id"
+  fakebin=$(make_spawn_fakebin "$TMP_ROOT/spawn-but-endpoint-abort/fake")
+  log="$TMP_ROOT/spawn-but-endpoint-abort/tmux.log"
+  tasktmp="/tmp/fm-$id"
+  [ ! -e "$tasktmp" ] || fail "endpoint recovery tasktmp fixture already exists: $tasktmp"
+  printf 'fixture\n' > "$tasktmp"
+  out=$(
+    FM_ROOT_OVERRIDE='' FM_HOME="$home" \
+      FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
+      FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
+      FM_SPAWN_NO_GUARD=1 TMUX="fake,1,0" \
+      FM_WORKTREE_PROVIDER=but FM_BUT_WORKTREE_ROOT="$TMP_ROOT/but-endpoint-abort-wts" \
+      FM_FAKE_PANE_PATH="$wt" FM_TMUX_LOG="$log" \
+      PATH="$fakebin:$PATH" \
+      "$SPAWN" "$id" "$proj" --mode no-mistakes --yolo off 2>&1
+  )
+  status=$?
+  rm -f "$tasktmp"
+  [ "$status" -ne 0 ] || fail "endpoint recovery spawn fixture should fail after worktree creation"
+  assert_contains "$out" "endpoint recovery metadata preserved at $home/state/$id.meta" \
+    "successful abort worktree removal did not retain endpoint recovery metadata"
+  assert_present "$home/state/$id.meta" \
+    "successful abort worktree removal lost endpoint recovery metadata"
+  assert_absent "$wt" "successful abort cleanup left the worktree path"
+  git -C "$proj" worktree list --porcelain | grep -F "worktree $wt" >/dev/null \
+    && fail "successful abort cleanup left the worktree registered"
+  teardown_out=$(
+    FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" \
+      FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
+      FM_CONFIG_OVERRIDE="$home/config" FM_TEARDOWN_GUARD_DONE=1 \
+      FM_TMUX_LOG="$log" PATH="$fakebin:$PATH" \
+      "$TEARDOWN" "$id" --force 2>&1
+  )
+  status=$?
+  expect_code 0 "$status" "endpoint recovery metadata should support teardown"
+  assert_contains "$teardown_out" "teardown $id complete" \
+    "endpoint recovery teardown did not complete"
+  assert_absent "$home/state/$id.meta" "endpoint recovery teardown retained task metadata"
+  assert_grep "kill-window" "$log" "endpoint recovery teardown did not close the backend endpoint"
+  pass "but spawn abort retains teardown-capable endpoint recovery metadata"
+}
+
 test_teardown_but_removes_git_worktree() {
   local home proj wt called
   home="$TMP_ROOT/td-but/home"
@@ -251,6 +300,7 @@ test_teardown_but_removes_git_worktree() {
   mkdir -p "$home/data" "$home/state" "$home/config" "$home/fakebin"
   fm_git_init_commit "$proj"
   git -C "$proj" branch -M main
+  git -C "$proj" branch fm/task-x1 main
   git -C "$proj" worktree add --quiet --detach "$wt" main
   printf 'version=1\ntask_id=%s\ntoken=%s\n' task-x1 fmw.AAAAAAAAAAAA > "$wt/.fm-worktree-owner"
   fm_write_meta "$home/state/task-x1.meta" \
@@ -282,8 +332,71 @@ SH
   assert_absent "$wt" "but teardown left the git worktree"
   git -C "$proj" worktree list | grep -F "$wt" >/dev/null \
     && fail "but teardown left a registered git worktree"
+  git -C "$proj" show-ref --verify --quiet refs/heads/fm/task-x1 \
+    || fail "detached but teardown deleted an unowned same-id branch"
   assert_absent "$called" "but teardown called treehouse return"
-  pass "but teardown removes the git worktree and does not call treehouse"
+  pass "but teardown removes detached worktrees without deleting unowned branches"
+}
+
+test_teardown_but_missing_path_preserves_registration_recovery() {
+  local home proj wt fakebin log out status real_git remove_log
+  home="$TMP_ROOT/td-missing/home"
+  proj="$TMP_ROOT/td-missing/project"
+  wt="$TMP_ROOT/td-missing/wt"
+  fakebin="$TMP_ROOT/td-missing/fakebin"
+  log="$TMP_ROOT/td-missing/tmux.log"
+  remove_log="$TMP_ROOT/td-missing/remove.log"
+  mkdir -p "$home/data" "$home/state" "$home/config" "$fakebin"
+  fm_git_init_commit "$proj"
+  git -C "$proj" branch -M main
+  git -C "$proj" worktree add --quiet --detach "$wt" main
+  printf 'version=1\ntask_id=%s\ntoken=%s\n' task-missing-c5 fmw.EEEEEEEEEEEE > "$wt/.fm-worktree-owner"
+  fm_write_meta "$home/state/task-missing-c5.meta" \
+    "window=firstmate:fm-task-missing-c5" \
+    "endpoint_task_id=task-missing-c5" \
+    "worktree=$wt" \
+    "project=$proj" \
+    "kind=ship" \
+    "mode=local-only" \
+    "worktree_provider=but" \
+    "worktree_owner_token=fmw.EEEEEEEEEEEE"
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${FM_TMUX_LOG:?}"
+exit 0
+SH
+  real_git=$(command -v git)
+  cat > "$fakebin/git" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -C ] && [ "${3:-}" = worktree ] && [ "${4:-}" = remove ]; then
+  printf '%s\n' "$*" >> "${FM_GIT_REMOVE_LOG:?}"
+  echo "fatal: simulated stale worktree registration removal failure" >&2
+  exit 1
+fi
+exec "${FM_REAL_GIT:?}" "$@"
+SH
+  chmod +x "$fakebin/tmux" "$fakebin/git"
+  rm -rf "$wt"
+  set +e
+  out=$(
+    FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" \
+      FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
+      FM_CONFIG_OVERRIDE="$home/config" FM_TEARDOWN_GUARD_DONE=1 \
+      FM_TMUX_LOG="$log" FM_GIT_REMOVE_LOG="$remove_log" FM_REAL_GIT="$real_git" \
+      PATH="$fakebin:$PATH" \
+      "$TEARDOWN" task-missing-c5 --force 2>&1
+  )
+  status=$?
+  set -e
+  expect_code 1 "$status" "registered missing but path should refuse when exact removal fails"
+  assert_present "$remove_log" "missing but path cleanup did not attempt exact registration removal"
+  assert_present "$home/state/task-missing-c5.meta" \
+    "missing but path refusal dropped recovery metadata"
+  assert_contains "$out" "preserving metadata" \
+    "missing but path refusal did not report retained recovery metadata"
+  [ ! -e "$log" ] || [ ! -s "$log" ] \
+    || fail "missing but path refusal closed the endpoint before registration cleanup"
+  pass "missing but paths preserve recovery when exact registration removal fails"
 }
 
 test_teardown_but_still_requires_owner() {
@@ -332,7 +445,7 @@ SH
 }
 
 test_forced_secondmate_but_child_runs_full_cleanup() {
-  local home subhome proj wt fakebin parent_id child_id pid out status
+  local home subhome proj wt fakebin parent_id child_id pid out status head nm_log
   parent_id=but-parent-d4
   child_id=but-child-d4
   home="$TMP_ROOT/child-but/home"
@@ -375,7 +488,27 @@ if [ "${1:-}" = display-message ] && [ "${*: -1}" = '#{pane_pid}' ]; then
 fi
 exit 0
 SH
-  chmod +x "$fakebin/tmux"
+  cat > "$fakebin/no-mistakes" <<'SH'
+#!/usr/bin/env bash
+case "${1:-} ${2:-}" in
+  "axi status")
+    if [ -s "${FM_FAKE_NM_ABORT_LOG:?}" ]; then
+      printf 'run:\n  id: "01CHILD"\n  outcome: cancelled\n'
+    else
+      printf 'run:\n  id: "01CHILD"\n  branch: %s\n  status: awaiting_approval\n  awaiting_agent: parked 2m\n  head: "%s"\n  pr: ""\n  findings: none\ngate: review\n' \
+        "${FM_FAKE_NM_BRANCH:?}" "${FM_FAKE_NM_HEAD:?}"
+    fi
+    ;;
+  "axi abort")
+    shift 2
+    printf 'abort %s\n' "$*" >> "${FM_FAKE_NM_ABORT_LOG:?}"
+    ;;
+esac
+exit 0
+SH
+  chmod +x "$fakebin/tmux" "$fakebin/no-mistakes"
+  head=$(git -C "$wt" rev-parse HEAD)
+  nm_log="$TMP_ROOT/child-but/no-mistakes-abort.log"
   perl -e 'setpgrp(0, 0); chdir shift or die; exec "sleep", "300"' "$wt" &
   pid=$!
   disown
@@ -385,7 +518,9 @@ SH
     FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" \
       FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
       FM_CONFIG_OVERRIDE="$home/config" FM_TEARDOWN_GUARD_DONE=1 \
-      FM_FAKE_PANE_PID="$pid" PATH="$fakebin:$PATH" \
+      FM_FAKE_PANE_PID="$pid" FM_FAKE_NM_BRANCH="fm/$child_id" \
+      FM_FAKE_NM_HEAD="$head" FM_FAKE_NM_ABORT_LOG="$nm_log" \
+      PATH="$fakebin:$PATH" \
       "$TEARDOWN" "$parent_id" --force 2>&1
   )
   status=$?
@@ -396,6 +531,10 @@ SH
   fi
   assert_contains "$out" "reaping leaked worktree process" \
     "forced secondmate teardown did not run the ordinary process reap"
+  assert_grep "abort --run 01CHILD" "$nm_log" \
+    "forced secondmate teardown orphaned the child's parked no-mistakes run"
+  assert_contains "$out" "no-mistakes run for $child_id is parked at a gate" \
+    "forced secondmate teardown did not run the child-scoped parked-run cleanup"
   assert_absent "$wt" "forced secondmate teardown left the But child worktree"
   git -C "$proj" worktree list | grep -F "$wt" >/dev/null \
     && fail "forced secondmate teardown left the But child registered"
@@ -473,7 +612,9 @@ test_required_tools_follow_provider
 test_spawn_but_creates_git_worktree
 test_spawn_treehouse_still_types_get
 test_spawn_but_preserves_recovery_when_remove_fails
+test_spawn_but_preserves_endpoint_recovery_after_remove
 test_teardown_but_removes_git_worktree
+test_teardown_but_missing_path_preserves_registration_recovery
 test_teardown_but_still_requires_owner
 test_forced_secondmate_but_child_runs_full_cleanup
 test_forced_secondmate_refuses_unknown_child_provider_before_cleanup

@@ -1669,7 +1669,8 @@ teardown_but_worktree_cleanup() {  # <project> <worktree> <task-id> <owner-token
     echo "error: cannot detach task worktree $worktree before removal" >&2
     return 1
   fi
-  if git -C "$project" show-ref --verify --quiet "refs/heads/$task_branch"; then
+  if [ "$branch" = "$task_branch" ] \
+     && git -C "$project" show-ref --verify --quiet "refs/heads/$task_branch"; then
     if ! git -C "$project" branch -D "$task_branch" >/dev/null 2>&1; then
       echo "error: cannot delete task branch $task_branch before removing $worktree" >&2
       return 1
@@ -1687,6 +1688,56 @@ teardown_but_worktree_cleanup() {  # <project> <worktree> <task-id> <owner-token
     echo "error: git worktree remove failed for worktree $worktree; teardown aborted" >&2
     return 1
   fi
+}
+
+preflight_but_missing_worktree_cleanup() {  # <project> <worktree> <task-id>
+  local project=$1 worktree=$2 task_id=$3 registration_rc
+  if [ -z "$project" ] || [ -z "$worktree" ] || [ -e "$worktree" ] || [ -L "$worktree" ]; then
+    echo "REFUSED: task $task_id has an invalid missing GitButler worktree binding; preserving metadata." >&2
+    return 1
+  fi
+  if fm_worktree_but_registered "$project" "$worktree"; then
+    return 0
+  else
+    registration_rc=$?
+  fi
+  [ "$registration_rc" -eq 1 ] && return 0
+  echo "REFUSED: cannot inspect Git's worktree registration for task $task_id at $worktree; preserving metadata." >&2
+  return 1
+}
+
+teardown_but_missing_worktree_cleanup() {  # <project> <worktree> <task-id>
+  local project=$1 worktree=$2 task_id=$3 registration_rc
+  preflight_but_missing_worktree_cleanup "$project" "$worktree" "$task_id" || return 1
+  if fm_worktree_but_registered "$project" "$worktree"; then
+    if ! fm_worktree_but_remove "$project" "$worktree"; then
+      if fm_worktree_but_registered "$project" "$worktree"; then
+        echo "error: stale Git worktree registration for $worktree could not be removed; preserving metadata for $task_id" >&2
+        return 1
+      else
+        registration_rc=$?
+        if [ "$registration_rc" -ne 1 ]; then
+          echo "REFUSED: cannot confirm stale Git worktree registration removal for task $task_id; preserving metadata." >&2
+          return 1
+        fi
+      fi
+    fi
+  else
+    registration_rc=$?
+    [ "$registration_rc" -eq 1 ] || {
+      echo "REFUSED: cannot inspect Git's worktree registration for task $task_id at $worktree; preserving metadata." >&2
+      return 1
+    }
+  fi
+  if fm_worktree_but_registered "$project" "$worktree"; then
+    echo "error: stale Git worktree registration remains for $worktree; preserving metadata for $task_id" >&2
+    return 1
+  else
+    registration_rc=$?
+  fi
+  [ "$registration_rc" -eq 1 ] && return 0
+  echo "REFUSED: cannot confirm Git worktree registration cleanup for task $task_id; preserving metadata." >&2
+  return 1
 }
 
 require_orca_worktree_path_match() {
@@ -2066,13 +2117,13 @@ preflight_firstmate_home_process_event_tree() {
 }
 
 validate_firstmate_home_children_removal() {
-  local home=$1 sub_state child_meta child_id child_wt child_proj child_kind child_home child_backend child_orca_worktree_id child_owner_token
+  local home=$1 sub_state child_meta child_id child_wt child_proj child_kind child_home child_backend child_orca_worktree_id child_owner_token child_provider
   sub_state="$home/state"
   [ -d "$sub_state" ] || return 0
   for child_meta in "$sub_state"/*.meta; do
     [ -e "$child_meta" ] || continue
     child_id=$(basename "$child_meta" .meta)
-    worktree_provider_of_meta "$child_meta" "$child_id" >/dev/null || return 1
+    child_provider=$(worktree_provider_of_meta "$child_meta" "$child_id") || return 1
     fm_backend_validate_task_endpoint "$child_meta" "$child_id" || return 1
     validate_pr_poll_cleanup "$sub_state" "$child_id" || return 1
     child_wt=$(meta_value "$child_meta" worktree)
@@ -2096,6 +2147,9 @@ validate_firstmate_home_children_removal() {
       child_owner_token=$(meta_value "$child_meta" worktree_owner_token)
       validate_child_worktree_for_removal "$child_wt" "$child_proj" >/dev/null || return 1
       require_treehouse_worktree_owner "$child_wt" "$child_id" "$child_owner_token" || return 1
+    elif [ "$child_provider" = but ]; then
+      child_proj=$(meta_value "$child_meta" project)
+      preflight_but_missing_worktree_cleanup "$child_proj" "$child_wt" "$child_id" || return 1
     fi
   done
 }
@@ -2273,8 +2327,10 @@ cleanup_firstmate_home_children() {
       child_tasktmp=$(meta_value "$child_meta" tasktmp)
       (
         ID=$child_id
+        KIND=$child_kind
         BACKEND=$child_backend
         T=$child_t
+        conclude_task_no_mistakes_run "$child_wt"
         reap_task_worktree_processes worktree "$child_wt" "$child_tasktmp"
       ) || return 1
     fi
@@ -2312,13 +2368,19 @@ cleanup_firstmate_home_children() {
           "$child_wt/.fm-grok-turnend" "$child_wt/.fm-kimi-turnend"
       fi
       fm_backend_remove_worktree "$child_backend" "$child_orca_worktree_id" || return 1
+    elif [ "$child_provider" = but ]; then
+      if [ -n "$child_wt" ] && [ -d "$child_wt" ]; then
+        validate_child_worktree_for_removal "$child_wt" "$child_proj" >/dev/null || return 1
+        require_treehouse_worktree_owner "$child_wt" "$child_id" "$child_owner_token" || return 1
+        teardown_but_worktree_cleanup \
+          "$child_proj" "$child_wt" "$child_id" "$child_owner_token" || return 1
+      else
+        teardown_but_missing_worktree_cleanup "$child_proj" "$child_wt" "$child_id" || return 1
+      fi
     elif [ -n "$child_wt" ] && [ -d "$child_wt" ]; then
       validate_child_worktree_for_removal "$child_wt" "$child_proj" >/dev/null || return 1
       require_treehouse_worktree_owner "$child_wt" "$child_id" "$child_owner_token" || return 1
-      if [ "$child_provider" = but ]; then
-        teardown_but_worktree_cleanup \
-          "$child_proj" "$child_wt" "$child_id" "$child_owner_token" || return 1
-      elif [ "$child_provider" = treehouse ]; then
+      if [ "$child_provider" = treehouse ]; then
         rm -f "$child_wt/.claude/settings.local.json" "$child_wt/.opencode/plugins/fm-turn-end.js" \
           "$child_wt/.opencode/plugins/fm-busy-state.js" \
           "$child_wt/.fm-grok-turnend" "$child_wt/.fm-kimi-turnend"
@@ -2476,6 +2538,11 @@ if [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
   fi
 fi
 
+if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ] \
+   && [ "$WORKTREE_PROVIDER" = but ] && [ ! -d "$WT" ]; then
+  preflight_but_missing_worktree_cleanup "$PROJ" "$WT" "$ID" || exit 1
+fi
+
 # Every landed/discard-work refusal above has now passed (or --force skipped
 # them). Fix 1 and Fix 2 (see script header) run here, unconditionally on
 # --force, and before ANY destructive step below - a still-parked run or a
@@ -2523,16 +2590,25 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
   fi
   [ -z "$T_ORCA" ] || fm_backend_kill "$BACKEND" "$T" "$(meta_value "$META" zellij_tab_id)" "fm-$ID" 2>/dev/null || true
   fm_backend_remove_worktree "$BACKEND" "$ORCA_WORKTREE_ID"
+elif [ "$KIND" != secondmate ] && [ "$WORKTREE_PROVIDER" = but ]; then
+  post_lock_cleanup_check=
+  if [ "$FORCE" != "--force" ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ]; then
+    post_lock_cleanup_check=validate_worktree_teardown_safety
+  fi
+  if [ -d "$WT" ]; then
+    require_current_treehouse_worktree_owner || exit 1
+    teardown_but_worktree_cleanup \
+      "$PROJ" "$WT" "$ID" "$WORKTREE_OWNER_TOKEN" "$post_lock_cleanup_check" || exit 1
+  else
+    teardown_but_missing_worktree_cleanup "$PROJ" "$WT" "$ID" || exit 1
+  fi
 elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
   require_current_treehouse_worktree_owner || exit 1
   post_lock_cleanup_check=
   if [ "$FORCE" != "--force" ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ]; then
     post_lock_cleanup_check=validate_worktree_teardown_safety
   fi
-  if [ "$WORKTREE_PROVIDER" = but ]; then
-    teardown_but_worktree_cleanup \
-      "$PROJ" "$WT" "$ID" "$WORKTREE_OWNER_TOKEN" "$post_lock_cleanup_check" || exit 1
-  else
+  if [ "$WORKTREE_PROVIDER" = treehouse ]; then
     branch=$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
     if [ "$branch" != "HEAD" ]; then
       if git -C "$WT" checkout --detach -q 2>/dev/null; then

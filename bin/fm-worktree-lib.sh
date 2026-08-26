@@ -101,3 +101,48 @@ fm_worktree_but_remove() {  # <project> <worktree>
   local project=$1 worktree=$2
   git -C "$project" worktree remove --force "$worktree"
 }
+
+fm_worktree_but_normalize_path() {  # <path>
+  local path=$1 parent base
+  [ -n "$path" ] || return 1
+  case "$path" in
+    /*) ;;
+    *) return 1 ;;
+  esac
+  while [ "$path" != / ] && [ "${path%/}" != "$path" ]; do
+    path=${path%/}
+  done
+  [ "$path" != / ] || {
+    printf '/\n'
+    return 0
+  }
+  parent=$(dirname "$path")
+  base=$(basename "$path")
+  if [ -d "$parent" ]; then
+    parent=$(cd "$parent" && pwd -P) || return 1
+  fi
+  if [ "$parent" = / ]; then
+    printf '/%s\n' "$base"
+  else
+    printf '%s/%s\n' "$parent" "$base"
+  fi
+}
+
+fm_worktree_but_registered() {  # <project> <worktree>
+  local project=$1 worktree=$2 target listed line listed_path
+  [ -n "$project" ] && [ -d "$project" ] || return 2
+  git -C "$project" rev-parse --git-dir >/dev/null 2>&1 || return 2
+  target=$(fm_worktree_but_normalize_path "$worktree") || return 2
+  listed=$(git -C "$project" -c core.quotePath=false worktree list --porcelain 2>/dev/null) || return 2
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *)
+        listed_path=$(fm_worktree_but_normalize_path "${line#worktree }") || return 2
+        [ "$listed_path" = "$target" ] && return 0
+        ;;
+    esac
+  done <<EOF
+$listed
+EOF
+  return 1
+}

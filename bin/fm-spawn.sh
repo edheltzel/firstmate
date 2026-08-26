@@ -791,7 +791,7 @@ preserve_spawn_abort_recovery_meta() {
 }
 
 spawn_abort_cleanup() {
-  local status=$?
+  local status=$? recovery_preserved=0 remove_failed=0
   if [ "$HERDR_PROJECTION_ABORT_CLEANUP" = 1 ] \
      && [ "$HERDR_PRESENTATION_ORDER_LOCK_HELD" != 1 ]; then
     if ! spawn_herdr_presentation_order_lock_acquire "${HERDR_PROJECTION_ABORT_SESSION:-}"; then
@@ -813,12 +813,24 @@ spawn_abort_cleanup() {
   if [ "$status" -ne 0 ] && [ "${BUT_WORKTREE_CREATED:-0}" = 1 ] \
      && [ -n "${WT:-}" ] && [ -n "${PROJ_ABS:-}" ]; then
     BUT_WORKTREE_CREATED=0
+    if preserve_spawn_abort_recovery_meta; then
+      recovery_preserved=1
+    else
+      echo "error: spawn abort recovery metadata could not be preserved for $ID; closing its backend endpoint" >&2
+      fm_backend_kill "$BACKEND" "$T" "${ZELLIJ_TAB_ID:-}" "fm-$ID" 2>/dev/null || true
+    fi
     if ! fm_worktree_but_remove "$PROJ_ABS" "$WT"; then
-      if preserve_spawn_abort_recovery_meta; then
+      remove_failed=1
+      if [ "$recovery_preserved" = 1 ]; then
         echo "error: git worktree remove failed for $WT; recovery metadata preserved at $STATE/$ID.meta" >&2
       else
         echo "error: git worktree remove failed for $WT and recovery metadata could not be preserved" >&2
       fi
+    elif [ "$recovery_preserved" = 1 ]; then
+      echo "error: spawn aborted after creating $WT; endpoint recovery metadata preserved at $STATE/$ID.meta" >&2
+    fi
+    if [ "$remove_failed" = 1 ] && [ -z "${WORKTREE_OWNER_TOKEN:-}" ]; then
+      fm_backend_kill "$BACKEND" "$T" "${ZELLIJ_TAB_ID:-}" "fm-$ID" 2>/dev/null || true
     fi
   fi
   if [ "$ORCA_ABORT_CLEANUP" = 1 ]; then
@@ -1926,6 +1938,8 @@ if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   if [ "$WORKTREE_PROVIDER" = but ]; then
     WT=$(fm_worktree_but_add "$PROJ_ABS" "$ID") || exit 1
     BUT_WORKTREE_CREATED=1
+    validate_spawn_worktree "but worktree" "$WT_TARGET"
+    publish_treehouse_worktree_owner || exit 1
     spawn_send_text_line "$WT_TARGET" "cd $(shell_quote "$WT")"
   else
     spawn_send_text_line "$WT_TARGET" 'treehouse get'
@@ -2005,7 +2019,9 @@ if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
 
   validate_spawn_worktree "treehouse get" "$T"
   fi
-  publish_treehouse_worktree_owner || exit 1
+  if [ "$WORKTREE_PROVIDER" = treehouse ]; then
+    publish_treehouse_worktree_owner || exit 1
+  fi
 fi
 
 # Per-task temp root: /tmp/fm-<id>/ with Go's build temp nested at gotmp/. Go won't
