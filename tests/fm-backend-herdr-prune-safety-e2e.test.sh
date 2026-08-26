@@ -60,14 +60,14 @@ fm_backend_herdr_version_check || fail "version_check failed against the real in
 # unlabeled workspace-label derivation is not a stable test contract, while the
 # adopted-workspace state is the behavior this regression must exercise. The
 # project basename "proj" has no registry alias, so its worker label is
-# "proj-Fleet". The seeded tab remains labeled "1".
+# "FM-fleet-1". The seeded tab remains labeled "1".
 
 LIVE_CWD="$SCRATCH/proj"
 mkdir -p "$LIVE_CWD"
 
 fm_backend_herdr_server_ensure "$SESSION" || fail "could not start the isolated session's server"
 
-CREATE_OUT=$(fm_backend_herdr_cli "$SESSION" workspace create --cwd "$LIVE_CWD" --label proj-Fleet --no-focus) \
+CREATE_OUT=$(fm_backend_herdr_cli "$SESSION" workspace create --cwd "$LIVE_CWD" --label FM-fleet-1 --no-focus) \
   || fail "could not create the label-collision startup workspace"
 LIVE_WSID=$(printf '%s' "$CREATE_OUT" | jq -r '.result.workspace.workspace_id // empty')
 LIVE_TAB_ID=$(printf '%s' "$CREATE_OUT" | jq -r '.result.tab.tab_id // empty')
@@ -77,8 +77,8 @@ if [ -z "$LIVE_WSID" ] || [ -z "$LIVE_TAB_ID" ] || [ -z "$LIVE_PANE_ID" ]; then
 fi
 
 LIVE_LABEL=$(herdr workspace list --session "$SESSION" 2>&1 | jq -r --arg id "$LIVE_WSID" '.result.workspaces[]? | select(.workspace_id == $id) | .label')
-[ "$LIVE_LABEL" = proj-Fleet ] || fail "the startup workspace label should be 'proj-Fleet', got '$LIVE_LABEL' - repro setup is wrong"
-pass "repro setup: a pre-existing workspace labeled 'proj-Fleet' collides with the project worker's own derived label"
+[ "$LIVE_LABEL" = FM-fleet-1 ] || fail "the startup workspace label should be 'FM-fleet-1', got '$LIVE_LABEL' - repro setup is wrong"
+pass "repro setup: a pre-existing workspace labeled 'FM-fleet-1' collides with the project worker's own derived label"
 
 # Simulate a live long-running agent in that pane: a heartbeat loop that
 # appends to a marker file, so liveness is independently verifiable (not just

@@ -47,15 +47,13 @@
 #   A backend spawn refusal (missing dependency, version gate, unauthenticated
 #   socket, or unsupported secondmate mode) is terminal for that selected backend;
 #   callers must surface it instead of silently retrying another backend.
-#   A herdr crewmate or scout is placed in the exact workspace of the firstmate
-#   or secondmate process launching it, resolved from that process's own herdr
-#   pane rather than from a workspace label (herdr enforces no label uniqueness,
-#   so a label cannot tell two "firstmate" workspaces apart). A claimed parent
-#   identity that is unreadable, contradictory, stale, or from another herdr
-#   session stops the spawn before any worker endpoint exists. A launcher
-#   outside herdr has no workspace to inherit and uses this home's own labeled
-#   workspace, which must then match exactly one. --secondmate is the deliberate
-#   exception: it stands up that secondmate home's own workspace.
+#   A herdr crewmate or scout is placed in the project's Fleet workspace.
+#   A claimed parent identity that is unreadable, contradictory, stale, or from
+#   another herdr session stops the spawn before any worker endpoint exists.
+#   A launcher already in that Fleet workspace disambiguates duplicate labels.
+#   A secondmate lands as tab Portside in the primary Firstmate workspace
+#   (TheBridge by default; config/herdr-layout can override the names).
+#   A Firstmate already in that workspace is reused; a Fleet launcher is not.
 #   Herdr additionally uses a default-on presentation-only layout unless the
 #   local config/herdr-presentation-spaces file says off. A clean fresh task first
 #   writes state/<id>.herdr-presentation atomically, then creates a disposable
@@ -72,7 +70,7 @@
 #   canonical socket, outside any home's state/) through launch handoff. Lock
 #   contention warns and falls back to the ordinary flat layout before any
 #   projection mutation. The exact response-derived new workspace is inserted
-#   immediately after its owning parent (the project's Fleet or Archon-<id>) contiguous
+#   immediately after its owning parent (the project's Fleet workspace) contiguous
 #   child block. Ordering never authorizes lifecycle cleanup, and any
 #   unavailable, ambiguous, or failed move warns while the spawn continues.
 #   Every projected create, prune, and move captures and verifies the named
@@ -1550,30 +1548,14 @@ case "$BACKEND" in
     WT_TARGET="$WID"
     ;;
   herdr)
-    # fm_backend_herdr_workspace_label resolves the target workspace from
-    # FM_HOME. For every KIND except secondmate, this process's own FM_HOME is
-    # already the right home (the primary spawning its own crewmate/scout, or
-    # a secondmate spawning ITS OWN crewmate/scout from its own process's
-    # FM_HOME - the latter needs no glue at all). A --secondmate spawn is the
-    # one case that does: it is the PRIMARY's own fm-spawn.sh process
-    # launching a DIFFERENT home (PROJ_ABS, already validated above as the
-    # secondmate's home), so FM_HOME here still names the primary. Shadow it
-    # to PROJ_ABS for just these two calls (bash restores it automatically
-    # after each prefixed simple-command call) so the secondmate's tab lands
-    # in the secondmate's own workspace, not the primary's "firstmate" one.
-    #
-    # Placement, separately from labeling: a crewmate/scout belongs in the
-    # EXACT herdr workspace this launching process is itself running in, which
-    # only its own herdr pane identity can name (a same-labeled sibling
-    # workspace must never be adopted). A --secondmate launch is the exception -
-    # it stands up a DIFFERENT home's own workspace by design - so it asks for
-    # the per-home container instead of inheriting this launcher's.
+    # Ordinary workers use this process's FM_HOME and land in the project Fleet.
+    # A secondmate reads the primary home's herdr-layout (default TheBridge /
+    # Portside) and uses launcher-home so an already-open TheBridge is reused.
+    # A Fleet launcher does not capture the secondmate: only a launcher whose
+    # live workspace label matches the primary workspace is adopted.
     HERDR_LABEL_HOME=$FM_HOME
     HERDR_LAUNCHER_RELATIONSHIP=launcher-home
-    if [ "$KIND" = secondmate ]; then
-      HERDR_LABEL_HOME=$PROJ_ABS
-      HERDR_LAUNCHER_RELATIONSHIP=other-home
-    fi
+    W=$(fm_backend_herdr_task_tab_label "$KIND" "$ID")
     HERDR_FLEET_LABEL=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_workspace_label "$KIND" "$PROJ_ABS" "${PROJ_KEY:-}")
     HERDR_PRESENTATION_JOURNAL=$(fm_backend_herdr_projection_journal_path "$STATE" "$ID")
     HERDR_PROJECTED=0

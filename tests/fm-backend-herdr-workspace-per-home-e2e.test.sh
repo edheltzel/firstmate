@@ -4,8 +4,8 @@
 # workspace contract. Drives the REAL bin/fm-spawn.sh and bin/fm-teardown.sh
 # (not just adapter primitives), because the requirements under test - a worker
 # landing in its PROJECT's Fleet workspace regardless of spawning home, two
-# projects never sharing a workspace, and a --secondmate spawn keeping its own
-# Archon supervisor workspace - only exist at fm-spawn.sh's herdr case arm and
+# projects never sharing a workspace, and a --secondmate spawn landing as
+# Portside in TheBridge - only exist at fm-spawn.sh's herdr case arm and
 # fm_backend_herdr_workspace_label's KIND + project resolution; none is
 # exercised by the adapter-primitive smoke test.
 #
@@ -22,7 +22,7 @@
 #   - two workers for the SAME project sharing one workspace even when spawned
 #     from DIFFERENT homes (project-keyed, not home-keyed)
 #   - two DIFFERENT projects never sharing a workspace
-#   - a --secondmate spawn keeping its own "Archon-<id>" supervisor workspace,
+#   - a --secondmate spawn landing as tab Portside in TheBridge,
 #     never a Fleet worker label
 #   - teardown closing the right tab (and no other) within a shared workspace
 #   - list-live recovery scoped to a given project's Fleet, across homes
@@ -110,11 +110,12 @@ make_scratch_project() {  # <dir>
 
 PROJ1="$TMP_ROOT/scratch-project-1"; make_scratch_project "$PROJ1"
 PROJ2="$TMP_ROOT/scratch-project-2"; make_scratch_project "$PROJ2"
-# Ordinary workers land in their PROJECT's own "<repo-name>-Fleet" workspace.
-# Neither home has a data/projects.md registry, so the Fleet name defaults to
-# the project clone basename.
-PROJ1_FLEET="$(basename "$PROJ1")-Fleet"
-PROJ2_FLEET="$(basename "$PROJ2")-Fleet"
+# Ordinary workers land in FM-fleet-<n> from the primary and SM-fleet-<n>
+# from a secondmate home. Same home, different projects get different suffixes.
+PROJ1_FLEET="FM-fleet-1"
+PROJ2_FLEET="FM-fleet-2"
+SM_PROJ1_FLEET="SM-fleet-1"
+SM_PROJ2_FLEET="SM-fleet-2"
 
 ws_label_of_pane() {  # <pane_id> -> the herdr workspace label hosting that pane
   local pane=$1 wsid
@@ -150,10 +151,8 @@ CM1_WS_LABEL=$(ws_label_of_pane "$CM1_PANE")
 [ "$CM1_WS_LABEL" = "$PROJ1_FLEET" ] || fail "a PROJ1 worker should land in the '$PROJ1_FLEET' workspace, got '$CM1_WS_LABEL'"
 pass "real herdr E2E: the PROJ1 worker landed in its project's '$PROJ1_FLEET' workspace"
 
-# --- 2. the PRIMARY spawns a secondmate: its tab lands in its Archon space ---
-# The persistent secondmate agent keeps its own "Archon-<id>" supervisor
-# workspace (never a Fleet worker label), read from the .fm-secondmate-home
-# marker at the secondmate's home.
+# --- 2. the PRIMARY spawns a secondmate: Portside in TheBridge ---
+# The persistent secondmate agent shares the primary Firstmate workspace.
 
 SM_OUT="$TMP_ROOT/sm.out"; SM_ERR="$TMP_ROOT/sm.err"
 FM_SPAWN_NO_GUARD=1 FM_HOME="$PRIMARY_HOME" FM_ROOT_OVERRIDE="$ROOT" \
@@ -175,12 +174,13 @@ SM_WSID=$(herdr pane get "$SM_PANE" --session "$SESSION" 2>/dev/null | jq -r '.r
 [ -n "$SM_WSID" ] || fail "could not read e2esm1's pane workspace_id"
 [ "$SM_WSID" != "$CM1_WSID" ] || fail "the secondmate's tab must NOT land in a worker's Fleet workspace, but it shares $CM1_WSID"
 SM_WS_LABEL=$(ws_label_of_pane "$SM_PANE")
-[ "$SM_WS_LABEL" = "Archon-e2esm1" ] || fail "a --secondmate spawn should land in 'Archon-<id>', got '$SM_WS_LABEL'"
-pass "real herdr E2E: a --secondmate spawn lands in its own 'Archon-<id>' supervisor workspace, never a Fleet worker label"
+[ "$SM_WS_LABEL" = "TheBridge" ] || fail "a --secondmate spawn should land in TheBridge, got '$SM_WS_LABEL'"
+SM_TAB=$(herdr pane get "$SM_PANE" --session "$SESSION" 2>/dev/null | jq -r '.result.pane.tab_id // empty')
+SM_TAB_LABEL=$(herdr tab list --workspace "$SM_WSID" --session "$SESSION" 2>/dev/null | jq -r --arg t "$SM_TAB" '.result.tabs[]? | select(.tab_id == $t) | .label')
+[ "$SM_TAB_LABEL" = "Portside" ] || fail "a --secondmate spawn should use tab Portside, got '$SM_TAB_LABEL'"
+pass "real herdr E2E: a --secondmate spawn lands as tab Portside in TheBridge, never a Fleet worker label"
 
-# --- 3. cross-home SAME-project sharing: a worker for PROJ1 spawned FROM the
-# secondmate home lands in the SAME "<PROJ1>-Fleet" workspace as cm1, proving
-# the workspace is keyed by PROJECT, not by the spawning home ----------------
+# --- 3. a worker for PROJ1 spawned FROM the secondmate home uses SM-fleet-1
 
 CM2_OUT="$TMP_ROOT/cm2.out"; CM2_ERR="$TMP_ROOT/cm2.err"
 FM_SPAWN_NO_GUARD=1 FM_HOME="$SM_HOME" FM_ROOT_OVERRIDE="$ROOT" \
@@ -203,10 +203,10 @@ assert_contains_local "$CM2_CAPTURE" "sm-crew-ok" "cm2's raw launch command did 
 
 CM2_WSID=$(herdr pane get "$CM2_PANE" --session "$SESSION" 2>/dev/null | jq -r '.result.pane.workspace_id // empty')
 CM2_WS_LABEL=$(ws_label_of_pane "$CM2_PANE")
-[ "$CM2_WS_LABEL" = "$PROJ1_FLEET" ] || fail "a PROJ1 worker must land in '$PROJ1_FLEET' regardless of spawning home, got '$CM2_WS_LABEL'"
-[ "$CM2_WSID" = "$CM1_WSID" ] || fail "two workers for PROJ1 must SHARE one workspace even across homes (cm1=$CM1_WSID cm2=$CM2_WSID)"
-[ "$CM2_WSID" != "$SM_WSID" ] || fail "a PROJ1 worker must NOT land in the secondmate's Archon workspace - the supervisor identity must not capture workers"
-pass "real herdr E2E: two workers for one project SHARE its Fleet workspace across different homes (project-keyed, not home-keyed)"
+[ "$CM2_WS_LABEL" = "$SM_PROJ1_FLEET" ] || fail "a PROJ1 worker from a secondmate home must land in '$SM_PROJ1_FLEET', got '$CM2_WS_LABEL'"
+[ "$CM2_WSID" != "$CM1_WSID" ] || fail "a secondmate-home worker must not share the primary FM-fleet workspace"
+[ "$CM2_WSID" != "$SM_WSID" ] || fail "a PROJ1 worker must NOT land in TheBridge - the supervisor workspace must not capture workers"
+pass "real herdr E2E: a secondmate-home worker uses SM-fleet-1, distinct from the primary FM-fleet-1 and TheBridge"
 
 # --- 4. cross-project separation: a worker for a DIFFERENT project gets a
 # DIFFERENT workspace ---------------------------------------------------------
@@ -225,25 +225,25 @@ CM3_PANE=$(grep '^herdr_pane_id=' "$CM3_META" | cut -d= -f2-)
 [ -n "$CM3_PANE" ] || fail "cm3 meta missing herdr_pane_id"
 CM3_WSID=$(herdr pane get "$CM3_PANE" --session "$SESSION" 2>/dev/null | jq -r '.result.pane.workspace_id // empty')
 CM3_WS_LABEL=$(ws_label_of_pane "$CM3_PANE")
-[ "$CM3_WS_LABEL" = "$PROJ2_FLEET" ] || fail "a PROJ2 worker should land in '$PROJ2_FLEET', got '$CM3_WS_LABEL'"
+[ "$CM3_WS_LABEL" = "$SM_PROJ2_FLEET" ] || fail "a PROJ2 worker from a secondmate home should land in '$SM_PROJ2_FLEET', got '$CM3_WS_LABEL'"
 [ "$CM3_WSID" != "$CM1_WSID" ] || fail "PROJ2 and PROJ1 workers must never share a workspace"
-[ "$CM3_WSID" != "$SM_WSID" ] || fail "a PROJ2 worker must not land in the secondmate's Archon workspace"
-pass "real herdr E2E: a worker for a different project gets a distinct '$PROJ2_FLEET' workspace - projects never share (cross-project separation)"
+[ "$CM3_WSID" != "$SM_WSID" ] || fail "a PROJ2 worker must not land in TheBridge"
+pass "real herdr E2E: a secondmate-home PROJ2 worker gets SM-fleet-2, distinct from SM-fleet-1 and TheBridge"
 
 # --- 5. list-live recovery: scoped to the given project's own Fleet ---------
 
 PROJ1_LIVE=$(fm_backend_herdr_list_live "$SESSION" "$PROJ1_FLEET")
-assert_contains_local "$PROJ1_LIVE" "fm-cm1" "the PROJ1 Fleet's list_live did not see its own worker cm1"
-assert_contains_local "$PROJ1_LIVE" "fm-cm2" "the PROJ1 Fleet's list_live did not see the second PROJ1 worker cm2 (same project, different home)"
-assert_not_contains_local "$PROJ1_LIVE" "fm-cm3" "the PROJ1 Fleet's list_live must not see a different project's worker"
-assert_not_contains_local "$PROJ1_LIVE" "fm-e2esm1" "the PROJ1 Fleet's list_live must not see the secondmate agent"
-pass "real herdr E2E: list_live for a project's Fleet sees exactly that project's workers, across homes, and no other"
+assert_contains_local "$PROJ1_LIVE" "fm-cm1" "the primary FM-fleet-1 list_live did not see its own worker cm1"
+assert_not_contains_local "$PROJ1_LIVE" "fm-cm2" "FM-fleet-1 must not see the secondmate-home worker"
+assert_not_contains_local "$PROJ1_LIVE" "fm-cm3" "FM-fleet-1 must not see a different project's worker"
+assert_not_contains_local "$PROJ1_LIVE" "Portside" "the PROJ1 Fleet's list_live must not see the secondmate agent"
+pass "real herdr E2E: list_live for FM-fleet-1 sees only the primary-home worker"
 
-SM_LIVE=$(fm_backend_herdr_list_live "$SESSION" "Archon-e2esm1")
-assert_contains_local "$SM_LIVE" "fm-e2esm1" "the secondmate's Archon list_live did not see its own task"
-assert_not_contains_local "$SM_LIVE" "fm-cm1" "the secondmate's Archon list_live must not see a worker's task"
-assert_not_contains_local "$SM_LIVE" "fm-cm2" "the secondmate's Archon list_live must not see a worker's task"
-pass "real herdr E2E: list_live for the secondmate's Archon workspace sees only the secondmate's own task, never workers"
+SM_LIVE=$(fm_backend_herdr_list_live "$SESSION" "TheBridge")
+assert_contains_local "$SM_LIVE" "Portside" "TheBridge list_live did not see Portside"
+assert_not_contains_local "$SM_LIVE" "fm-cm1" "TheBridge list_live must not see a worker's task"
+assert_not_contains_local "$SM_LIVE" "fm-cm2" "TheBridge list_live must not see a worker's task"
+pass "real herdr E2E: list_live for TheBridge sees Portside and never Fleet workers"
 
 # --- 6. teardown closes the RIGHT tab, and no other ------------------------
 # cm1 and cm2 share one PROJ1 Fleet workspace, so tearing down one must leave

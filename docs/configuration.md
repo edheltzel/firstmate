@@ -80,7 +80,8 @@ These five sentences are the single owner of the task-selector vocabulary; backe
 `fm-teardown.sh <id>` takes a task id directly and validates the complete metadata-only endpoint identity before any runtime dispatch or cleanup mutation.
 Missing, empty, duplicate, malformed, backend-inconsistent, or task-mismatched endpoint records are preserved and refused.
 Legacy tmux metadata remains cleanup-compatible when its exact window name is `fm-<id>`; opaque non-tmux endpoints require their recorded `endpoint_task_id=` binding.
-Herdr places ordinary ship and scout tasks in the canonical project's `<Fleet>-Fleet` workspace and secondmate agents in `Archon-<id>` workspaces.
+Herdr places ordinary ship and scout tasks in `FM-fleet-<n>` or `SM-fleet-<n>` and secondmate agents as tab `Portside` in the primary workspace (`TheBridge` by default).
+The local `config/herdr-layout` file can override those names with `workspace=`, `firstmate-tab=`, and `secondmate-tab=` lines; an absent file keeps the defaults.
 The canonical project key selects Fleet grouping, task-bound PR publication identity, and standing-posture advisory lookup, but it never selects a task's delivery mode.
 When a live launcher identity claims the same target workspace label it can disambiguate that exact workspace; a missing, mismatched, or duplicate identity refuses rather than adopting another workspace.
 [`herdr-backend.md`](herdr-backend.md#watching-and-task-containers) owns exact launcher identity, duplicate refusal, focus-safe pane removal, version-2 projection bindings, semantic `agent_state`, `SSH_AUTH_SOCK` forwarding, display metadata, and the geometry rationale.
