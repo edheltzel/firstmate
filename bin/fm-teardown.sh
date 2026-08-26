@@ -201,6 +201,10 @@ export FM_LOCK_LOG_PREFIX=teardown
 META="$STATE/$ID.meta"
 [ -f "$META" ] || { echo "error: no meta for task $ID at $META" >&2; exit 1; }
 WORKTREE_PROVIDER=$(worktree_provider_of_meta "$META" "$ID") || exit 1
+if [ "$WORKTREE_PROVIDER" = but ]; then
+  # shellcheck source=bin/fm-worktree-lib.sh
+  . "$SCRIPT_DIR/fm-worktree-lib.sh"
+fi
 
 REMOTE_HANDOFF_DIR_PRESENT=0
 REMOTE_HANDOFF_DIR_REAL=

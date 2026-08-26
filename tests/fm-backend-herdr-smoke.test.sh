@@ -96,8 +96,8 @@ XP_ATLAS_RAW=$(FM_HOME="$XP_HOME" fm_backend_herdr_container_ensure ship "$XP_HO
 XP_ATLAS_WS=${XP_ATLAS_RAW%%$'\t'*}; XP_ATLAS_WS=${XP_ATLAS_WS#*:}
 XP_ECHO_LABEL=$(herdr workspace list --session "$SESSION" 2>&1 | jq -r --arg id "$XP_ECHO_WS" '.result.workspaces[]? | select(.workspace_id == $id) | .label')
 XP_ATLAS_LABEL=$(herdr workspace list --session "$SESSION" 2>&1 | jq -r --arg id "$XP_ATLAS_WS" '.result.workspaces[]? | select(.workspace_id == $id) | .label')
-[ "$XP_ECHO_LABEL" = "FM-fleet-1" ] || fail "the Echo worker workspace should be FM-fleet-1, got '$XP_ECHO_LABEL'"
-[ "$XP_ATLAS_LABEL" = "FM-fleet-2" ] || fail "the atlas-config worker workspace should be FM-fleet-2, got '$XP_ATLAS_LABEL'"
+[ "$XP_ECHO_LABEL" = "FM-fleet-2" ] || fail "the Echo worker workspace should follow the existing /tmp allocation as FM-fleet-2, got '$XP_ECHO_LABEL'"
+[ "$XP_ATLAS_LABEL" = "FM-fleet-3" ] || fail "the atlas-config worker workspace should follow Echo as FM-fleet-3, got '$XP_ATLAS_LABEL'"
 [ "$XP_ECHO_WS" != "$XP_ATLAS_WS" ] || fail "two different projects must never share a workspace, both got '$XP_ECHO_WS'"
 rm -rf "$XP_SCRATCH"
 pass "real herdr: different projects get distinct FM-fleet suffixes, never Project-Fleet names"

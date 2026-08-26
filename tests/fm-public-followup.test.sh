@@ -797,7 +797,10 @@ test_secondmate_teardown_durable_record_with_unknown_field_succeeds() {
   fm_write_meta "$child/state/work-clean.meta" \
     "window=firstmate:fm-work-clean" "endpoint_task_id=work-clean" \
     "worktree=$child/projects/worktree" "project=$child/projects/worktree" \
-    "kind=ship" "mode=local-only"
+    "kind=ship" "mode=local-only" "worktree_owner_token=fmw.AAAAAAAAAAAA"
+  printf 'version=1\ntask_id=work-clean\ntoken=fmw.AAAAAAAAAAAA\n' > \
+    "$child/projects/worktree/.fm-worktree-owner"
+  printf '%s\n' .fm-worktree-owner >> "$child/projects/worktree/.git/info/exclude"
 
   rc=0
   out=$(PATH="$child/fakebin:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$child" \
