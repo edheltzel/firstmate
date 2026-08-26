@@ -255,6 +255,7 @@ _wslabel() {  # <home> <kind> <project-abs>
   FM_HOME="$1" FM_FAKE_FLEET_SOCKET="$1/session.sock" bash -c '
     . "$0/bin/backends/herdr.sh"
     fm_backend_herdr_presentation_session_socket_path() { printf "%s" "$FM_FAKE_FLEET_SOCKET"; }
+    fm_backend_herdr_fleet_live_max() { printf 0; }
     fm_backend_herdr_workspace_label "$1" "$2" "" fmtest
   ' "$ROOT" "$2" "$3"
 }
@@ -326,6 +327,7 @@ _wslabel_key() {  # <home> <kind> <project-abs> <project-key>
   FM_HOME="$1" FM_FAKE_FLEET_SOCKET="$1/session.sock" bash -c '
     . "$0/bin/backends/herdr.sh"
     fm_backend_herdr_presentation_session_socket_path() { printf "%s" "$FM_FAKE_FLEET_SOCKET"; }
+    fm_backend_herdr_fleet_live_max() { printf 0; }
     fm_backend_herdr_workspace_label "$1" "$2" "$3" fmtest
   ' "$ROOT" "$2" "$3" "$4"
 }
@@ -380,9 +382,30 @@ _wslabel_shared_session() {  # <home> <kind> <project-abs> <project-key> <socket
   FM_HOME="$1" FM_FAKE_FLEET_SOCKET="$5" bash -c '
     . "$0/bin/backends/herdr.sh"
     fm_backend_herdr_presentation_session_socket_path() { printf "%s" "$FM_FAKE_FLEET_SOCKET"; }
+    fm_backend_herdr_fleet_live_max() { printf 0; }
     label=$(fm_backend_herdr_workspace_label "$1" "$2" "$3" fmtest) || exit 1
     printf "%s\n" "$label"
   ' "$ROOT" "$2" "$3" "$4"
+}
+
+test_workspace_label_reconciles_restored_suffixes_after_registry_loss() {
+  local dir home log resp fb first second
+  dir="$TMP_ROOT/fleet-restored"; home="$dir/home"; log="$dir/log"; resp="$dir/responses"
+  mkdir -p "$home/projects/A" "$home/projects/B" "$resp"; : > "$log"
+  printf '{"result":{"workspaces":[]}}\n' > "$resp/1.out"
+  fb=$(make_herdr_fakebin "$dir")
+  first=$( PATH="$fb:$PATH" FM_HOME="$home" FM_BACKEND_HERDR_FLEET_NAMESPACE_ROOT="$dir/fleets" \
+    FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_workspace_label ship "$1" A fmtest' "$ROOT" "$home/projects/A" )
+  [ "$first" = "FM-fleet-1" ] || fail "initial fleet allocation should use FM-fleet-1, got '$first'"
+  mv "$dir/fleets" "$dir/lost-fleets"
+  rm -f "$resp/.count"
+  printf '{"result":{"workspaces":[{"workspace_id":"w1","label":"FM-fleet-1"},{"workspace_id":"w8","label":"SM-fleet-8"}]}}\n' > "$resp/1.out"
+  second=$( PATH="$fb:$PATH" FM_HOME="$home" FM_BACKEND_HERDR_FLEET_NAMESPACE_ROOT="$dir/fleets" \
+    FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_workspace_label ship "$1" B fmtest' "$ROOT" "$home/projects/B" )
+  [ "$second" = "FM-fleet-2" ] || fail "restored FM-fleet-1 should advance a lost registry to FM-fleet-2, got '$second'"
+  pass "herdr Fleet allocation: a lost registry advances past restored session labels"
 }
 
 test_workspace_label_separate_secondmate_homes_share_one_sequence() {
@@ -759,7 +782,7 @@ test_container_ensure_starts_server_and_workspace() {
   # cwd /tmp -> basename "tmp"; FM_HOME=$dir has no registry, so the Fleet name
   # deterministically defaults to the repo (dir) name -> "FM-fleet-1".
   out=$( PATH="$fb:$PATH" FM_HOME="$dir" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" FM_HERDR_SCRIPT_STATUS=1 HERDR_SESSION=fmtest \
-    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_container_ensure ship /tmp' "$ROOT" )
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_fleet_live_max() { printf 0; }; fm_backend_herdr_container_ensure ship /tmp' "$ROOT" )
   [ "$out" = $'fmtest:w1\tw1:t9' ] || fail "container_ensure should echo '<session>:<workspace_id>\\t<seeded_default_tab_id>', got '$out'"
   assert_contains "$(cat "$log")" "HERDR_SESSION=fmtest"$'\x1f''server' "container_ensure did not start the herdr server"
   assert_contains "$(cat "$log")" $'\x1f''workspace'$'\x1f''create'$'\x1f''--cwd'$'\x1f''/tmp'$'\x1f''--label'$'\x1f''FM-fleet-1' \
@@ -775,7 +798,7 @@ test_container_ensure_reuses_existing_workspace() {
   printf '{"result":{"workspaces":[{"workspace_id":"w9","label":"FM-fleet-1"}]}}\n' > "$resp/3.out"
   fb=$(make_herdr_fakebin "$dir")
   out=$( PATH="$fb:$PATH" FM_HOME="$dir" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" FM_HERDR_SCRIPT_STATUS=1 HERDR_SESSION=fmtest \
-    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_container_ensure ship /tmp' "$ROOT" )
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_fleet_live_max() { printf 0; }; fm_backend_herdr_container_ensure ship /tmp' "$ROOT" )
   [ "$out" = $'fmtest:w9\t' ] || fail "container_ensure should reuse the existing 'FM-fleet-1' workspace id with an EMPTY seeded-tab field (an ADOPTED workspace is never a prune candidate), got '$out'"
   assert_not_contains "$(cat "$log")" $'\x1f''workspace'$'\x1f''create' "container_ensure should not create a workspace that already exists"
   pass "fm_backend_herdr_container_ensure: reuses an existing 'FM-fleet-1' workspace without recreating it, and reports no seeded default tab (adopted, not created)"
@@ -1182,11 +1205,31 @@ test_container_ensure_creates_with_no_focus_flag() {
   printf '{"result":{"workspace":{"workspace_id":"w1","label":"FM-fleet-1"},"tab":{"tab_id":"w1:t1"},"root_pane":{"pane_id":"w1:p1"}}}\n' > "$resp/4.out"
   fb=$(make_herdr_fakebin "$dir")
   out=$( PATH="$fb:$PATH" FM_HOME="$dir" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" FM_HERDR_SCRIPT_STATUS=1 HERDR_SESSION=fmtest \
-    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_container_ensure ship /tmp' "$ROOT" )
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_fleet_live_max() { printf 0; }; fm_backend_herdr_container_ensure ship /tmp' "$ROOT" )
   [ "$out" = $'fmtest:w1\tw1:t1' ] || fail "container_ensure should still echo '<session>:<workspace_id>\\t<seeded_default_tab_id>', got '$out'"
   assert_contains "$(cat "$log")" $'\x1f''workspace'$'\x1f''create'$'\x1f''--cwd'$'\x1f''/tmp'$'\x1f''--label'$'\x1f''FM-fleet-1'$'\x1f''--no-focus' \
     "container_ensure's workspace create did not pass --no-focus (focus-safety: never steal the captain's attention on spawn)"
   pass "fm_backend_herdr_container_ensure: workspace create passes --no-focus"
+}
+
+test_container_ensure_fails_closed_when_fleet_allocation_fails() {
+  local dir log resp fb out status calls lists
+  dir="$TMP_ROOT/container-fleet-allocation-fail"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
+  printf '{"client":{"version":"0.7.1","protocol":14}}\n' > "$resp/1.out"
+  printf '{"server":{"running":true}}\n' > "$resp/2.out"
+  printf '1\n' > "$resp/3.exit"
+  fb=$(make_herdr_fakebin "$dir")
+  out=$( PATH="$fb:$PATH" FM_HOME="$dir" FM_BACKEND_HERDR_FLEET_NAMESPACE_ROOT="$dir/fleets" \
+    FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" FM_HERDR_SCRIPT_STATUS=1 HERDR_SESSION=fmtest \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_container_ensure ship /tmp' "$ROOT" 2>&1 )
+  status=$?
+  [ "$status" -ne 0 ] || fail "container_ensure must fail when Fleet allocation cannot read the session"
+  assert_contains "$out" "failed to resolve herdr workspace label" "container_ensure did not report the Fleet label failure"
+  calls=$(cat "$log")
+  lists=$(printf '%s\n' "$calls" | grep -c $'\x1f''workspace'$'\x1f''list' || true)
+  [ "$lists" = 1 ] || fail "a failed Fleet allocation should stop before workspace_ensure, got $lists workspace-list calls"
+  assert_not_contains "$calls" $'\x1f''workspace'$'\x1f''create' "a failed Fleet allocation must not create a legacy workspace"
+  pass "fm_backend_herdr_container_ensure: Fleet allocation errors fail closed before workspace creation"
 }
 
 test_container_ensure_uses_secondmate_thebridge_label() {
@@ -4031,7 +4074,7 @@ test_workspace_ensure_prunes_default_tab() {
   dir="$TMP_ROOT/prune-default"; mkdir -p "$dir"; log="$dir/log"; state="$dir/state.json"; : > "$log"
   fb=$(make_herdr_statefake "$dir")
   raw=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_FAKE_HERDR_STATE="$state" HERDR_SESSION=fmtest \
-    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_container_ensure ship /proj' "$ROOT" ) \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_fleet_live_max() { printf 0; }; fm_backend_herdr_container_ensure ship /proj' "$ROOT" ) \
     || fail "container_ensure failed against the stateful fake"
   container=${raw%%$'\t'*}
   seeded=${raw#*$'\t'}
@@ -4066,7 +4109,7 @@ test_repeated_cycles_reuse_one_workspace_no_orphans() {
   fb=$(make_herdr_statefake "$dir")
   for i in 1 2 3; do
     raw=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_FAKE_HERDR_STATE="$state" HERDR_SESSION=fmtest \
-      bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_container_ensure ship /proj' "$ROOT" ) \
+      bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_fleet_live_max() { printf 0; }; fm_backend_herdr_container_ensure ship /proj' "$ROOT" ) \
       || fail "cycle $i: container_ensure failed"
     container=${raw%%$'\t'*}
     seeded=${raw#*$'\t'}
@@ -4139,7 +4182,7 @@ test_adopted_workspace_never_prunes_default_tab() {
   # container_ensure never ran a `workspace create` call to produce it.
   jq -n '{next:2,workspaces:[{workspace_id:"w1",label:"FM-fleet-1"}],tabs:[{tab_id:"w1:t1",label:"1",workspace_id:"w1",pane_id:"w1:p1"}],agent_status:{}}' > "$state"
   raw=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_FAKE_HERDR_STATE="$state" HERDR_SESSION=fmtest \
-    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_container_ensure ship /proj' "$ROOT" ) \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_fleet_live_max() { printf 0; }; fm_backend_herdr_container_ensure ship /proj' "$ROOT" ) \
     || fail "container_ensure failed against the stateful fake"
   container=${raw%%$'\t'*}
   seeded=${raw#*$'\t'}
@@ -4178,7 +4221,7 @@ test_label_collision_startup_workspace_leaves_live_tab_alone() {
   # (agent_status=working), matching the incident's structural collision.
   jq -n '{next:2,workspaces:[{workspace_id:"w1",label:"FM-fleet-1"}],tabs:[{tab_id:"w1:t1",label:"1",workspace_id:"w1",pane_id:"w1:p1"}],agent_status:{"w1:p1":"working"}}' > "$state"
   raw=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_FAKE_HERDR_STATE="$state" HERDR_SESSION=fmtest \
-    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_container_ensure ship /proj' "$ROOT" ) \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_fleet_live_max() { printf 0; }; fm_backend_herdr_container_ensure ship /proj' "$ROOT" ) \
     || fail "container_ensure failed against the stateful fake"
   container=${raw%%$'\t'*}
   seeded=${raw#*$'\t'}
@@ -4209,7 +4252,7 @@ test_prune_refuses_a_working_agent_pane_defense_in_depth() {
   dir="$TMP_ROOT/prune-busy-defense"; mkdir -p "$dir"; log="$dir/log"; state="$dir/state.json"; : > "$log"
   fb=$(make_herdr_statefake "$dir")
   raw=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_FAKE_HERDR_STATE="$state" HERDR_SESSION=fmtest \
-    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_container_ensure ship /proj' "$ROOT" ) \
+    bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_fleet_live_max() { printf 0; }; fm_backend_herdr_container_ensure ship /proj' "$ROOT" ) \
     || fail "container_ensure failed against the stateful fake"
   container=${raw%%$'\t'*}
   seeded=${raw#*$'\t'}
@@ -4576,6 +4619,7 @@ test_workspace_label_key_differs_from_basename_with_alias
 test_workspace_and_display_fleet_labels_are_separate
 test_workspace_label_separate_secondmate_homes_share_one_sequence
 test_workspace_label_concurrent_same_home_projects_are_unique
+test_workspace_label_reconciles_restored_suffixes_after_registry_loss
 test_workspace_label_absent_key_arg_is_basename_backcompat
 test_workspace_label_secondmate_defaults_to_thebridge
 test_workspace_label_secondmate_layout_config_overrides_workspace
@@ -4600,6 +4644,7 @@ test_container_ensure_refuses_an_ambiguous_home_label
 test_container_ensure_starts_server_and_workspace
 test_container_ensure_reuses_existing_workspace
 test_container_ensure_creates_with_no_focus_flag
+test_container_ensure_fails_closed_when_fleet_allocation_fails
 test_container_ensure_uses_secondmate_thebridge_label
 test_workspace_ensure_prunes_default_tab
 test_repeated_cycles_reuse_one_workspace_no_orphans

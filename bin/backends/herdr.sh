@@ -276,6 +276,12 @@ fm_backend_herdr_fleet_registry_paths() {  # <session>
   fm_backend_herdr_presentation_lock_namespace_valid "$dir" || return 1
   FM_BACKEND_HERDR_FLEET_MAP="$dir/labels-$key"
   FM_BACKEND_HERDR_FLEET_LOCK="$dir/labels-$key.lock"
+  if [ -e "$FM_BACKEND_HERDR_FLEET_MAP" ] || [ -L "$FM_BACKEND_HERDR_FLEET_MAP" ]; then
+    [ -f "$FM_BACKEND_HERDR_FLEET_MAP" ] \
+      && [ ! -L "$FM_BACKEND_HERDR_FLEET_MAP" ] \
+      && [ -r "$FM_BACKEND_HERDR_FLEET_MAP" ] \
+      || return 1
+  fi
 }
 
 fm_backend_herdr_fleet_lock_acquire() {  # <lock-path>
@@ -315,11 +321,31 @@ fm_backend_herdr_fleet_lock_release() {
   FM_BACKEND_HERDR_FLEET_LOCK_HELD=0
 }
 
+fm_backend_herdr_fleet_live_max() {  # <session> <prefix>
+  local session=$1 prefix=$2 list
+  case "$prefix" in FM|SM) ;; *) return 1 ;; esac
+  list=$(fm_backend_herdr_cli "$session" workspace list 2>/dev/null) || return 1
+  printf '%s' "$list" | jq -er --arg prefix "$prefix-fleet-" '
+    .result.workspaces
+    | if type == "array" then . else error("invalid workspace list") end
+    | [
+        .[]?
+        | .label?
+        | select(type == "string" and startswith($prefix))
+        | ltrimstr($prefix)
+        | select(test("^[1-9][0-9]*$"))
+        | tonumber
+      ]
+    | max // 0
+  ' 2>/dev/null
+}
+
 # fm_backend_herdr_fleet_suffix: stable per-home per-project number from the
-# shared named-session registry. FM and SM use independent sequences.
+# shared named-session registry. A missing registry continues after the live
+# numeric high-water mark. FM and SM use independent sequences.
 fm_backend_herdr_fleet_suffix() {  # <session> <prefix> <project-key>
   local session=$1 prefix=$2 project_key=$3 home identity map_key map lock
-  local line key value max=0 suffix tmp status=0
+  local line key value max=0 live_max suffix tmp status=0
   [ -n "$session" ] && [ -n "$project_key" ] || return 1
   case "$prefix" in FM|SM) ;; *) return 1 ;; esac
   home=$(fm_backend_herdr_projection_home_identity "${FM_HOME:-$FM_BACKEND_HERDR_ROOT}") || return 1
@@ -350,7 +376,15 @@ fm_backend_herdr_fleet_suffix() {  # <session> <prefix> <project-key>
       case "$key" in
         "$prefix":*) [ "$value" -gt "$max" ] && max=$value ;;
       esac
-    done < "$map"
+    done < "$map" || status=1
+  else
+    live_max=$(fm_backend_herdr_fleet_live_max "$session" "$prefix") || status=1
+    if [ "$status" -eq 0 ]; then
+      case "$live_max" in ''|*[!0-9]*) status=1 ;; esac
+    fi
+    if [ "$status" -eq 0 ] && [ "$live_max" -gt "$max" ]; then
+      max=$live_max
+    fi
   fi
   if [ "$status" -eq 0 ] && [ -z "${suffix:-}" ]; then
     suffix=$((max + 1))
@@ -2040,7 +2074,10 @@ fm_backend_herdr_container_ensure() {
       cwd=$2
       project_key=${3:-}
       relationship=${4:-launcher-home}
-      label=$(fm_backend_herdr_workspace_label "$kind" "$cwd" "$project_key" "$session")
+      if ! label=$(fm_backend_herdr_workspace_label "$kind" "$cwd" "$project_key" "$session"); then
+        echo "error: failed to resolve herdr workspace label for '$kind' in session '$session'" >&2
+        return 1
+      fi
       ;;
     *)
       kind=ship
@@ -2050,6 +2087,10 @@ fm_backend_herdr_container_ensure() {
       label=$(fm_backend_herdr_home_workspace_label)
       ;;
   esac
+  if [ -z "$label" ]; then
+    echo "error: resolved an empty herdr workspace label for '$kind' in session '$session'" >&2
+    return 1
+  fi
   fm_backend_herdr_workspace_ensure "$session" "$cwd" "$label" "$relationship" >/dev/null && status=0 || status=$?
   # A 3 already reported the exact placement it refused to guess at; adding the
   # generic message here would bury it.
