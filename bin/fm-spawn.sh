@@ -717,6 +717,79 @@ parse_orca_worktree_result() {
   fi
 }
 
+write_task_metadata() {  # <path>
+  local path=$1
+  META_WINDOW=${T:-${W:-fm-$ID}}
+  [ "$BACKEND" != orca ] || META_WINDOW=${W:-fm-$ID}
+  {
+    echo "window=$META_WINDOW"
+    echo "endpoint_task_id=$ID"
+    echo "worktree=${WT:-}"
+    echo "project=$PROJ_ABS"
+    if [ "$KIND" != secondmate ] && [ "${PROJ_KEY:-}" != "${PROJ_BASENAME:-}" ]; then
+      echo "project_key=$PROJ_KEY"
+    fi
+    echo "harness=$HARNESS"
+    echo "kind=$KIND"
+    [ -z "${MODE:-}" ] || echo "mode=$MODE"
+    [ -z "${YOLO:-}" ] || echo "yolo=$YOLO"
+    echo "tasktmp=${TASK_TMP:-}"
+    [ -z "${WORKTREE_OWNER_TOKEN:-}" ] || echo "worktree_owner_token=$WORKTREE_OWNER_TOKEN"
+    [ "${WORKTREE_PROVIDER:-}" = but ] && echo "worktree_provider=but"
+    echo "model=${MODEL:-default}"
+    echo "effort=${EFFORT:-default}"
+    [ -z "${BUSY_GEN:-}" ] || echo "busy_gen=$BUSY_GEN"
+    [ "$BACKEND" = tmux ] || echo "backend=$BACKEND"
+    if [ "$BACKEND" = herdr ]; then
+      echo "herdr_session=${HERDR_SES:-}"
+      echo "herdr_workspace_id=${HERDR_WORKSPACE_ID:-}"
+      echo "herdr_tab_id=${HERDR_TAB_ID:-}"
+      echo "herdr_pane_id=${HERDR_PANE_ID:-}"
+    fi
+    if [ "$BACKEND" = zellij ]; then
+      echo "zellij_session=${ZELLIJ_SES:-}"
+      echo "zellij_tab_id=${ZELLIJ_TAB_ID:-}"
+      echo "zellij_pane_id=${ZELLIJ_PANE_ID:-}"
+    fi
+    if [ "$BACKEND" = orca ]; then
+      echo "orca_worktree_id=${ORCA_WORKTREE_ID:-}"
+      [ -z "${ORCA_TERMINAL:-}" ] || echo "terminal=$ORCA_TERMINAL"
+    fi
+    if [ "$BACKEND" = cmux ]; then
+      echo "cmux_workspace_id=${CMUX_WORKSPACE_ID:-}"
+      echo "cmux_surface_id=${CMUX_SURFACE_ID:-}"
+    fi
+    if [ "$KIND" = secondmate ]; then
+      echo "home=$PROJ_ABS"
+      echo "projects=${SECONDMATE_PROJECTS:-}"
+    fi
+    if [ "$KIND" != secondmate ] && [ "${PR_IDENTITY:-none}" != none ]; then
+      echo "pr_identity=$PR_IDENTITY"
+      echo "pr_project_key=$PROJ_KEY"
+      echo "pr_repo=$PR_REPO"
+      echo "pr_branch=$PR_BRANCH"
+      echo "pr_base=$PR_BASE"
+    fi
+  } > "$path"
+}
+
+preserve_spawn_abort_recovery_meta() {
+  local tmp
+  mkdir -p "$STATE" 2>/dev/null || {
+    echo "error: cannot preserve recovery metadata for $ID because $STATE is unavailable" >&2
+    return 1
+  }
+  tmp=$(umask 077; mktemp "$STATE/.$ID.meta.recovery.XXXXXXXXXXXX") || {
+    echo "error: cannot stage recovery metadata for $ID in $STATE" >&2
+    return 1
+  }
+  if ! write_task_metadata "$tmp" || ! mv -f -- "$tmp" "$STATE/$ID.meta"; then
+    rm -f -- "$tmp"
+    echo "error: cannot preserve recovery metadata for $ID at $STATE/$ID.meta" >&2
+    return 1
+  fi
+}
+
 spawn_abort_cleanup() {
   local status=$?
   if [ "$HERDR_PROJECTION_ABORT_CLEANUP" = 1 ] \
@@ -737,9 +810,16 @@ spawn_abort_cleanup() {
     HERDR_PRESENTATION_ORDER_LOCK_HELD=0
     fm_lock_release "$HERDR_PRESENTATION_ORDER_LOCK" || true
   fi
-  if [ "$status" -ne 0 ] && [ "${BUT_WORKTREE_CREATED:-0}" = 1 ]      && [ -n "${WT:-}" ] && [ -n "${PROJ_ABS:-}" ]; then
+  if [ "$status" -ne 0 ] && [ "${BUT_WORKTREE_CREATED:-0}" = 1 ] \
+     && [ -n "${WT:-}" ] && [ -n "${PROJ_ABS:-}" ]; then
     BUT_WORKTREE_CREATED=0
-    fm_worktree_but_remove "$PROJ_ABS" "$WT" 2>/dev/null || true
+    if ! fm_worktree_but_remove "$PROJ_ABS" "$WT"; then
+      if preserve_spawn_abort_recovery_meta; then
+        echo "error: git worktree remove failed for $WT; recovery metadata preserved at $STATE/$ID.meta" >&2
+      else
+        echo "error: git worktree remove failed for $WT and recovery metadata could not be preserved" >&2
+      fi
+    fi
   fi
   if [ "$ORCA_ABORT_CLEANUP" = 1 ]; then
     ORCA_ABORT_CLEANUP=0
@@ -748,33 +828,10 @@ spawn_abort_cleanup() {
     fi
     if [ -n "${ORCA_WORKTREE_ID:-}" ]; then
       if ! fm_backend_remove_worktree orca "$ORCA_WORKTREE_ID" 2>/dev/null; then
-        mkdir -p "$STATE" 2>/dev/null || true
-        if [ -d "$STATE" ]; then
-          {
-            echo "window=$W"
-            echo "worktree=${WT:-}"
-            echo "project=$PROJ_ABS"
-            if [ "$KIND" != secondmate ] && [ "${PROJ_KEY:-}" != "${PROJ_BASENAME:-}" ]; then
-              echo "project_key=$PROJ_KEY"
-            fi
-            if [ "${PR_IDENTITY:-none}" != none ]; then
-              echo "pr_identity=$PR_IDENTITY"
-              echo "pr_project_key=$PROJ_KEY"
-              echo "pr_repo=$PR_REPO"
-              echo "pr_branch=$PR_BRANCH"
-              echo "pr_base=$PR_BASE"
-            fi
-            echo "harness=$HARNESS"
-            echo "kind=$KIND"
-            [ -z "${MODE:-}" ] || echo "mode=$MODE"
-            [ -z "${YOLO:-}" ] || echo "yolo=$YOLO"
-            echo "tasktmp=${TASK_TMP:-}"
-            echo "model=${MODEL:-default}"
-            echo "effort=${EFFORT:-default}"
-            echo "backend=orca"
-            echo "orca_worktree_id=$ORCA_WORKTREE_ID"
-            [ -z "${ORCA_TERMINAL:-}" ] || echo "terminal=$ORCA_TERMINAL"
-          } > "$STATE/$ID.meta" 2>/dev/null || true
+        if preserve_spawn_abort_recovery_meta; then
+          echo "error: Orca worktree cleanup failed for $ORCA_WORKTREE_ID; recovery metadata preserved at $STATE/$ID.meta" >&2
+        else
+          echo "error: Orca worktree cleanup failed for $ORCA_WORKTREE_ID and recovery metadata could not be preserved" >&2
         fi
       fi
     fi
@@ -2269,68 +2326,7 @@ else
   fi
 fi
 
-META_WINDOW=$T
-[ "$BACKEND" = orca ] && META_WINDOW=$W
-{
-  echo "window=$META_WINDOW"
-  echo "endpoint_task_id=$ID"
-  echo "worktree=$WT"
-  echo "project=$PROJ_ABS"
-  # project_key= records the canonical registry identity ONLY when it differs from
-  # the repository basename (mirroring backend='s only-when-non-tmux idiom), so
-  # every key==basename task's meta stays byte-identical while a key-mismatched
-  # task (e.g. the firstmate repo registered as AgentThemis) durably carries the
-  # identity that produced its mode - no post-spawn hand-correction, and any future
-  # re-resolution reads it instead of re-deriving the wrong basename.
-  if [ "$KIND" != secondmate ] && [ "${PROJ_KEY:-}" != "${PROJ_BASENAME:-}" ]; then
-    echo "project_key=$PROJ_KEY"
-  fi
-  echo "harness=$HARNESS"
-  echo "kind=$KIND"
-  [ -z "$MODE" ] || echo "mode=$MODE"
-  [ -z "$YOLO" ] || echo "yolo=$YOLO"
-  echo "tasktmp=$TASK_TMP"
-  [ -z "$WORKTREE_OWNER_TOKEN" ] || echo "worktree_owner_token=$WORKTREE_OWNER_TOKEN"
-  [ "${WORKTREE_PROVIDER:-}" = but ] && echo "worktree_provider=but"
-  echo "model=${MODEL:-default}"
-  echo "effort=${EFFORT:-default}"
-  [ -z "${BUSY_GEN:-}" ] || echo "busy_gen=$BUSY_GEN"
-  # Default-off writes no traceparent= line (meta stays byte-identical).
-  # backend= is written only for a non-default (non-tmux) backend, so the
-  # default path's meta stays byte-identical (absent backend= means tmux;
-  # data/fm-backend-design-d7's P1 compatibility contract).
-  [ "$BACKEND" = tmux ] || echo "backend=$BACKEND"
-  if [ "$BACKEND" = herdr ]; then
-    echo "herdr_session=$HERDR_SES"
-    echo "herdr_workspace_id=$HERDR_WORKSPACE_ID"
-    echo "herdr_tab_id=$HERDR_TAB_ID"
-    echo "herdr_pane_id=$HERDR_PANE_ID"
-  fi
-  if [ "$BACKEND" = zellij ]; then
-    echo "zellij_session=$ZELLIJ_SES"
-    echo "zellij_tab_id=$ZELLIJ_TAB_ID"
-    echo "zellij_pane_id=$ZELLIJ_PANE_ID"
-  fi
-  if [ "$BACKEND" = orca ]; then
-    echo "orca_worktree_id=$ORCA_WORKTREE_ID"
-    echo "terminal=$ORCA_TERMINAL"
-  fi
-  if [ "$BACKEND" = cmux ]; then
-    echo "cmux_workspace_id=$CMUX_WORKSPACE_ID"
-    echo "cmux_surface_id=$CMUX_SURFACE_ID"
-  fi
-  if [ "$KIND" = secondmate ]; then
-    echo "home=$PROJ_ABS"
-    echo "projects=$SECONDMATE_PROJECTS"
-  fi
-  if [ "$KIND" != secondmate ] && [ "$PR_IDENTITY" != none ]; then
-    echo "pr_identity=$PR_IDENTITY"
-    echo "pr_project_key=$PROJ_KEY"
-    echo "pr_repo=$PR_REPO"
-    echo "pr_branch=$PR_BRANCH"
-    echo "pr_base=$PR_BASE"
-  fi
-} > "$STATE/$ID.meta" || {
+write_task_metadata "$STATE/$ID.meta" || {
   echo "error: could not publish task metadata at $STATE/$ID.meta" >&2
   exit 1
 }

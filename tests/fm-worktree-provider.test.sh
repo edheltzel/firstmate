@@ -184,6 +184,65 @@ EOF
   pass "treehouse spawn still types treehouse get and omits worktree_provider"
 }
 
+test_spawn_but_preserves_recovery_when_remove_fails() {
+  local rec home proj id fakebin wt wt_real log out status tasktmp owner_token real_git
+  id=but-abort-recovery-c3
+  rec=$(make_home spawn-but-abort "$id")
+  IFS='|' read -r home proj <<EOF
+$rec
+EOF
+  wt="$TMP_ROOT/but-abort-wts/$id"
+  fakebin=$(make_spawn_fakebin "$TMP_ROOT/spawn-but-abort/fake")
+  log="$TMP_ROOT/spawn-but-abort/tmux.log"
+  real_git=$(command -v git)
+  cat > "$fakebin/git" <<'SH'
+#!/usr/bin/env bash
+if [ "${FM_FAKE_GIT_REMOVE_FAIL:-0}" = 1 ] \
+   && [ "${1:-}" = -C ] && [ "${3:-}" = worktree ] && [ "${4:-}" = remove ]; then
+  echo "fatal: simulated registered worktree removal failure" >&2
+  exit 1
+fi
+exec "${FM_REAL_GIT:?}" "$@"
+SH
+  chmod +x "$fakebin/git"
+  tasktmp="/tmp/fm-$id"
+  [ ! -e "$tasktmp" ] || fail "abort recovery tasktmp fixture already exists: $tasktmp"
+  printf 'fixture\n' > "$tasktmp"
+  out=$(
+    FM_ROOT_OVERRIDE='' FM_HOME="$home" \
+      FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
+      FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
+      FM_SPAWN_NO_GUARD=1 TMUX="fake,1,0" \
+      FM_WORKTREE_PROVIDER=but FM_BUT_WORKTREE_ROOT="$TMP_ROOT/but-abort-wts" \
+      FM_FAKE_PANE_PATH="$wt" FM_TMUX_LOG="$log" \
+      FM_FAKE_GIT_REMOVE_FAIL=1 FM_REAL_GIT="$real_git" \
+      PATH="$fakebin:$PATH" \
+      "$SPAWN" "$id" "$proj" --mode no-mistakes --yolo off 2>&1
+  )
+  status=$?
+  rm -f "$tasktmp"
+  [ "$status" -ne 0 ] || fail "but spawn abort fixture should fail after worktree creation"
+  assert_contains "$out" "git worktree remove failed for $wt" \
+    "but abort cleanup did not report the failed worktree removal"
+  assert_contains "$out" "recovery metadata preserved at $home/state/$id.meta" \
+    "but abort cleanup did not report durable recovery metadata"
+  assert_present "$home/state/$id.meta" "but abort cleanup did not preserve task metadata"
+  assert_grep "endpoint_task_id=$id" "$home/state/$id.meta" \
+    "but abort recovery metadata lacks the task binding"
+  assert_grep "worktree=$wt" "$home/state/$id.meta" \
+    "but abort recovery metadata lacks the worktree"
+  assert_grep "worktree_provider=but" "$home/state/$id.meta" \
+    "but abort recovery metadata lacks the provider"
+  owner_token=$(sed -n 's/^worktree_owner_token=//p' "$home/state/$id.meta")
+  assert_grep "token=$owner_token" "$wt/.fm-worktree-owner" \
+    "but abort recovery metadata lost the ownership proof"
+  wt_real=$(cd "$wt" && pwd -P)
+  git -C "$proj" worktree list --porcelain | grep -F "worktree $wt_real" >/dev/null \
+    || fail "but abort fixture did not retain the registered worktree"
+  git -C "$proj" worktree remove --force "$wt"
+  pass "but spawn abort reports cleanup failure and preserves recovery metadata"
+}
+
 test_teardown_but_removes_git_worktree() {
   local home proj wt called
   home="$TMP_ROOT/td-but/home"
@@ -272,12 +331,151 @@ SH
   pass "but teardown still refuses a mismatched ownership marker"
 }
 
+test_forced_secondmate_but_child_runs_full_cleanup() {
+  local home subhome proj wt fakebin parent_id child_id pid out status
+  parent_id=but-parent-d4
+  child_id=but-child-d4
+  home="$TMP_ROOT/child-but/home"
+  subhome="$TMP_ROOT/child-but/secondmate"
+  proj="$TMP_ROOT/child-but/project"
+  wt="$TMP_ROOT/child-but/worktree"
+  fakebin="$TMP_ROOT/child-but/fakebin"
+  mkdir -p "$home/state" "$home/data" "$home/config" \
+    "$subhome/state" "$subhome/data" "$subhome/config" "$subhome/projects" "$fakebin"
+  fm_git_init_commit "$proj"
+  git -C "$proj" branch -M main
+  git -C "$proj" worktree add --quiet -b "fm/$child_id" "$wt" main
+  printf '%s\n' "$parent_id" > "$subhome/.fm-secondmate-home"
+  printf 'version=1\ntask_id=%s\ntoken=%s\n' "$child_id" fmw.CCCCCCCCCCCC \
+    > "$wt/.fm-worktree-owner"
+  fm_write_meta "$home/state/$parent_id.meta" \
+    "window=firstmate:fm-$parent_id" \
+    "endpoint_task_id=$parent_id" \
+    "worktree=$subhome" \
+    "project=$subhome" \
+    "kind=secondmate" \
+    "mode=secondmate" \
+    "home=$subhome"
+  printf -- '- %s - synthetic (home: %s; scope: cleanup; projects: ; added 2026-08-26)\n' \
+    "$parent_id" "$subhome" > "$home/data/secondmates.md"
+  fm_write_meta "$subhome/state/$child_id.meta" \
+    "window=firstmate:fm-$child_id" \
+    "endpoint_task_id=$child_id" \
+    "worktree=$wt" \
+    "project=$proj" \
+    "harness=codex" \
+    "kind=ship" \
+    "mode=local-only" \
+    "worktree_provider=but" \
+    "worktree_owner_token=fmw.CCCCCCCCCCCC"
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = display-message ] && [ "${*: -1}" = '#{pane_pid}' ]; then
+  printf '%s\n' "${FM_FAKE_PANE_PID:-}"
+fi
+exit 0
+SH
+  chmod +x "$fakebin/tmux"
+  perl -e 'setpgrp(0, 0); chdir shift or die; exec "sleep", "300"' "$wt" &
+  pid=$!
+  disown
+  sleep 0.3
+  kill -0 "$pid" 2>/dev/null || fail "but child cleanup sleeper did not start"
+  out=$(
+    FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" \
+      FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
+      FM_CONFIG_OVERRIDE="$home/config" FM_TEARDOWN_GUARD_DONE=1 \
+      FM_FAKE_PANE_PID="$pid" PATH="$fakebin:$PATH" \
+      "$TEARDOWN" "$parent_id" --force 2>&1
+  )
+  status=$?
+  expect_code 0 "$status" "forced secondmate teardown should clean a But child"
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -KILL "$pid" 2>/dev/null || true
+    fail "forced secondmate teardown left a But child process alive"
+  fi
+  assert_contains "$out" "reaping leaked worktree process" \
+    "forced secondmate teardown did not run the ordinary process reap"
+  assert_absent "$wt" "forced secondmate teardown left the But child worktree"
+  git -C "$proj" worktree list | grep -F "$wt" >/dev/null \
+    && fail "forced secondmate teardown left the But child registered"
+  git -C "$proj" show-ref --verify --quiet "refs/heads/fm/$child_id" \
+    && fail "forced secondmate teardown left the But child task branch"
+  pass "forced secondmate teardown reaps and removes a But child lifecycle"
+}
+
+test_forced_secondmate_refuses_unknown_child_provider_before_cleanup() {
+  local home subhome proj wt fakebin parent_id child_id out status
+  parent_id=unknown-parent-e5
+  child_id=unknown-child-e5
+  home="$TMP_ROOT/child-unknown/home"
+  subhome="$TMP_ROOT/child-unknown/secondmate"
+  proj="$TMP_ROOT/child-unknown/project"
+  wt="$TMP_ROOT/child-unknown/worktree"
+  fakebin="$TMP_ROOT/child-unknown/fakebin"
+  mkdir -p "$home/state" "$home/data" "$home/config" \
+    "$subhome/state" "$subhome/data" "$subhome/config" "$subhome/projects" "$fakebin"
+  fm_git_init_commit "$proj"
+  git -C "$proj" branch -M main
+  git -C "$proj" worktree add --quiet -b "fm/$child_id" "$wt" main
+  printf '%s\n' "$parent_id" > "$subhome/.fm-secondmate-home"
+  printf 'version=1\ntask_id=%s\ntoken=%s\n' "$child_id" fmw.DDDDDDDDDDDD \
+    > "$wt/.fm-worktree-owner"
+  fm_write_meta "$home/state/$parent_id.meta" \
+    "window=firstmate:fm-$parent_id" \
+    "endpoint_task_id=$parent_id" \
+    "worktree=$subhome" \
+    "project=$subhome" \
+    "kind=secondmate" \
+    "mode=secondmate" \
+    "home=$subhome"
+  printf -- '- %s - synthetic (home: %s; scope: cleanup; projects: ; added 2026-08-26)\n' \
+    "$parent_id" "$subhome" > "$home/data/secondmates.md"
+  fm_write_meta "$subhome/state/$child_id.meta" \
+    "window=firstmate:fm-$child_id" \
+    "endpoint_task_id=$child_id" \
+    "worktree=$wt" \
+    "project=$proj" \
+    "kind=ship" \
+    "mode=local-only" \
+    "worktree_provider=future" \
+    "worktree_owner_token=fmw.DDDDDDDDDDDD"
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${FM_TMUX_LOG:?}"
+exit 0
+SH
+  chmod +x "$fakebin/tmux"
+  : > "$home/tmux.log"
+  set +e
+  out=$(
+    FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" \
+      FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
+      FM_CONFIG_OVERRIDE="$home/config" FM_TEARDOWN_GUARD_DONE=1 \
+      FM_TMUX_LOG="$home/tmux.log" PATH="$fakebin:$PATH" \
+      "$TEARDOWN" "$parent_id" --force 2>&1
+  )
+  status=$?
+  set -e
+  expect_code 1 "$status" "unknown child worktree provider should refuse"
+  assert_contains "$out" "invalid worktree_provider metadata" \
+    "unknown child provider refusal was not reported"
+  assert_present "$wt" "unknown child provider refusal removed the worktree"
+  assert_present "$subhome/state/$child_id.meta" \
+    "unknown child provider refusal removed child metadata"
+  [ ! -s "$home/tmux.log" ] || fail "unknown child provider refusal killed an endpoint"
+  pass "forced secondmate teardown refuses unknown providers before cleanup"
+}
+
 test_override_pins_provider
 test_auto_detects_but_then_treehouse
 test_required_tools_follow_provider
 test_spawn_but_creates_git_worktree
 test_spawn_treehouse_still_types_get
+test_spawn_but_preserves_recovery_when_remove_fails
 test_teardown_but_removes_git_worktree
 test_teardown_but_still_requires_owner
+test_forced_secondmate_but_child_runs_full_cleanup
+test_forced_secondmate_refuses_unknown_child_provider_before_cleanup
 
 echo "# all fm-worktree-provider tests passed"

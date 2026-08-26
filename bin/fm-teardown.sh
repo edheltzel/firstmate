@@ -161,6 +161,31 @@ SUB_HOME_PARENT_MARKER=".fm-secondmate-parent"
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-nm-run-lib.sh
 . "$SCRIPT_DIR/fm-nm-run-lib.sh"
+
+worktree_provider_of_meta() {  # <meta> <task-id>
+  local meta=$1 task_id=$2 count provider
+  count=$(grep -c '^worktree_provider=' "$meta" 2>/dev/null || true)
+  case "$count" in
+    0)
+      printf '%s\n' treehouse
+      ;;
+    1)
+      provider=$(fm_meta_get "$meta" worktree_provider)
+      case "$provider" in
+        treehouse|but) printf '%s\n' "$provider" ;;
+        *)
+          echo "REFUSED: task $task_id has invalid worktree_provider metadata; expected absent, treehouse, or but. Preserving task state." >&2
+          return 1
+          ;;
+      esac
+      ;;
+    *)
+      echo "REFUSED: task $task_id has ambiguous worktree_provider metadata; expected absent, treehouse, or but. Preserving task state." >&2
+      return 1
+      ;;
+  esac
+}
+
 if [ "$#" -lt 1 ] || ! fm_task_id_path_safe "$1"; then
   echo "error: invalid teardown request" >&2
   exit 2
@@ -174,6 +199,7 @@ export FM_LOCK_LOG_PREFIX=teardown
 
 META="$STATE/$ID.meta"
 [ -f "$META" ] || { echo "error: no meta for task $ID at $META" >&2; exit 1; }
+WORKTREE_PROVIDER=$(worktree_provider_of_meta "$META" "$ID") || exit 1
 
 REMOTE_HANDOFF_DIR_PRESENT=0
 REMOTE_HANDOFF_DIR_REAL=
@@ -413,8 +439,6 @@ if [ -z "$BUSY_GEN" ]; then
 fi
 ORCA_WORKTREE_ID=$(fm_meta_get "$META" orca_worktree_id)
 WORKTREE_OWNER_TOKEN=$(fm_meta_get "$META" worktree_owner_token)
-WORKTREE_PROVIDER=$(fm_meta_get "$META" worktree_provider)
-[ -n "$WORKTREE_PROVIDER" ] || WORKTREE_PROVIDER=treehouse
 ORCA_PATH_MATCH_VERIFIED=0
 ATLAS_VERIFY_OUTPUT=
 
@@ -1636,6 +1660,35 @@ EOF
   return 1
 }
 
+teardown_but_worktree_cleanup() {  # <project> <worktree> <task-id> <owner-token> [post-check]
+  local project=$1 worktree=$2 task_id=$3 owner_token=$4 post_check=${5:-}
+  local branch task_branch="fm/$task_id"
+  require_treehouse_worktree_owner "$worktree" "$task_id" "$owner_token" || return 1
+  branch=$(git -C "$worktree" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
+  if [ "$branch" != HEAD ] && ! git -C "$worktree" checkout --detach -q; then
+    echo "error: cannot detach task worktree $worktree before removal" >&2
+    return 1
+  fi
+  if git -C "$project" show-ref --verify --quiet "refs/heads/$task_branch"; then
+    if ! git -C "$project" branch -D "$task_branch" >/dev/null 2>&1; then
+      echo "error: cannot delete task branch $task_branch before removing $worktree" >&2
+      return 1
+    fi
+  fi
+  rm -f "$worktree/.claude/settings.local.json" "$worktree/.opencode/plugins/fm-turn-end.js" \
+    "$worktree/.opencode/plugins/fm-busy-state.js" \
+    "$worktree/.fm-grok-turnend" "$worktree/.fm-kimi-turnend"
+  if [ -n "$post_check" ] && ! "$post_check"; then
+    echo "error: GitButler worktree safety check failed for $worktree; teardown aborted" >&2
+    return 1
+  fi
+  require_treehouse_worktree_owner "$worktree" "$task_id" "$owner_token" || return 1
+  if ! fm_worktree_but_remove "$project" "$worktree"; then
+    echo "error: git worktree remove failed for worktree $worktree; teardown aborted" >&2
+    return 1
+  fi
+}
+
 require_orca_worktree_path_match() {
   local worktree_id=$1 inspected=$2 resolved inspected_abs resolved_abs
   resolved=$(fm_backend_worktree_path orca "$worktree_id") || {
@@ -2019,6 +2072,7 @@ validate_firstmate_home_children_removal() {
   for child_meta in "$sub_state"/*.meta; do
     [ -e "$child_meta" ] || continue
     child_id=$(basename "$child_meta" .meta)
+    worktree_provider_of_meta "$child_meta" "$child_id" >/dev/null || return 1
     fm_backend_validate_task_endpoint "$child_meta" "$child_id" || return 1
     validate_pr_poll_cleanup "$sub_state" "$child_id" || return 1
     child_wt=$(meta_value "$child_meta" worktree)
@@ -2187,12 +2241,13 @@ preflight_firstmate_home_herdr_children() {  # <home>
 }
 
 cleanup_firstmate_home_children() {
-  local home=$1 sub_state child_meta child_id child_t child_wt child_proj child_kind child_home child_backend child_orca_worktree_id child_owner_token child_return_rc child_busy_gen
+  local home=$1 sub_state child_meta child_id child_t child_wt child_proj child_kind child_home child_backend child_orca_worktree_id child_owner_token child_return_rc child_busy_gen child_provider child_tasktmp
   sub_state="$home/state"
   [ -d "$sub_state" ] || return 0
   for child_meta in "$sub_state"/*.meta; do
     [ -e "$child_meta" ] || continue
     child_id=$(basename "$child_meta" .meta)
+    child_provider=$(worktree_provider_of_meta "$child_meta" "$child_id") || return 1
     child_wt=$(meta_value "$child_meta" worktree)
     child_proj=$(meta_value "$child_meta" project)
     child_kind=$(meta_value "$child_meta" kind)
@@ -2212,6 +2267,16 @@ cleanup_firstmate_home_children() {
       child_owner_token=$(meta_value "$child_meta" worktree_owner_token)
       validate_child_worktree_for_removal "$child_wt" "$child_proj" >/dev/null || return 1
       require_treehouse_worktree_owner "$child_wt" "$child_id" "$child_owner_token" || return 1
+    fi
+    if [ "$child_kind" != secondmate ] && [ "$child_backend" != orca ] \
+       && [ "$child_provider" = but ] && [ -n "$child_wt" ] && [ -d "$child_wt" ]; then
+      child_tasktmp=$(meta_value "$child_meta" tasktmp)
+      (
+        ID=$child_id
+        BACKEND=$child_backend
+        T=$child_t
+        reap_task_worktree_processes worktree "$child_wt" "$child_tasktmp"
+      ) || return 1
     fi
     if [ -n "$child_t" ]; then
       if [ "$child_backend" = herdr ]; then
@@ -2250,31 +2315,31 @@ cleanup_firstmate_home_children() {
     elif [ -n "$child_wt" ] && [ -d "$child_wt" ]; then
       validate_child_worktree_for_removal "$child_wt" "$child_proj" >/dev/null || return 1
       require_treehouse_worktree_owner "$child_wt" "$child_id" "$child_owner_token" || return 1
-      rm -f "$child_wt/.claude/settings.local.json" "$child_wt/.opencode/plugins/fm-turn-end.js" \
-        "$child_wt/.opencode/plugins/fm-busy-state.js" \
-        "$child_wt/.fm-grok-turnend" "$child_wt/.fm-kimi-turnend"
-      child_provider=$(meta_value "$child_meta" worktree_provider)
-      [ -n "$child_provider" ] || child_provider=treehouse
       if [ "$child_provider" = but ]; then
-        require_treehouse_worktree_owner "$child_wt" "$child_id" "$child_owner_token" || return 1
-        fm_worktree_but_remove "$child_proj" "$child_wt" || return 1
-      elif [ -n "$child_proj" ] && [ -d "$child_proj" ] && command -v treehouse >/dev/null 2>&1; then
-        CHILD_TREEHOUSE_WORKTREE=$child_wt
-        CHILD_TREEHOUSE_TASK_ID=$child_id
-        CHILD_TREEHOUSE_OWNER_TOKEN=$child_owner_token
-        if teardown_treehouse_return "$child_wt" "$child_proj" "child worktree" "" require_current_child_treehouse_worktree_owner; then
-          :
-        else
-          child_return_rc=$?
-          if [ "$child_return_rc" -eq "$TEARDOWN_TREEHOUSE_LOCK_REFUSED" ] \
-             || [ "$child_return_rc" -eq "$TEARDOWN_TREEHOUSE_OWNERSHIP_REFUSED" ]; then
-            return "$child_return_rc"
+        teardown_but_worktree_cleanup \
+          "$child_proj" "$child_wt" "$child_id" "$child_owner_token" || return 1
+      elif [ "$child_provider" = treehouse ]; then
+        rm -f "$child_wt/.claude/settings.local.json" "$child_wt/.opencode/plugins/fm-turn-end.js" \
+          "$child_wt/.opencode/plugins/fm-busy-state.js" \
+          "$child_wt/.fm-grok-turnend" "$child_wt/.fm-kimi-turnend"
+        if [ -n "$child_proj" ] && [ -d "$child_proj" ] && command -v treehouse >/dev/null 2>&1; then
+          CHILD_TREEHOUSE_WORKTREE=$child_wt
+          CHILD_TREEHOUSE_TASK_ID=$child_id
+          CHILD_TREEHOUSE_OWNER_TOKEN=$child_owner_token
+          if teardown_treehouse_return "$child_wt" "$child_proj" "child worktree" "" require_current_child_treehouse_worktree_owner; then
+            :
+          else
+            child_return_rc=$?
+            if [ "$child_return_rc" -eq "$TEARDOWN_TREEHOUSE_LOCK_REFUSED" ] \
+               || [ "$child_return_rc" -eq "$TEARDOWN_TREEHOUSE_OWNERSHIP_REFUSED" ]; then
+              return "$child_return_rc"
+            fi
+            require_treehouse_worktree_owner "$child_wt" "$child_id" "$child_owner_token" || return 1
+            safe_rm_rf_child_worktree "$child_wt" "$child_proj"
           fi
-          require_treehouse_worktree_owner "$child_wt" "$child_id" "$child_owner_token" || return 1
+        else
           safe_rm_rf_child_worktree "$child_wt" "$child_proj"
         fi
-      else
-        safe_rm_rf_child_worktree "$child_wt" "$child_proj"
       fi
     fi
     remove_grok_turnend_auth "$sub_state" "$child_id"
@@ -2460,38 +2525,31 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != secondmate ]; then
   fm_backend_remove_worktree "$BACKEND" "$ORCA_WORKTREE_ID"
 elif [ -d "$WT" ] && [ "$KIND" != secondmate ]; then
   require_current_treehouse_worktree_owner || exit 1
-  branch=$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
-  if [ "$branch" != "HEAD" ]; then
-    if git -C "$WT" checkout --detach -q 2>/dev/null; then
-      git -C "$WT" branch -D "$branch" >/dev/null 2>&1 || true
-    fi
-  fi
-  # Remove our hook file so a reused pool worktree cannot fire signals for a dead task.
-  rm -f "$WT/.claude/settings.local.json" "$WT/.opencode/plugins/fm-turn-end.js" \
-    "$WT/.fm-grok-turnend" "$WT/.fm-kimi-turnend"
-  # Kills remaining processes in the worktree (including the agent), resets, returns
-  # to pool. treehouse resolves the pool from the working directory, so run it from
-  # the project. teardown_treehouse_return tolerates transient and stale git locks
-  # left by a killed crew process; see the script header for retry and stale-lock proof.
   post_lock_cleanup_check=
   if [ "$FORCE" != "--force" ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ]; then
     post_lock_cleanup_check=validate_worktree_teardown_safety
   fi
   if [ "$WORKTREE_PROVIDER" = but ]; then
-    if [ -n "$post_lock_cleanup_check" ] && ! "$post_lock_cleanup_check"; then
-      echo "error: GitButler worktree safety check failed for $WT; teardown aborted" >&2
-      exit 1
+    teardown_but_worktree_cleanup \
+      "$PROJ" "$WT" "$ID" "$WORKTREE_OWNER_TOKEN" "$post_lock_cleanup_check" || exit 1
+  else
+    branch=$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
+    if [ "$branch" != "HEAD" ]; then
+      if git -C "$WT" checkout --detach -q 2>/dev/null; then
+        git -C "$WT" branch -D "$branch" >/dev/null 2>&1 || true
+      fi
     fi
-    require_current_treehouse_worktree_owner || exit 1
-    fm_worktree_but_remove "$PROJ" "$WT" || {
-      echo "error: git worktree remove failed for worktree $WT; teardown aborted" >&2
+    # Remove our hook file so a reused pool worktree cannot fire signals for a dead task.
+    rm -f "$WT/.claude/settings.local.json" "$WT/.opencode/plugins/fm-turn-end.js" \
+      "$WT/.fm-grok-turnend" "$WT/.fm-kimi-turnend"
+    # Kills remaining processes in the worktree (including the agent), resets, returns
+    # to pool. treehouse resolves the pool from the working directory, so run it from
+    # the project. teardown_treehouse_return tolerates transient and stale git locks
+    # left by a killed crew process; see the script header for retry and stale-lock proof.
+    teardown_treehouse_return "$WT" "$PROJ" "worktree" "$post_lock_cleanup_check" require_current_treehouse_worktree_owner || {
+      echo "error: treehouse return failed for worktree $WT; teardown aborted" >&2
       exit 1
     }
-  else
-  teardown_treehouse_return "$WT" "$PROJ" "worktree" "$post_lock_cleanup_check" require_current_treehouse_worktree_owner || {
-    echo "error: treehouse return failed for worktree $WT; teardown aborted" >&2
-    exit 1
-  }
   fi
 fi
 
