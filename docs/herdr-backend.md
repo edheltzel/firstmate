@@ -36,11 +36,12 @@ Real harness credential tests remain opt-in rather than part of default CI.
 
 The ordinary topology maintains one durable FM-fleet or SM-fleet workspace per project in a home and one task tab per endpoint.
 An ordinary ship or scout uses `FM-fleet-<n>` when the primary Firstmate creates the workspace, or `SM-fleet-<n>` when a second mate creates it.
-The suffix is a per-home sequential number so two projects never share a label.
+The suffix is a stable per-home/project assignment from one serialized registry per prefix in the shared Herdr session, so separate homes and concurrent spawns cannot mint the same label.
 This is never `<Project>-Fleet`.
 A persistent secondmate agent uses tab `Portside` in the primary Firstmate workspace (`TheBridge` by default).
 Local gitignored `config/herdr-layout` can override those names with `workspace=`, `firstmate-tab=`, and `secondmate-tab=` lines.
-The canonical project key drives both delivery-mode and Fleet lookup, while the project basename remains the display default unless `data/projects.md` supplies a `fleet=<Display>` alias.
+The canonical project key drives both delivery-mode and display Fleet lookup, while the project basename remains the display default unless `data/projects.md` supplies a `fleet=<Display>` alias.
+Generic workspace numbering never replaces that project-facing identity in display metadata.
 
 Attach to the selected named Herdr session and switch to the relevant Fleet or primary workspace to watch its task tabs.
 Routine supervision uses `bin/fm-peek.sh <id>` and `FM_HOME=<home> bin/fm-send.sh <id> '<text>'` without attaching.

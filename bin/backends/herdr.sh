@@ -230,15 +230,6 @@ fm_backend_herdr_tab_create() {  # <session> <workspace-id> <cwd> <label>
   fi
 }
 
-# fm_backend_herdr_state_dir: this home's state dir (tests may override).
-fm_backend_herdr_state_dir() {
-  if [ -n "${FM_STATE_OVERRIDE:-}" ]; then
-    printf '%s' "$FM_STATE_OVERRIDE"
-    return 0
-  fi
-  printf '%s/state' "${FM_HOME:-$FM_BACKEND_HERDR_ROOT}"
-}
-
 # fm_backend_herdr_fleet_home_prefix: FM from a primary home, SM from a
 # secondmate home. The marker is on FM_HOME, the spawning home.
 fm_backend_herdr_fleet_home_prefix() {
@@ -250,37 +241,146 @@ fm_backend_herdr_fleet_home_prefix() {
   printf 'FM'
 }
 
-# fm_backend_herdr_fleet_suffix: stable per-home per-project number. First
-# unseen project key gets max+1. The map lives at state/.herdr-fleet-labels.
-fm_backend_herdr_fleet_suffix() {  # <map-key>
-  local key=$1 dir map line k v max=0
-  [ -n "$key" ] || return 1
-  case "$key" in
-    *=*) return 1 ;;
-  esac
-  dir=$(fm_backend_herdr_state_dir)
-  map="$dir/.herdr-fleet-labels"
+fm_backend_herdr_hash_values() {
+  local value
+  if command -v shasum >/dev/null 2>&1; then
+    { for value in "$@"; do printf '%s\0' "$value"; done; } \
+      | shasum -a 256 2>/dev/null \
+      | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    { for value in "$@"; do printf '%s\0' "$value"; done; } \
+      | sha256sum 2>/dev/null \
+      | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
+fm_backend_herdr_fleet_namespace() {
+  printf '%s' "${FM_BACKEND_HERDR_FLEET_NAMESPACE_ROOT:-/tmp/firstmate-herdr-fleets}"
+}
+
+fm_backend_herdr_fleet_registry_paths() {  # <session>
+  local session=$1 socket hash key dir
+  socket=$(fm_backend_herdr_presentation_session_socket_path "$session") || return 1
+  hash=$(fm_backend_herdr_hash_values "$session" "$socket") || return 1
+  [ -n "$hash" ] || return 1
+  key=${hash:0:32}
+  dir=$(fm_backend_herdr_fleet_namespace) || return 1
+  [ -n "$dir" ] || return 1
+  if [ ! -e "$dir" ] && [ ! -L "$dir" ]; then
+    if ! mkdir -m 700 "$dir" 2>/dev/null; then
+      fm_backend_herdr_presentation_lock_namespace_valid "$dir" || return 1
+    fi
+  fi
+  fm_backend_herdr_presentation_lock_namespace_valid "$dir" || return 1
+  FM_BACKEND_HERDR_FLEET_MAP="$dir/labels-$key"
+  FM_BACKEND_HERDR_FLEET_LOCK="$dir/labels-$key.lock"
+}
+
+fm_backend_herdr_fleet_lock_acquire() {  # <lock-path>
+  local lock_path=$1 attempt=0 pid
+  FM_BACKEND_HERDR_FLEET_LOCK_HELD=0
+  while [ "$attempt" -lt 50 ]; do
+    if declare -F fm_lock_try_acquire >/dev/null 2>&1; then
+      fm_lock_try_acquire "$lock_path" && break
+    elif mkdir "$lock_path" 2>/dev/null; then
+      printf '%s\n' "${BASHPID:-$$}" > "$lock_path/pid" || {
+        rmdir "$lock_path" 2>/dev/null || true
+        return 1
+      }
+      break
+    else
+      pid=$(cat "$lock_path/pid" 2>/dev/null || true)
+      if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+        rm -f "$lock_path/pid"
+        rmdir "$lock_path" 2>/dev/null || true
+      fi
+    fi
+    sleep 0.1
+    attempt=$((attempt + 1))
+  done
+  [ "$attempt" -lt 50 ] || return 1
+  FM_BACKEND_HERDR_FLEET_LOCK_HELD=1
+}
+
+fm_backend_herdr_fleet_lock_release() {
+  [ "${FM_BACKEND_HERDR_FLEET_LOCK_HELD:-0}" = 1 ] || return 0
+  if declare -F fm_lock_release >/dev/null 2>&1; then
+    fm_lock_release "$FM_BACKEND_HERDR_FLEET_LOCK" || true
+  else
+    rm -f "$FM_BACKEND_HERDR_FLEET_LOCK/pid"
+    rmdir "$FM_BACKEND_HERDR_FLEET_LOCK" 2>/dev/null || true
+  fi
+  FM_BACKEND_HERDR_FLEET_LOCK_HELD=0
+}
+
+# fm_backend_herdr_fleet_suffix: stable per-home per-project number from the
+# shared named-session registry. FM and SM use independent sequences.
+fm_backend_herdr_fleet_suffix() {  # <session> <prefix> <project-key>
+  local session=$1 prefix=$2 project_key=$3 home identity map_key map lock
+  local line key value max=0 suffix tmp status=0
+  [ -n "$session" ] && [ -n "$project_key" ] || return 1
+  case "$prefix" in FM|SM) ;; *) return 1 ;; esac
+  home=$(fm_backend_herdr_projection_home_identity "${FM_HOME:-$FM_BACKEND_HERDR_ROOT}") || return 1
+  identity=$(fm_backend_herdr_hash_values "$prefix" "$home" "$project_key") || return 1
+  [ -n "$identity" ] || return 1
+  map_key="$prefix:$identity"
+  fm_backend_herdr_fleet_registry_paths "$session" || return 1
+  map=$FM_BACKEND_HERDR_FLEET_MAP
+  lock=$FM_BACKEND_HERDR_FLEET_LOCK
+  fm_backend_herdr_fleet_lock_acquire "$lock" || return 1
   if [ -f "$map" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
       case "$line" in
         ''|\#*) continue ;;
+        *=*) ;;
+        *) status=1; break ;;
       esac
-      k=${line%%=*}
-      v=${line#*=}
-      if [ "$k" = "$key" ] && [ -n "$v" ]; then
-        printf '%s' "$v"
-        return 0
+      key=${line%%=*}
+      value=${line#*=}
+      case "$value" in
+        ''|*[!0-9]*) status=1; break ;;
+      esac
+      [ "$value" -gt 0 ] || { status=1; break; }
+      if [ "$key" = "$map_key" ]; then
+        suffix=$value
+        break
       fi
-      case "$v" in
-        ''|*[!0-9]*) ;;
-        *) [ "$v" -gt "$max" ] && max=$v ;;
+      case "$key" in
+        "$prefix":*) [ "$value" -gt "$max" ] && max=$value ;;
       esac
     done < "$map"
   fi
-  v=$((max + 1))
-  mkdir -p "$dir" || return 1
-  printf '%s=%s\n' "$key" "$v" >> "$map" || return 1
-  printf '%s' "$v"
+  if [ "$status" -eq 0 ] && [ -z "${suffix:-}" ]; then
+    suffix=$((max + 1))
+    tmp=$(mktemp "${map}.tmp.XXXXXX") || status=1
+    if [ "$status" -eq 0 ]; then
+      chmod 0600 "$tmp" || status=1
+    fi
+    if [ "$status" -eq 0 ] && [ -f "$map" ]; then
+      cat "$map" > "$tmp" || status=1
+    fi
+    if [ "$status" -eq 0 ]; then
+      printf '%s=%s\n' "$map_key" "$suffix" >> "$tmp" || status=1
+    fi
+    if [ "$status" -eq 0 ]; then
+      mv "$tmp" "$map" || status=1
+    fi
+    [ "$status" -eq 0 ] || rm -f "${tmp:-}"
+  fi
+  fm_backend_herdr_fleet_lock_release
+  [ "$status" -eq 0 ] || return 1
+  printf '%s' "$suffix"
+}
+
+fm_backend_herdr_display_fleet_label() {  # <project-abs> [<project-key>]
+  local project_abs=$1 project_key=${2:-} name key fleet
+  name=${project_abs##*/}
+  key=${project_key:-$name}
+  fleet=$(FM_HOME="$FM_HOME" "$FM_BACKEND_HERDR_ROOT/bin/fm-project-mode.sh" --fleet "$key" "$name" 2>/dev/null) || fleet=$name
+  [ -n "$fleet" ] || fleet=$name
+  printf '%s-Fleet' "$fleet"
 }
 
 # fm_backend_herdr_workspace_label: the herdr workspace label for a spawn, the
@@ -288,22 +388,23 @@ fm_backend_herdr_fleet_suffix() {  # <map-key>
 # "Fleet workspaces").
 #   - An ordinary worker (kind ship or scout) lands in FM-fleet-<n> when the
 #     spawning home is the primary, or SM-fleet-<n> when it is a secondmate
-#     home. <n> is a per-home sequential suffix so two projects never share a
-#     label. The same project reuses its assigned suffix. This is never
-#     "<Project>-Fleet".
+#     home. <n> is allocated in the shared named-session namespace so separate
+#     homes and concurrent spawns never share a label. The same home/project
+#     pair reuses its assigned suffix. This is never "<Project>-Fleet".
 #   - The persistent SECONDMATE agent lands in the primary Firstmate workspace
 #     from config/herdr-layout (default TheBridge), as tab Portside.
 # The primary workspace and secondmate tab are never ordinary worker labels.
-fm_backend_herdr_workspace_label() {  # <kind> <project-abs> [<project-key>]
-  local kind=$1 project_abs=$2 project_key=${3:-} name key prefix suffix
+fm_backend_herdr_workspace_label() {  # <kind> <project-abs> [<project-key>] [<session>]
+  local kind=$1 project_abs=$2 project_key=${3:-} session=${4:-} name key prefix suffix
   if [ "$kind" = secondmate ]; then
     fm_backend_herdr_layout_value workspace
     return 0
   fi
+  [ -n "$session" ] || session=$(fm_backend_herdr_session)
   name=${project_abs##*/}
   key=${project_key:-$name}
   prefix=$(fm_backend_herdr_fleet_home_prefix)
-  suffix=$(fm_backend_herdr_fleet_suffix "$key") || return 1
+  suffix=$(fm_backend_herdr_fleet_suffix "$session" "$prefix" "$key") || return 1
   printf '%s-fleet-%s' "$prefix" "$suffix"
 }
 
@@ -1930,13 +2031,16 @@ fm_backend_herdr_workspace_ensure() {  # <session> <cwd> [<label>] [<launcher-re
 # supported, but real spawn paths use `<kind> <project-abs> [project-key]`.
 fm_backend_herdr_container_ensure() {
   local first=${1:-} kind cwd project_key relationship label session status
+  fm_backend_herdr_version_check || return 1
+  session=$(fm_backend_herdr_session)
+  fm_backend_herdr_server_ensure "$session" || return 1
   case "$first" in
     ship|scout|secondmate)
       kind=$first
       cwd=$2
       project_key=${3:-}
       relationship=${4:-launcher-home}
-      label=$(fm_backend_herdr_workspace_label "$kind" "$cwd" "$project_key")
+      label=$(fm_backend_herdr_workspace_label "$kind" "$cwd" "$project_key" "$session")
       ;;
     *)
       kind=ship
@@ -1946,9 +2050,6 @@ fm_backend_herdr_container_ensure() {
       label=$(fm_backend_herdr_home_workspace_label)
       ;;
   esac
-  fm_backend_herdr_version_check || return 1
-  session=$(fm_backend_herdr_session)
-  fm_backend_herdr_server_ensure "$session" || return 1
   fm_backend_herdr_workspace_ensure "$session" "$cwd" "$label" "$relationship" >/dev/null && status=0 || status=$?
   # A 3 already reported the exact placement it refused to guess at; adding the
   # generic message here would bury it.

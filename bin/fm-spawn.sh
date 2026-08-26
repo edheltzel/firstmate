@@ -1556,12 +1556,17 @@ case "$BACKEND" in
     HERDR_LABEL_HOME=$FM_HOME
     HERDR_LAUNCHER_RELATIONSHIP=launcher-home
     W=$(fm_backend_herdr_task_tab_label "$KIND" "$ID")
-    HERDR_FLEET_LABEL=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_workspace_label "$KIND" "$PROJ_ABS" "${PROJ_KEY:-}")
+    HERDR_SES=$(fm_backend_herdr_session)
+    fm_backend_herdr_version_check || exit 1
+    fm_backend_herdr_server_ensure "$HERDR_SES" || exit 1
+    HERDR_WORKSPACE_LABEL=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_workspace_label \
+      "$KIND" "$PROJ_ABS" "${PROJ_KEY:-}" "$HERDR_SES") || exit 1
+    HERDR_DISPLAY_FLEET_LABEL=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_display_fleet_label \
+      "$PROJ_ABS" "${PROJ_KEY:-}") || exit 1
     HERDR_PRESENTATION_JOURNAL=$(fm_backend_herdr_projection_journal_path "$STATE" "$ID")
     HERDR_PROJECTED=0
     if [ "$KIND" != secondmate ] && fm_backend_herdr_presentation_enabled "$CONFIG"; then
-      HERDR_SES=$(fm_backend_herdr_session)
-      HERDR_PARENT_LABEL=$HERDR_FLEET_LABEL
+      HERDR_PARENT_LABEL=$HERDR_WORKSPACE_LABEL
       if [ -e "$HERDR_PRESENTATION_JOURNAL" ] || [ -L "$HERDR_PRESENTATION_JOURNAL" ]; then
         fm_backend_herdr_server_ensure "$HERDR_SES" || {
           echo "error: herdr presentation recovery could not ensure its exact named session" >&2
@@ -1633,7 +1638,7 @@ case "$BACKEND" in
             HERDR_PROJECTION_LABEL=$(fm_backend_herdr_projection_workspace_label "$ID" "$HERDR_PROJECTION_ID")
             if ! FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_projection_create_task \
               "$PROJ_ABS" "$HERDR_PROJECTION_LABEL" "$W" \
-              "$ID" "${PROJ_KEY:-}" "$HARNESS" "$HERDR_FLEET_LABEL"; then
+              "$ID" "${PROJ_KEY:-}" "$HARNESS" "$HERDR_DISPLAY_FLEET_LABEL"; then
               if [ "${FM_BACKEND_HERDR_PROJECTION_CLEANUP_SAFE:-0}" = 1 ]; then
                 HERDR_PROJECTION_ABORT_CLEANUP=1
                 HERDR_PROJECTION_ABORT_SESSION=$FM_BACKEND_HERDR_PROJECTION_SESSION
@@ -1689,7 +1694,7 @@ case "$BACKEND" in
       HERDR_WORKSPACE_ID=${CONTAINER#*:}
       HERDR_TASK_IDS=$(fm_backend_herdr_create_task \
         "$CONTAINER" "$W" "$PROJ_ABS" "$HERDR_SEEDED_DEFAULT_TAB_ID" \
-        "$ID" "${PROJ_KEY:-}" "$HARNESS" "$HERDR_FLEET_LABEL") || exit 1
+        "$ID" "${PROJ_KEY:-}" "$HARNESS" "$HERDR_DISPLAY_FLEET_LABEL") || exit 1
       read -r HERDR_TAB_ID HERDR_PANE_ID <<EOF
 $HERDR_TASK_IDS
 EOF

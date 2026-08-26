@@ -66,6 +66,7 @@ herdr_forget_inherited_pane
 TMP_ROOT=$(mktemp -d "$(cd "${TMPDIR:-/tmp}" && pwd -P)/fm-herdr-e2e.XXXXXX")
 SESSION="fm-lab-herdr-e2e-$$"
 export HERDR_SESSION="$SESSION"
+export FM_BACKEND_HERDR_FLEET_NAMESPACE_ROOT="$TMP_ROOT/fleet-namespace"
 WT1=; WT2=; WT3=
 cleanup_all() {
   [ -n "$WT1" ] && command -v treehouse >/dev/null 2>&1 && treehouse return --force "$WT1" >/dev/null 2>&1
@@ -150,6 +151,10 @@ CM1_WSID=$(herdr pane get "$CM1_PANE" --session "$SESSION" 2>/dev/null | jq -r '
 CM1_WS_LABEL=$(ws_label_of_pane "$CM1_PANE")
 [ "$CM1_WS_LABEL" = "$PROJ1_FLEET" ] || fail "a PROJ1 worker should land in the '$PROJ1_FLEET' workspace, got '$CM1_WS_LABEL'"
 pass "real herdr E2E: the PROJ1 worker landed in its project's '$PROJ1_FLEET' workspace"
+CM1_DISPLAY_AGENT=$(herdr pane get "$CM1_PANE" --session "$SESSION" 2>/dev/null | jq -r '.result.pane.display_agent // empty')
+[ "$CM1_DISPLAY_AGENT" = "scratch-project-1-Fleet-1" ] \
+  || fail "generic workspace naming replaced the project-facing display identity: '$CM1_DISPLAY_AGENT'"
+pass "real herdr E2E: FM-fleet workspace topology preserves the project-facing Fleet display identity"
 
 # --- 2. the PRIMARY spawns a secondmate: Portside in TheBridge ---
 # The persistent secondmate agent shares the primary Firstmate workspace.

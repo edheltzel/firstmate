@@ -24,6 +24,7 @@ herdr_forget_inherited_pane
 
 TMP_ROOT=$(fm_test_tmproot fm-backend-herdr-tests)
 export FM_BACKEND_HERDR_SUBMIT_MIN_SLEEP=0
+export FM_BACKEND_HERDR_FLEET_NAMESPACE_ROOT="$TMP_ROOT/fleet-namespace"
 # Spawn-environment tests opt in explicitly. The rest of this suite must not
 # depend on whichever SSH agent launched the test process.
 unset SSH_AUTH_SOCK
@@ -52,6 +53,19 @@ next=$(( $(cat "$COUNT_FILE" 2>/dev/null || echo 0) + 1 ))
 } >> "$LOG"
 if [ "${1:-}" = status ] && [ "${2:-}" = --json ] && [ "${FM_HERDR_SCRIPT_STATUS:-0}" != 1 ]; then
   printf '{"client":{"version":"0.7.1","protocol":14},"server":{"running":true}}\n'
+  exit 0
+fi
+if [ "${1:-}" = session ] && [ "${2:-}" = list ]; then
+  if [ -f "$RESP/$next.out" ] && grep -q '"sessions"' "$RESP/$next.out"; then
+    echo "$next" > "$COUNT_FILE"
+    if [ -f "$RESP/$next.exit" ]; then
+      exit "$(cat "$RESP/$next.exit")"
+    fi
+    cat "$RESP/$next.out"
+    exit 0
+  fi
+  printf '{"sessions":[{"name":"%s","running":true,"socket_path":"%s/session.sock"}]}\n' \
+    "${HERDR_SESSION:-default}" "$RESP"
   exit 0
 fi
 n=$next
@@ -116,6 +130,10 @@ done
 case "$cmd $sub" in
   "status --json")
     printf '{"client":{"version":"0.7.1","protocol":14},"server":{"running":true}}\n'
+    ;;
+  "session list")
+    printf '{"sessions":[{"name":"%s","running":true,"socket_path":"%s.sock"}]}\n' \
+      "${HERDR_SESSION:-default}" "$STATE"
     ;;
   "workspace list")
     jq_state '{result:{workspaces:.workspaces}}'
@@ -227,15 +245,18 @@ test_version_check_refuses_missing_herdr() {
   pass "fm_backend_herdr_version_check: refuses loudly when herdr is not installed"
 }
 
-# --- workspace_label: project-keyed Fleet workspaces + primary layout --------
+# --- workspace_label: numbered Fleet workspaces + primary layout -------------
 # fm_backend_herdr_workspace_label <kind> <project-abs>. Ordinary workers land in
-# their PROJECT's "<Fleet display name>-Fleet" workspace (Fleet name resolved by
-# fm-project-mode.sh --fleet from data/projects.md, default = repo name); the
-# secondmate agent lands in the primary Firstmate workspace (TheBridge by default).
+# FM-fleet-* or SM-fleet-*; the secondmate agent lands in the primary Firstmate
+# workspace (TheBridge by default).
 
 # resolve <kind> <project-abs> under FM_HOME=<home>; caller sets up <home>/data.
 _wslabel() {  # <home> <kind> <project-abs>
-  FM_HOME="$1" bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_workspace_label "$1" "$2"' "$ROOT" "$2" "$3"
+  FM_HOME="$1" FM_FAKE_FLEET_SOCKET="$1/session.sock" bash -c '
+    . "$0/bin/backends/herdr.sh"
+    fm_backend_herdr_presentation_session_socket_path() { printf "%s" "$FM_FAKE_FLEET_SOCKET"; }
+    fm_backend_herdr_workspace_label "$1" "$2" "" fmtest
+  ' "$ROOT" "$2" "$3"
 }
 
 test_workspace_label_ordinary_worker_uses_project_fleet() {
@@ -302,7 +323,16 @@ test_workspace_label_from_clone_basename_not_worktree_path() {
 # the canonical registry key threaded from fm-spawn.sh, distinct from the clone
 # basename (the AgentThemis/Themis case).
 _wslabel_key() {  # <home> <kind> <project-abs> <project-key>
-  FM_HOME="$1" bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_workspace_label "$1" "$2" "$3"' "$ROOT" "$2" "$3" "$4"
+  FM_HOME="$1" FM_FAKE_FLEET_SOCKET="$1/session.sock" bash -c '
+    . "$0/bin/backends/herdr.sh"
+    fm_backend_herdr_presentation_session_socket_path() { printf "%s" "$FM_FAKE_FLEET_SOCKET"; }
+    fm_backend_herdr_workspace_label "$1" "$2" "$3" fmtest
+  ' "$ROOT" "$2" "$3" "$4"
+}
+
+_display_fleet_label() {  # <home> <project-abs> <project-key>
+  FM_HOME="$1" bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_display_fleet_label "$1" "$2"' \
+    "$ROOT" "$2" "$3"
 }
 
 test_workspace_label_key_differs_from_basename_no_alias() {
@@ -328,13 +358,76 @@ test_workspace_label_live_agentthemis_defaults_to_themis_fleet() {
 
 test_workspace_label_key_differs_from_basename_with_alias() {
   local home
-  # Same key-vs-basename mismatch, but now the key's entry carries fleet=Shown:
-  # only an explicit alias renames the workspace.
   home="$TMP_ROOT/fleet-key-alias"; mkdir -p "$home/data" "$home/projects/Themis"
   printf -- '- AgentThemis [local-only fleet=Shown] - key with alias (added 2026-07-20)\n' > "$home/data/projects.md"
   out=$(_wslabel_key "$home" ship "$home/projects/Themis" AgentThemis)
   [ "$out" = "FM-fleet-1" ] || fail "fleet=Shown must not become the workspace name, got '$out'"
   pass "fm_backend_herdr_workspace_label: fleet= alias on a key-mismatched project is not the workspace name"
+}
+
+test_workspace_and_display_fleet_labels_are_separate() {
+  local home workspace_label display_label
+  home="$TMP_ROOT/fleet-display-separate"; mkdir -p "$home/data" "$home/projects/atlas-config"
+  printf -- '- atlas-config [direct-PR fleet=Atlas] - config (added 2026-07-17)\n' > "$home/data/projects.md"
+  workspace_label=$(_wslabel_key "$home" ship "$home/projects/atlas-config" atlas-config)
+  display_label=$(_display_fleet_label "$home" "$home/projects/atlas-config" atlas-config)
+  [ "$workspace_label" = "FM-fleet-1" ] || fail "workspace topology should use FM-fleet-1, got '$workspace_label'"
+  [ "$display_label" = "Atlas-Fleet" ] || fail "display metadata should preserve Atlas-Fleet, got '$display_label'"
+  pass "herdr Fleet identity: generic workspace labels stay separate from project-facing display labels"
+}
+
+_wslabel_shared_session() {  # <home> <kind> <project-abs> <project-key> <socket>
+  FM_HOME="$1" FM_FAKE_FLEET_SOCKET="$5" bash -c '
+    . "$0/bin/backends/herdr.sh"
+    fm_backend_herdr_presentation_session_socket_path() { printf "%s" "$FM_FAKE_FLEET_SOCKET"; }
+    label=$(fm_backend_herdr_workspace_label "$1" "$2" "$3" fmtest) || exit 1
+    printf "%s\n" "$label"
+  ' "$ROOT" "$2" "$3" "$4"
+}
+
+test_workspace_label_separate_secondmate_homes_share_one_sequence() {
+  local dir home_a home_b socket pid_a pid_b labels
+  dir="$TMP_ROOT/fleet-shared-sm"; home_a="$dir/home-a"; home_b="$dir/home-b"; socket="$dir/session.sock"
+  mkdir -p "$home_a/projects/Echo" "$home_b/projects/Ali"
+  printf 'alpha\n' > "$home_a/.fm-secondmate-home"
+  printf 'bravo\n' > "$home_b/.fm-secondmate-home"
+  _wslabel_shared_session "$home_a" ship "$home_a/projects/Echo" Echo "$socket" > "$dir/a.out" & pid_a=$!
+  _wslabel_shared_session "$home_b" ship "$home_b/projects/Ali" Ali "$socket" > "$dir/b.out" & pid_b=$!
+  wait "$pid_a" || fail "first secondmate-home allocation failed"
+  wait "$pid_b" || fail "second secondmate-home allocation failed"
+  labels=$(sort "$dir/a.out" "$dir/b.out")
+  [ "$labels" = "$(printf 'SM-fleet-1\nSM-fleet-2')" ] \
+    || fail "separate secondmate homes minted colliding labels: $labels"
+  pass "herdr Fleet allocation: separate secondmate homes share one serialized SM sequence"
+}
+
+test_workspace_label_concurrent_same_home_projects_are_unique() {
+  local dir home socket i labels count
+  local -a pids
+  dir="$TMP_ROOT/fleet-concurrent-home"; home="$dir/home"; socket="$dir/session.sock"
+  mkdir -p "$home/projects"
+  i=1
+  while [ "$i" -le 12 ]; do
+    mkdir -p "$home/projects/P$i"
+    _wslabel_shared_session "$home" ship "$home/projects/P$i" "P$i" "$socket" > "$dir/$i.out" &
+    pids[$i]=$!
+    i=$((i + 1))
+  done
+  i=1
+  while [ "$i" -le 12 ]; do
+    wait "${pids[$i]}" || fail "concurrent same-home allocation $i failed"
+    i=$((i + 1))
+  done
+  labels=$(cat "$dir"/*.out)
+  count=$(printf '%s\n' "$labels" | sort -u | wc -l | tr -d '[:space:]')
+  [ "$count" = 12 ] || fail "concurrent same-home projects reused a suffix: $labels"
+  i=1
+  while [ "$i" -le 12 ]; do
+    printf '%s\n' "$labels" | grep -qx "FM-fleet-$i" \
+      || fail "concurrent same-home allocation omitted FM-fleet-$i: $labels"
+    i=$((i + 1))
+  done
+  pass "herdr Fleet allocation: concurrent same-home projects receive unique sequential labels"
 }
 
 test_workspace_label_absent_key_arg_is_basename_backcompat() {
@@ -4480,6 +4573,9 @@ test_workspace_label_from_clone_basename_not_worktree_path
 test_workspace_label_key_differs_from_basename_no_alias
 test_workspace_label_live_agentthemis_defaults_to_themis_fleet
 test_workspace_label_key_differs_from_basename_with_alias
+test_workspace_and_display_fleet_labels_are_separate
+test_workspace_label_separate_secondmate_homes_share_one_sequence
+test_workspace_label_concurrent_same_home_projects_are_unique
 test_workspace_label_absent_key_arg_is_basename_backcompat
 test_workspace_label_secondmate_defaults_to_thebridge
 test_workspace_label_secondmate_layout_config_overrides_workspace
