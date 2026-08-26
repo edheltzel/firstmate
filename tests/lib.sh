@@ -33,6 +33,10 @@ FM_TEST_LIB_SOURCED=1
 # the boundary against the real hazard is unaffected. tests/fm-gate-refuse.test.sh
 # strips this to verify real refusal.
 export FM_GATE_REFUSE_BYPASS=1
+# Production prefers GitButler worktrees when but is on PATH. Pin tests to
+# treehouse so suites that did not opt into the but branch stay stable.
+: "${FM_WORKTREE_PROVIDER:=treehouse}"
+export FM_WORKTREE_PROVIDER
 
 # Resolve the repo root from this library's own location. Consumed by sourcing
 # test files, not by this library, so it reads as "unused" here.

@@ -343,7 +343,7 @@ case "${1:-} ${2:-}" in
     printf '{"sessions":[{"name":"default","running":true,"socket_path":"%s.sock"}]}\n' "$state"
     ;;
   "workspace list")
-    printf '{"result":{"workspaces":[{"workspace_id":"ws1","label":"Archon-%s","focused":true,"active_tab_id":"t-focus"}]}}\n' "$mate_id"
+    printf '%s\n' '{"result":{"workspaces":[{"workspace_id":"ws1","label":"TheBridge","focused":true,"active_tab_id":"t-focus"}]}}'
     ;;
   "tab list")
     if [ -e "$spawned" ]; then

@@ -225,8 +225,11 @@ write_child_meta() {
   fm_write_meta "$REMOTE_HOME/state/work-child.meta" \
     "window=firstmate:fm-work-child" "endpoint_task_id=work-child" \
     "worktree=$CHILD_WT" "project=$CHILD_WT" "harness=codex" "kind=ship" \
-    "mode=local-only" "yolo=off"
+    "mode=local-only" "yolo=off" "worktree_owner_token=fmw.AAAAAAAAAAAA"
 }
+printf 'version=1\ntask_id=work-child\ntoken=fmw.AAAAAAAAAAAA\n' > \
+  "$CHILD_WT/.fm-worktree-owner"
+printf '%s\n' .fm-worktree-owner >> "$CHILD_WT/.git/info/exclude"
 mkdir -p "$TMP_ROOT/childfake"
 for t in tmux treehouse no-mistakes gh gh-axi tasks-axi; do
   printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP_ROOT/childfake/$t"

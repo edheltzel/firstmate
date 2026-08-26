@@ -55,7 +55,7 @@ Every `needs:human` line must include concise explicit response options such as 
 Count each Tasks Axi record as exactly one action item, never each sentence, subtask, status event, or child process.
 List only current action items inline.
 Represent completed records only through progress percentages and completed/scoped counts.
-Use each active Treehouse branch name from the snapshot.
+Use each active task branch name from the snapshot.
 When a project has no active branch, display its repository default branch.
 Order projects with self-progressing `in_flight` work first, blocked or held work second, and projects whose only current work is `needs:human` last.
 Within each group, sort by numeric priority ascending with unknown priorities last, then by project name.

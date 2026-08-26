@@ -3,9 +3,9 @@
 #
 # Design: data/fm-backend-design-d7/report.md ("Zellij Backend" section - the
 # interface mapping, implementation choices, and "Zellij gaps to verify" list)
-# and herdr-addendum.md D2/D3 (zellij is P3, after herdr; treehouse stays the
-# worktree provider). Zellij is a session provider ONLY: the worktree provider
-# stays treehouse, exactly like tmux and herdr. Sourced only through
+# and herdr-addendum.md D2/D3 (zellij is P3, after herdr; worktree isolation is
+# owned by bin/fm-worktree-lib.sh). Zellij is a session provider ONLY: the
+# worktree provider is selected like tmux and herdr. Sourced only through
 # bin/fm-backend.sh's fm_backend_source in normal operation; the unit tests
 # source it directly.
 #
@@ -382,8 +382,8 @@ fm_backend_zellij_target_ready() {  # <target> [expected-label]
 }
 
 # fm_backend_zellij_current_path: the live pane's cwd, or empty on any error.
-# Mirrors tmux's pane_current_path poll used for worktree-path discovery after
-# `treehouse get`.
+# Mirrors tmux's pane_current_path poll used after the selected provider moves
+# the shell into the worktree.
 #
 # Verified pitfall (docs/zellij-backend.md "Worktree-path discovery: pane_cwd
 # does not track a subshell"): `list-panes --json`'s `pane_cwd` DOES reflect a

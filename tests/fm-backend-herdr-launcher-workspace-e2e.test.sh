@@ -37,6 +37,7 @@ assert_contains_local() {  # <haystack> <needle> <msg>
 command -v herdr >/dev/null 2>&1 || { echo "skip: herdr not found"; exit 0; }
 command -v jq >/dev/null 2>&1 || { echo "skip: jq not found (required by the herdr adapter)"; exit 0; }
 command -v treehouse >/dev/null 2>&1 || { echo "skip: treehouse not found (required by fm-spawn.sh)"; exit 0; }
+export FM_WORKTREE_PROVIDER=treehouse
 
 # shellcheck source=tests/herdr-test-safety.sh
 . "$ROOT/tests/herdr-test-safety.sh"
@@ -173,18 +174,10 @@ printf '# scratch secondmate home AGENTS.md placeholder\n' > "$SM2_HOME/AGENTS.m
 printf '%s\n' "$SM2_ID" > "$SM2_HOME/.fm-secondmate-home"
 printf 'trivial e2e secondmate charter: nothing to do.\n' > "$SM2_HOME/data/charter.md"
 
-# A third primary-shaped home that keeps presentation spaces ON through the
-# historical empty opt-in file, so the default-on migration is exercised against
-# real Herdr while the opted-out homes above assert the flat layout in isolation.
-PRES_HOME="$TMP_ROOT/presentation-home"
-mkdir -p "$PRES_HOME/state" "$PRES_HOME/config"
-: > "$PRES_HOME/config/herdr-presentation-spaces"
-
 for id in uniqA uniqB dupC dupD staleF smE presU presD; do
-  mkdir -p "$PRIMARY_HOME/data/$id" "$SM_HOME/data/$id" "$PRES_HOME/data/$id"
+  mkdir -p "$PRIMARY_HOME/data/$id" "$SM_HOME/data/$id"
   printf 'trivial launcher-placement brief: nothing to do.\n' > "$PRIMARY_HOME/data/$id/brief.md"
   printf 'trivial launcher-placement brief: nothing to do.\n' > "$SM_HOME/data/$id/brief.md"
-  printf 'trivial launcher-placement brief: nothing to do.\n' > "$PRES_HOME/data/$id/brief.md"
 done
 mkdir -p "$PRIMARY_HOME/data/$SM2_ID"
 printf 'trivial secondmate charter brief: nothing to do.\n' > "$PRIMARY_HOME/data/$SM2_ID/brief.md"
@@ -242,9 +235,11 @@ pass "real herdr E2E: the normal unique-label path is unchanged when the launche
 # --- 2b. presentation spaces ON: the projected child is created and bound
 #         UNDER the launcher's exact workspace, not collapsed into it ---------
 
-spawn_from_launcher "$LAUNCH_PRIMARY_PANE" "$PRES_HOME" presU "$PROJ" --mode no-mistakes --yolo off
+: > "$PRIMARY_HOME/config/herdr-presentation-spaces"
+spawn_from_launcher "$LAUNCH_PRIMARY_PANE" "$PRIMARY_HOME" presU "$PROJ" --mode no-mistakes --yolo off
+printf 'off\n' > "$PRIMARY_HOME/config/herdr-presentation-spaces"
 [ "$SPAWN_RC" -eq 0 ] || fail "a presentation-enabled spawn from a launcher pane failed"$'\n'"$(cat "$SPAWN_ERR")"
-PRESU_META="$PRES_HOME/state/presU.meta"
+PRESU_META="$PRIMARY_HOME/state/presU.meta"
 record_worktree "$PRESU_META"
 PRESU_PANE=$(grep '^herdr_pane_id=' "$PRESU_META" | cut -d= -f2-)
 PRESU_WS=$(workspace_of_pane "$PRESU_PANE")
@@ -255,10 +250,10 @@ case "$(label_of_workspace "$PRESU_WS")" in
   "└ "*" · p:"*) : ;;
   *) fail "presU's workspace is not a presentation projection: '$(label_of_workspace "$PRESU_WS")'" ;;
 esac
-PRESU_JOURNAL="$PRES_HOME/state/presU.herdr-presentation"
+PRESU_JOURNAL="$PRIMARY_HOME/state/presU.herdr-presentation"
 [ -f "$PRESU_JOURNAL" ] || fail "a projected spawn did not leave its presentation journal"
 [ "$(journal_field "$PRESU_JOURNAL" version)" = 2 ] \
-  || fail "the projection did not publish an exact restart binding"$'\n'"$(cat "$PRESU_JOURNAL")"
+  || fail "the projection did not publish an exact restart binding"$'\n'"$(cat "$PRESU_JOURNAL")"$'\n'"$(cat "$SPAWN_ERR")"$'\n'"$(lab workspace list 2>&1)"$'\n'"$(lab tab list --workspace "$PRESU_WS" 2>&1)"$'\n'"$(lab pane list --workspace "$PRESU_WS" 2>&1)"
 [ "$(journal_field "$PRESU_JOURNAL" parent_workspace_id)" = "$WS_PRIMARY" ] \
   || fail "the projection bound a parent other than the launcher's own workspace ($WS_PRIMARY)"
 [ "$(journal_field "$PRESU_JOURNAL" workspace_id)" = "$PRESU_WS" ] \
@@ -322,14 +317,16 @@ pass "real herdr E2E: the duplicate-labeled sibling workspace is left entirely u
 # --- 3b. presentation spaces ON with a duplicated parent label: the projection
 #         still hangs off the launcher's exact workspace ---------------------
 
-spawn_from_launcher "$LAUNCH_DUP_PANE" "$PRES_HOME" presD "$PROJ" --mode no-mistakes --yolo off
+: > "$PRIMARY_HOME/config/herdr-presentation-spaces"
+spawn_from_launcher "$LAUNCH_DUP_PANE" "$PRIMARY_HOME" presD "$PROJ" --mode no-mistakes --yolo off
+printf 'off\n' > "$PRIMARY_HOME/config/herdr-presentation-spaces"
 [ "$SPAWN_RC" -eq 0 ] || fail "a projected spawn under a duplicated parent label failed"$'\n'"$(cat "$SPAWN_ERR")"
-PRESD_META="$PRES_HOME/state/presD.meta"
+PRESD_META="$PRIMARY_HOME/state/presD.meta"
 record_worktree "$PRESD_META"
 PRESD_PANE=$(grep '^herdr_pane_id=' "$PRESD_META" | cut -d= -f2-)
 PRESD_WS=$(workspace_of_pane "$PRESD_PANE")
 [ -n "$PRESD_WS" ] || fail "could not read presD's workspace"
-PRESD_JOURNAL="$PRES_HOME/state/presD.herdr-presentation"
+PRESD_JOURNAL="$PRIMARY_HOME/state/presD.herdr-presentation"
 [ "$(journal_field "$PRESD_JOURNAL" version)" = 2 ] \
   || fail "the duplicate-label projection did not publish a version 2 binding"$'\n'"$(cat "$PRESD_JOURNAL" 2>/dev/null)"
 [ "$(journal_field "$PRESD_JOURNAL" parent_workspace_id)" = "$WS_PRIMARY_DUP" ] \

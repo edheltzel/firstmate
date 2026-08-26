@@ -3,10 +3,11 @@
 Orca is an experimental macOS backend in which the Orca app owns both the task worktree and terminal endpoint.
 The crewmate harness remains the agent process launched inside that endpoint.
 Firstmate agents load [`firstmate-orca`](../.agents/skills/firstmate-orca/SKILL.md) before operating or recovering this backend.
+[`configuration.md`](configuration.md#runtime-backend-configbackend--fm_backend) owns shared backend and worktree-provider selection plus metadata semantics.
 
 ## Setup
 
-Pick Orca when you already use the Orca macOS app and want Orca-managed worktrees and terminals instead of Treehouse plus a session multiplexer.
+Pick Orca when you already use the Orca macOS app and want it to manage both worktrees and terminals.
 Orca is macOS-only, explicit-only, and does not support secondmate spawns.
 
 Prerequisites:
@@ -29,7 +30,7 @@ Enter and Ctrl-C are supported; Escape is not.
 ## Task shape and metadata
 
 Each task has one Orca-managed git worktree and one Orca terminal.
-`fm-spawn.sh` does not call Treehouse for Orca tasks.
+`fm-spawn.sh` does not invoke Firstmate's selected worktree provider for Orca tasks.
 The normal isolation and unlanded-work refusal rules still apply.
 
 ```text

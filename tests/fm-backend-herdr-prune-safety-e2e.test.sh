@@ -41,6 +41,7 @@ herdr_forget_inherited_pane
 SESSION="fm-lab-prune-safety-e2e-$$"
 export HERDR_SESSION="$SESSION"
 SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/fm-herdr-prune-safety.XXXXXX")
+export FM_BACKEND_HERDR_FLEET_NAMESPACE_ROOT="$SCRATCH/fleet-namespace"
 cleanup_all() {
   herdr_safe_stop_and_delete "$SESSION"
   rm -rf "$SCRATCH"
@@ -66,6 +67,9 @@ LIVE_CWD="$SCRATCH/proj"
 mkdir -p "$LIVE_CWD"
 
 fm_backend_herdr_server_ensure "$SESSION" || fail "could not start the isolated session's server"
+ALLOCATED_SUFFIX=$(FM_HOME="$SCRATCH" fm_backend_herdr_fleet_suffix "$SESSION" FM proj) \
+  || fail "could not reserve the collision fixture's fleet suffix"
+[ "$ALLOCATED_SUFFIX" = 1 ] || fail "the isolated collision fixture should reserve suffix 1, got '$ALLOCATED_SUFFIX'"
 
 CREATE_OUT=$(fm_backend_herdr_cli "$SESSION" workspace create --cwd "$LIVE_CWD" --label FM-fleet-1 --no-focus) \
   || fail "could not create the label-collision startup workspace"

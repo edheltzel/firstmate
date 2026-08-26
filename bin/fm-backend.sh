@@ -306,17 +306,28 @@ fm_backend_validate_spawn() {  # <name>
 #   - jq, for the JSON-emitting experimental adapters (herdr, zellij, cmux) whose
 #     spawn/liveness paths parse the backend's JSON output (see each adapter's
 #     tool check, e.g. fm_backend_herdr_tool_check);
-#   - the treehouse worktree provider for every session-provider-only backend
-#     (tmux, herdr, zellij, cmux); orca owns its own task worktree and terminal,
-#     so it drops both treehouse and any other backend's session CLI.
+#   - the worktree provider for every session-provider-only backend
+#     (tmux, herdr, zellij, cmux): GitButler worktrees when `but` is present
+#     and capable, else treehouse (bin/fm-worktree-lib.sh). Orca owns its own
+#     task worktree and terminal, so it drops both that provider and every
+#     other backend's session CLI.
 # Prints a single space-separated line and returns 0 for a known backend; returns
 # 1 and prints nothing for an unknown backend.
+fm_backend_worktree_lib_ensure() {
+  declare -F fm_worktree_session_tool >/dev/null 2>&1 && return 0
+  # shellcheck source=bin/fm-worktree-lib.sh disable=SC1091
+  . "$FM_BACKEND_LIB_DIR/fm-worktree-lib.sh"
+}
+
 fm_backend_required_tools() {  # <backend>
+  local wt
+  fm_backend_worktree_lib_ensure || return 1
+  wt=$(fm_worktree_session_tool)
   case "$1" in
-    tmux)   printf '%s' 'tmux treehouse' ;;
-    herdr)  printf '%s' 'herdr jq treehouse' ;;
-    zellij) printf '%s' 'zellij jq treehouse' ;;
-    cmux)   printf '%s' 'cmux jq treehouse' ;;
+    tmux)   printf '%s' "tmux${wt:+ $wt}" ;;
+    herdr)  printf '%s' "herdr jq${wt:+ $wt}" ;;
+    zellij) printf '%s' "zellij jq${wt:+ $wt}" ;;
+    cmux)   printf '%s' "cmux jq${wt:+ $wt}" ;;
     orca)   printf '%s' 'orca' ;;
     *) return 1 ;;
   esac
@@ -324,6 +335,7 @@ fm_backend_required_tools() {  # <backend>
 
 fm_backend_required_tool_available() {  # <backend> <tool>
   local backend=$1 tool=$2 required
+  fm_backend_worktree_lib_ensure || return 1
   required=$(fm_backend_required_tools "$backend") || return 1
   fm_backend_list_contains "$required" "$tool" || return 1
   case "$backend:$tool" in

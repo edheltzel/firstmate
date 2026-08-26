@@ -7,10 +7,11 @@
 # protocol 14, macOS aarch64), with current protocol-17 metadata evidence in
 # docs/herdr-backend.md, and refined by that document's numbered per-home fleet
 # workspace pass (AGENTS.md task herdr-sm-spaces-k4). Herdr is a
-# session provider ONLY (D3): the worktree provider stays treehouse, exactly
-# like tmux. Sourced only through bin/fm-backend.sh's fm_backend_source in
-# normal operation; the unit tests source it directly, so the FM_HOME fallback
-# below keeps that path sane without fm-backend.sh's preamble.
+# session provider ONLY (D3): worktree isolation is owned by
+# bin/fm-worktree-lib.sh, exactly like tmux. Sourced only through
+# bin/fm-backend.sh's fm_backend_source in normal operation; the unit tests
+# source it directly, so the FM_HOME fallback below keeps that path sane
+# without fm-backend.sh's preamble.
 #
 # Default container shape (D4, decided empirically - see
 # herdr-verification-p2.md "Task container shape", refined by
@@ -119,7 +120,7 @@ FM_BACKEND_HERDR_SECONDMATE_MARKER=".fm-secondmate-home"
 # Version 2 additionally binds the successful projection's exact home,
 # session, workspace, tab, pane, parent, and presentation labels so a resumed
 # spawn can replace one verified agent-free husk under the session lock.
-# No send, capture, Treehouse, or general task-ownership path reads it.
+# No send, capture, worktree-cleanup, or general task-ownership path reads it.
 FM_BACKEND_HERDR_PRESENTATION_JOURNAL_SUFFIX=".herdr-presentation"
 
 # The config item a home writes to opt OUT of the projection.
@@ -2807,8 +2808,8 @@ fm_backend_herdr_target_ready() {  # <target>
 }
 
 # fm_backend_herdr_current_path: the live FOREGROUND process's cwd, or empty on
-# any error. Mirrors tmux's pane_current_path poll used for worktree-path
-# discovery after `treehouse get`.
+# any error. Mirrors tmux's pane_current_path poll used after the selected
+# provider moves the shell into the worktree.
 #
 # Verified pitfall: `pane get`'s `.result.pane.cwd` is the pane's cwd AT
 # CREATION TIME - the top-level shell's cwd - and does NOT update when that
@@ -2826,7 +2827,7 @@ fm_backend_herdr_current_path() {  # <target>
 
 # fm_backend_herdr_send_text_line: send one line of TEXT then submit,
 # ATOMICALLY - mirrors tmux's `send-keys -t T text Enter`. Used for the fixed
-# spawn-time commands (treehouse get, the GOTMPDIR export). `pane run` types
+# spawn-time commands (the provider transition and GOTMPDIR export). `pane run` types
 # the command and submits it in one call (verified).
 fm_backend_herdr_send_text_line() {  # <target> <text>
   fm_backend_herdr_target_ready "$1" || return 1
