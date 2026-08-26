@@ -184,8 +184,39 @@ EOF
   pass "treehouse spawn still types treehouse get and omits worktree_provider"
 }
 
+test_spawn_but_closes_endpoint_when_add_fails() {
+  local rec home proj id fakebin wt log out status
+  id=but-add-failure-b3
+  rec=$(make_home spawn-but-add-failure "$id")
+  IFS='|' read -r home proj <<EOF
+$rec
+EOF
+  wt="$TMP_ROOT/but-add-failure-wts/$id"
+  fakebin=$(make_spawn_fakebin "$TMP_ROOT/spawn-but-add-failure/fake")
+  log="$TMP_ROOT/spawn-but-add-failure/tmux.log"
+  mkdir -p "$wt"
+  out=$(
+    FM_ROOT_OVERRIDE='' FM_HOME="$home" \
+      FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
+      FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
+      FM_SPAWN_NO_GUARD=1 TMUX="fake,1,0" \
+      FM_WORKTREE_PROVIDER=but FM_BUT_WORKTREE_ROOT="$TMP_ROOT/but-add-failure-wts" \
+      FM_FAKE_PANE_PATH="$proj" FM_TMUX_LOG="$log" \
+      PATH="$fakebin:$PATH" \
+      "$SPAWN" "$id" "$proj" --mode no-mistakes --yolo off 2>&1
+  )
+  status=$?
+  [ "$status" -ne 0 ] || fail "existing but worktree path should fail spawn"
+  assert_contains "$out" "GitButler worktree path already exists" \
+    "but add failure was not reported"
+  assert_present "$wt" "but add failure removed the pre-existing path"
+  assert_absent "$home/state/$id.meta" "but add failure retained endpoint metadata"
+  assert_grep "kill-window" "$log" "but add failure left the backend endpoint alive"
+  pass "but add failures close their already-created backend endpoint"
+}
+
 test_spawn_but_preserves_recovery_when_remove_fails() {
-  local rec home proj id fakebin wt wt_real log out status tasktmp owner_token real_git
+  local rec home proj id fakebin wt wt_real log out status tasktmp owner_token real_git wt_status
   id=but-abort-recovery-c3
   rec=$(make_home spawn-but-abort "$id")
   IFS='|' read -r home proj <<EOF
@@ -236,6 +267,9 @@ SH
   owner_token=$(sed -n 's/^worktree_owner_token=//p' "$home/state/$id.meta")
   assert_grep "token=$owner_token" "$wt/.fm-worktree-owner" \
     "but abort recovery metadata lost the ownership proof"
+  wt_status=$(git -C "$wt" status --porcelain --untracked-files=all)
+  assert_not_contains "$wt_status" ".fm-worktree-owner" \
+    "but abort recovery left the ownership marker unignored"
   wt_real=$(cd "$wt" && pwd -P)
   git -C "$proj" worktree list --porcelain | grep -F "worktree $wt_real" >/dev/null \
     || fail "but abort fixture did not retain the registered worktree"
@@ -444,6 +478,77 @@ SH
   pass "but teardown still refuses a mismatched ownership marker"
 }
 
+test_teardown_but_rechecks_before_branch_mutation() {
+  local home proj wt fakebin id out status real_git count_file exclude_file
+  id=but-safety-race-c6
+  home="$TMP_ROOT/td-race/home"
+  proj="$TMP_ROOT/td-race/project"
+  wt="$TMP_ROOT/td-race/wt"
+  fakebin="$TMP_ROOT/td-race/fakebin"
+  count_file="$TMP_ROOT/td-race/status-count"
+  mkdir -p "$home/data" "$home/state" "$home/config" "$fakebin"
+  fm_git_init_commit "$proj"
+  git -C "$proj" branch -M main
+  git -C "$proj" worktree add --quiet -b "fm/$id" "$wt" main
+  printf 'version=1\ntask_id=%s\ntoken=%s\n' "$id" fmw.FFFFFFFFFFFF > "$wt/.fm-worktree-owner"
+  exclude_file=$(git -C "$wt" rev-parse --git-path info/exclude)
+  case "$exclude_file" in
+    /*) ;;
+    *) exclude_file="$wt/$exclude_file" ;;
+  esac
+  printf '%s\n' .fm-worktree-owner >> "$exclude_file"
+  fm_write_meta "$home/state/$id.meta" \
+    "window=firstmate:fm-$id" \
+    "endpoint_task_id=$id" \
+    "worktree=$wt" \
+    "project=$proj" \
+    "kind=ship" \
+    "mode=local-only" \
+    "worktree_provider=but" \
+    "worktree_owner_token=fmw.FFFFFFFFFFFF"
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+  fm_fake_exit0 "$fakebin" no-mistakes
+  real_git=$(command -v git)
+  cat > "$fakebin/git" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -C ] && [ "${2:-}" = "${FM_RACE_WORKTREE:?}" ] \
+   && [ "${3:-}" = status ] && [ "${4:-}" = --porcelain ]; then
+  count=$(cat "${FM_RACE_COUNT_FILE:?}" 2>/dev/null || printf '0')
+  count=$((count + 1))
+  printf '%s\n' "$count" > "$FM_RACE_COUNT_FILE"
+  if [ "$count" -eq 2 ]; then
+    printf 'late work\n' > "$FM_RACE_WORKTREE/race.txt"
+  fi
+fi
+exec "${FM_REAL_GIT:?}" "$@"
+SH
+  chmod +x "$fakebin/tmux" "$fakebin/git"
+  set +e
+  out=$(
+    FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" \
+      FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
+      FM_CONFIG_OVERRIDE="$home/config" FM_TEARDOWN_GUARD_DONE=1 \
+      FM_RACE_WORKTREE="$wt" FM_RACE_COUNT_FILE="$count_file" FM_REAL_GIT="$real_git" \
+      PATH="$fakebin:$PATH" \
+      "$TEARDOWN" "$id" 2>&1
+  )
+  status=$?
+  set -e
+  expect_code 1 "$status" "late work should fail the final but safety check"
+  assert_contains "$out" "GitButler worktree safety check failed" \
+    "late work did not trigger the final but safety refusal"
+  assert_present "$wt" "late-work refusal removed the but worktree"
+  assert_present "$home/state/$id.meta" "late-work refusal removed task metadata"
+  [ "$(git -C "$wt" symbolic-ref --quiet --short HEAD)" = "fm/$id" ] \
+    || fail "late-work refusal detached the task branch"
+  git -C "$proj" show-ref --verify --quiet "refs/heads/fm/$id" \
+    || fail "late-work refusal deleted the task branch"
+  pass "but safety rechecks before detaching or deleting the task branch"
+}
+
 test_forced_secondmate_but_child_runs_full_cleanup() {
   local home subhome proj wt fakebin parent_id child_id pid out status head nm_log
   parent_id=but-parent-d4
@@ -611,11 +716,13 @@ test_auto_detects_but_then_treehouse
 test_required_tools_follow_provider
 test_spawn_but_creates_git_worktree
 test_spawn_treehouse_still_types_get
+test_spawn_but_closes_endpoint_when_add_fails
 test_spawn_but_preserves_recovery_when_remove_fails
 test_spawn_but_preserves_endpoint_recovery_after_remove
 test_teardown_but_removes_git_worktree
 test_teardown_but_missing_path_preserves_registration_recovery
 test_teardown_but_still_requires_owner
+test_teardown_but_rechecks_before_branch_mutation
 test_forced_secondmate_but_child_runs_full_cleanup
 test_forced_secondmate_refuses_unknown_child_provider_before_cleanup
 

@@ -1664,6 +1664,10 @@ teardown_but_worktree_cleanup() {  # <project> <worktree> <task-id> <owner-token
   local project=$1 worktree=$2 task_id=$3 owner_token=$4 post_check=${5:-}
   local branch task_branch="fm/$task_id"
   require_treehouse_worktree_owner "$worktree" "$task_id" "$owner_token" || return 1
+  if [ -n "$post_check" ] && ! "$post_check"; then
+    echo "error: GitButler worktree safety check failed for $worktree; teardown aborted" >&2
+    return 1
+  fi
   branch=$(git -C "$worktree" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
   if [ "$branch" != HEAD ] && ! git -C "$worktree" checkout --detach -q; then
     echo "error: cannot detach task worktree $worktree before removal" >&2
@@ -1679,10 +1683,6 @@ teardown_but_worktree_cleanup() {  # <project> <worktree> <task-id> <owner-token
   rm -f "$worktree/.claude/settings.local.json" "$worktree/.opencode/plugins/fm-turn-end.js" \
     "$worktree/.opencode/plugins/fm-busy-state.js" \
     "$worktree/.fm-grok-turnend" "$worktree/.fm-kimi-turnend"
-  if [ -n "$post_check" ] && ! "$post_check"; then
-    echo "error: GitButler worktree safety check failed for $worktree; teardown aborted" >&2
-    return 1
-  fi
   require_treehouse_worktree_owner "$worktree" "$task_id" "$owner_token" || return 1
   if ! fm_worktree_but_remove "$project" "$worktree"; then
     echo "error: git worktree remove failed for worktree $worktree; teardown aborted" >&2

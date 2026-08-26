@@ -656,6 +656,7 @@ if [ "$BACKEND" = orca ]; then
 fi
 ORCA_ABORT_CLEANUP=0
 BUT_WORKTREE_CREATED=0
+BUT_ENDPOINT_ABORT_CLEANUP=0
 WORKTREE_PROVIDER=
 ORCA_WORKTREE_ID=
 ORCA_TERMINAL=
@@ -671,6 +672,18 @@ PR_BINDING_CREATED=0
 CONFIG_INHERIT_LOCK=
 CONFIG_INHERIT_LOCK_HELD=0
 WORKTREE_OWNER_TOKEN=
+
+exclude_path() {
+  local rel=$1 EXCL
+  EXCL=$(git -C "$WT" rev-parse --git-path info/exclude 2>/dev/null || true)
+  [ -n "$EXCL" ] || return 0
+  case "$EXCL" in
+    /*) : ;;
+    *) EXCL="$WT/$EXCL" ;;
+  esac
+  mkdir -p "$(dirname "$EXCL")"
+  grep -qxF "$rel" "$EXCL" 2>/dev/null || echo "$rel" >> "$EXCL"
+}
 
 publish_treehouse_worktree_owner() {
   local tmp token
@@ -698,6 +711,7 @@ publish_treehouse_worktree_owner() {
     return 1
   fi
   WORKTREE_OWNER_TOKEN=$token
+  exclude_path "$WORKTREE_OWNER_MARKER"
 }
 
 parse_orca_worktree_result() {
@@ -810,26 +824,31 @@ spawn_abort_cleanup() {
     HERDR_PRESENTATION_ORDER_LOCK_HELD=0
     fm_lock_release "$HERDR_PRESENTATION_ORDER_LOCK" || true
   fi
-  if [ "$status" -ne 0 ] && [ "${BUT_WORKTREE_CREATED:-0}" = 1 ] \
-     && [ -n "${WT:-}" ] && [ -n "${PROJ_ABS:-}" ]; then
-    BUT_WORKTREE_CREATED=0
-    if preserve_spawn_abort_recovery_meta; then
-      recovery_preserved=1
-    else
-      echo "error: spawn abort recovery metadata could not be preserved for $ID; closing its backend endpoint" >&2
-      fm_backend_kill "$BACKEND" "$T" "${ZELLIJ_TAB_ID:-}" "fm-$ID" 2>/dev/null || true
-    fi
-    if ! fm_worktree_but_remove "$PROJ_ABS" "$WT"; then
-      remove_failed=1
-      if [ "$recovery_preserved" = 1 ]; then
-        echo "error: git worktree remove failed for $WT; recovery metadata preserved at $STATE/$ID.meta" >&2
+  if [ "$status" -ne 0 ] && [ "${BUT_ENDPOINT_ABORT_CLEANUP:-0}" = 1 ]; then
+    BUT_ENDPOINT_ABORT_CLEANUP=0
+    if [ "${BUT_WORKTREE_CREATED:-0}" = 1 ] \
+       && [ -n "${WT:-}" ] && [ -n "${PROJ_ABS:-}" ]; then
+      BUT_WORKTREE_CREATED=0
+      if preserve_spawn_abort_recovery_meta; then
+        recovery_preserved=1
       else
-        echo "error: git worktree remove failed for $WT and recovery metadata could not be preserved" >&2
+        echo "error: spawn abort recovery metadata could not be preserved for $ID; closing its backend endpoint" >&2
+        fm_backend_kill "$BACKEND" "$T" "${ZELLIJ_TAB_ID:-}" "fm-$ID" 2>/dev/null || true
       fi
-    elif [ "$recovery_preserved" = 1 ]; then
-      echo "error: spawn aborted after creating $WT; endpoint recovery metadata preserved at $STATE/$ID.meta" >&2
-    fi
-    if [ "$remove_failed" = 1 ] && [ -z "${WORKTREE_OWNER_TOKEN:-}" ]; then
+      if ! fm_worktree_but_remove "$PROJ_ABS" "$WT"; then
+        remove_failed=1
+        if [ "$recovery_preserved" = 1 ]; then
+          echo "error: git worktree remove failed for $WT; recovery metadata preserved at $STATE/$ID.meta" >&2
+        else
+          echo "error: git worktree remove failed for $WT and recovery metadata could not be preserved" >&2
+        fi
+      elif [ "$recovery_preserved" = 1 ]; then
+        echo "error: spawn aborted after creating $WT; endpoint recovery metadata preserved at $STATE/$ID.meta" >&2
+      fi
+      if [ "$remove_failed" = 1 ] && [ -z "${WORKTREE_OWNER_TOKEN:-}" ]; then
+        fm_backend_kill "$BACKEND" "$T" "${ZELLIJ_TAB_ID:-}" "fm-$ID" 2>/dev/null || true
+      fi
+    else
       fm_backend_kill "$BACKEND" "$T" "${ZELLIJ_TAB_ID:-}" "fm-$ID" 2>/dev/null || true
     fi
   fi
@@ -1936,6 +1955,7 @@ kimi_spawn_fail() {  # <detail>
 if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   WORKTREE_PROVIDER=$(fm_worktree_provider) || exit 1
   if [ "$WORKTREE_PROVIDER" = but ]; then
+    BUT_ENDPOINT_ABORT_CLEANUP=1
     WT=$(fm_worktree_but_add "$PROJ_ABS" "$ID") || exit 1
     BUT_WORKTREE_CREATED=1
     validate_spawn_worktree "but worktree" "$WT_TARGET"
@@ -2053,20 +2073,6 @@ fi
 mkdir -p "$STATE"
 STATE_REAL=$(cd "$STATE" && pwd -P)
 TURNEND="$STATE_REAL/$ID.turn-ended"
-exclude_path() {
-  local rel=$1 EXCL
-  EXCL=$(git -C "$WT" rev-parse --git-path info/exclude 2>/dev/null || true)
-  [ -n "$EXCL" ] || return 0
-  case "$EXCL" in
-    /*) : ;;
-    *) EXCL="$WT/$EXCL" ;;
-  esac
-  mkdir -p "$(dirname "$EXCL")"
-  grep -qxF "$rel" "$EXCL" 2>/dev/null || echo "$rel" >> "$EXCL"
-}
-if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
-  exclude_path "$WORKTREE_OWNER_MARKER"
-fi
 if [ "$KIND" != secondmate ]; then
   # Arm the semantic busy-state contract (bin/fm-busy-lib.sh) for every
   # adapter with a verified semantic source. The launch brief sent below IS a
@@ -2348,6 +2354,7 @@ write_task_metadata "$STATE/$ID.meta" || {
 }
 [ "$BACKEND" = orca ] && ORCA_ABORT_CLEANUP=0
 BUT_WORKTREE_CREATED=0
+BUT_ENDPOINT_ABORT_CLEANUP=0
 
 sq_brief=$(shell_quote "$BRIEF")
 sq_turnend=$(shell_quote "$TURNEND")
