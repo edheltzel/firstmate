@@ -8,7 +8,7 @@
 #     and merge master into Themis (fast-forward only when Themis is already an
 #     ancestor of master).
 #   - Unique Themis commits survive a successful merge.
-#   - Merge conflicts abort, report conflicted paths, and leave Themis untouched.
+#   - Merge conflicts are reported and left in progress for resolution.
 #   - HEAD is never switched to master.
 #   - A dirty, diverged, offline, or non-Themis running checkout is skipped and
 #     reported, never forced or stashed.
@@ -468,6 +468,48 @@ test_current_master_worktree_allows_themis_merge() {
   pass "T14 current master worktree permits the Themis merge"
 }
 
+test_master_worktree_branch_switch_is_blocked() {
+  local w out fakebin real_git master_before feature_before switch_worktree
+  w=$(new_world t14-master-switch)
+  master_before=$(git -C "$w/main" rev-parse refs/heads/master)
+  git -C "$w/main" branch race-feature "$master_before"
+  feature_before=$(git -C "$w/main" rev-parse refs/heads/race-feature)
+  git -C "$w/main" worktree add -q "$w/master-wt" master
+  switch_worktree=$(cd "$w/master-wt" && pwd -P)
+  bump_kun "$w" instr
+  fakebin="$w/fakebin"
+  mkdir -p "$fakebin"
+  real_git=$(command -v git)
+  cat > "$fakebin/git" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -C ] && [ "${2:-}" = "$FM_TEST_SWITCH_WORKTREE" ] \
+  && [ "${3:-}" = merge ] && [ "${4:-}" = --ff-only ]; then
+  if env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
+    "$FM_TEST_REAL_GIT" -C "$FM_TEST_SWITCH_WORKTREE" switch -q race-feature; then
+    printf 'switched\n' > "$FM_TEST_SWITCH_RESULT"
+  else
+    printf 'blocked\n' > "$FM_TEST_SWITCH_RESULT"
+  fi
+fi
+exec "$FM_TEST_REAL_GIT" "$@"
+SH
+  chmod +x "$fakebin/git"
+
+  out=$(PATH="$fakebin:$PATH" FM_TEST_REAL_GIT="$real_git" \
+    FM_TEST_SWITCH_WORKTREE="$switch_worktree" FM_TEST_SWITCH_RESULT="$w/switch-result" \
+    FM_ROOT_OVERRIDE="$w/main" FM_HOME="$w/home" "$UPDATE" 2>/dev/null)
+
+  [ "$(cat "$w/switch-result")" = blocked ] || fail "master worktree switched branches during update"
+  assert_contains "$out" "master: updated " "locked master worktree fast-forwarded"
+  [ "$(head_branch "$w/master-wt")" = master ] || fail "master worktree left master"
+  [ "$(git -C "$w/main" rev-parse refs/heads/race-feature)" = "$feature_before" ] \
+    || fail "feature branch moved during master update"
+  [ "$(git -C "$w/main" rev-parse refs/heads/master)" = "$(git -C "$w/main" rev-parse upstream/main)" ] \
+    || fail "master did not reach upstream/main"
+  assert_still_themis "$w/main"
+  pass "T14 master worktree branch switch is blocked"
+}
+
 test_preexisting_merge_is_preserved() {
   local w out before merge_head_before
   w=$(new_world t14-preexisting-merge)
@@ -607,7 +649,49 @@ test_unsafe_origin_push_does_not_block_themis() {
   pass "T15 unsafe origin/master push does not block Themis merge"
 }
 
-test_merge_conflict_aborts() {
+test_foreign_merge_race_is_preserved() {
+  local w out fakebin real_git foreign_rev before
+  w=$(new_world t16-foreign-race)
+  printf 'themis-agents\n' > "$w/main/AGENTS.md"
+  git -C "$w/main" add AGENTS.md
+  git -C "$w/main" commit -qm themis-agents
+  before=$(git -C "$w/main" rev-parse HEAD)
+  git -C "$w/main" worktree add -q -b foreign-merge "$w/foreign" HEAD~1
+  printf 'foreign-agents\n' > "$w/foreign/AGENTS.md"
+  git -C "$w/foreign" add AGENTS.md
+  git -C "$w/foreign" commit -qm foreign-agents
+  foreign_rev=$(git -C "$w/foreign" rev-parse HEAD)
+  git -C "$w/main" worktree remove "$w/foreign"
+  bump_kun "$w" readme
+  fakebin="$w/fakebin"
+  mkdir -p "$fakebin"
+  real_git=$(command -v git)
+  cat > "$fakebin/git" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -C ] && [ "${2:-}" = "$FM_TEST_MERGE_REPO" ] \
+  && [ "${3:-}" = -c ] && [ "${4:-}" = merge.ff=true ] \
+  && [ "${5:-}" = merge ] && [ "${6:-}" = --no-edit ]; then
+  "$FM_TEST_REAL_GIT" -C "$FM_TEST_MERGE_REPO" merge --no-edit foreign-merge >/dev/null 2>&1 || true
+fi
+exec "$FM_TEST_REAL_GIT" "$@"
+SH
+  chmod +x "$fakebin/git"
+
+  out=$(PATH="$fakebin:$PATH" FM_TEST_REAL_GIT="$real_git" \
+    FM_TEST_MERGE_REPO="$w/main" FM_ROOT_OVERRIDE="$w/main" FM_HOME="$w/home" \
+    "$UPDATE" 2>/dev/null)
+
+  assert_contains "$out" "firstmate: skipped: merge conflict" "foreign merge race is reported"
+  [ "$(git -C "$w/main" rev-parse HEAD)" = "$before" ] || fail "foreign merge race moved Themis HEAD"
+  [ "$(git -C "$w/main" rev-parse MERGE_HEAD)" = "$foreign_rev" ] \
+    || fail "foreign merge race was aborted or replaced"
+  git -C "$w/main" diff --name-only --diff-filter=U | grep -qx AGENTS.md \
+    || fail "foreign merge conflict was not preserved"
+  assert_still_themis "$w/main"
+  pass "T16 foreign merge race remains in progress"
+}
+
+test_merge_conflict_is_left_reported() {
   local w out before
   w=$(new_world t16)
   printf 'themis-agents\n' > "$w/main/AGENTS.md"
@@ -620,13 +704,14 @@ test_merge_conflict_aborts() {
 
   assert_contains "$out" "firstmate: skipped: merge conflict" "conflict is reported"
   assert_contains "$out" "conflict: AGENTS.md" "conflicted path is listed"
-  assert_contains "$out" "reread-firstmate: no" "no reread after aborted merge"
+  assert_contains "$out" "reread-firstmate: no" "no reread after conflicted merge"
   [ "$(git -C "$w/main" rev-parse HEAD)" = "$before" ] || fail "conflicting merge moved Themis"
-  ! git -C "$w/main" rev-parse --verify --quiet MERGE_HEAD \
-    || fail "merge was left in progress"
-  grep -qx 'themis-agents' "$w/main/AGENTS.md" || fail "Themis AGENTS.md was overwritten"
+  git -C "$w/main" rev-parse --verify --quiet MERGE_HEAD >/dev/null \
+    || fail "conflicting merge was not left in progress"
+  git -C "$w/main" diff --name-only --diff-filter=U | grep -qx AGENTS.md \
+    || fail "conflicted path was not left for resolution"
   assert_still_themis "$w/main"
-  pass "T16 merge conflict aborts and leaves Themis untouched"
+  pass "T16 merge conflict remains reported for resolution"
 }
 
 test_themis_fast_forwards_when_ancestor() {
@@ -663,11 +748,13 @@ test_failed_upstream_fetch_does_not_use_stale_ref
 test_dirty_master_skips_themis_merge
 test_clean_master_worktree_fast_forwards
 test_current_master_worktree_allows_themis_merge
+test_master_worktree_branch_switch_is_blocked
 test_preexisting_merge_is_preserved
 test_verified_upstream_commit_survives_master_race
 test_remote_controller_updates_origin_only_root
 test_unsafe_origin_push_does_not_block_themis
-test_merge_conflict_aborts
+test_foreign_merge_race_is_preserved
+test_merge_conflict_is_left_reported
 test_themis_fast_forwards_when_ancestor
 
 echo "# all fm-update tests passed"

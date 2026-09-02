@@ -12,8 +12,8 @@
 #      block the Themis merge.
 #   4. Merge master into the current Themis checkout so unique Themis commits
 #      remain. Fast-forward Themis only when it is already an ancestor of master.
-#   5. On merge conflict, abort, print the conflicted paths, and leave Themis
-#      untouched. Never force.
+#   5. On merge conflict, print the conflicted paths and leave the merge in
+#      progress for resolution. Never force.
 # If HEAD is not Themis, skip that merge and report "on <branch>, expected Themis".
 # Never check out master as HEAD of the running home.
 # Never force, never stash, never discard unlanded work.
@@ -73,10 +73,97 @@ branch_worktree() {
   return 1
 }
 
+ff_checked_out_ref() (
+  local wt=$1 label=$2 dest=$3 src_rev=$4 src_label=$5 expected_rev=$6
+  local head_path head_lock lock_token head_ref current_rev before after out
+  local git_dir common_dir index_path txn_git_dir=""
+
+  head_path=$(git -C "$wt" rev-parse --path-format=absolute --git-path HEAD 2>/dev/null || true)
+  [ -n "$head_path" ] || {
+    echo "$label: skipped: cannot lock checked-out $dest"
+    return 1
+  }
+  head_lock="${head_path}.lock"
+  lock_token="$$:$RANDOM:$RANDOM"
+  if ! ( set -C; printf '%s\n' "$lock_token" > "$head_lock" ) 2>/dev/null; then
+    echo "$label: skipped: checked-out $dest is busy"
+    return 1
+  fi
+  release_ff_locks() {
+    case "$txn_git_dir" in
+      "$git_dir"/fm-update-git.*) rm -rf -- "$txn_git_dir" ;;
+    esac
+    if [ -f "$head_lock" ] && [ "$(cat "$head_lock" 2>/dev/null || true)" = "$lock_token" ]; then
+      rm -f -- "$head_lock"
+    fi
+  }
+  trap release_ff_locks EXIT
+  trap 'exit 1' HUP INT TERM
+
+  head_ref=$(git -C "$wt" symbolic-ref --quiet HEAD 2>/dev/null || true)
+  if [ "$head_ref" != "refs/heads/$dest" ]; then
+    echo "$label: skipped: checked-out worktree left $dest"
+    return 1
+  fi
+  if git_operation_in_progress "$wt"; then
+    echo "$label: skipped: git operation in progress"
+    return 1
+  fi
+  if [ -n "$(dirty_status "$wt" no)" ]; then
+    echo "$label: skipped: dirty working tree"
+    return 1
+  fi
+  current_rev=$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)
+  if [ "$current_rev" != "$expected_rev" ]; then
+    echo "$label: skipped: $dest changed during update"
+    return 1
+  fi
+  if [ "$current_rev" = "$src_rev" ]; then
+    echo "$label: already current"
+    return 0
+  fi
+  if ! git -C "$wt" merge-base --is-ancestor "$current_rev" "$src_rev" 2>/dev/null; then
+    echo "$label: skipped: diverged from $src_label"
+    return 1
+  fi
+
+  git_dir=$(git -C "$wt" rev-parse --path-format=absolute --git-dir 2>/dev/null || true)
+  common_dir=$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+  index_path=$(git -C "$wt" rev-parse --path-format=absolute --git-path index 2>/dev/null || true)
+  if [ -z "$git_dir" ] || [ -z "$common_dir" ] || [ -z "$index_path" ]; then
+    echo "$label: skipped: cannot prepare checked-out $dest"
+    return 1
+  fi
+  txn_git_dir=$(mktemp -d "$git_dir/fm-update-git.XXXXXX" 2>/dev/null || true)
+  if [ -z "$txn_git_dir" ]; then
+    echo "$label: skipped: cannot prepare checked-out $dest"
+    return 1
+  fi
+  printf 'ref: refs/heads/%s\n' "$dest" > "$txn_git_dir/HEAD"
+  printf '%s\n' "$common_dir" > "$txn_git_dir/commondir"
+  if [ -f "$git_dir/config.worktree" ]; then
+    ln -s "$git_dir/config.worktree" "$txn_git_dir/config.worktree"
+  fi
+  if [ -d "$git_dir/info" ]; then
+    ln -s "$git_dir/info" "$txn_git_dir/info"
+  fi
+
+  before=$(git -C "$wt" rev-parse --short "$current_rev")
+  if ! out=$(GIT_DIR="$txn_git_dir" GIT_WORK_TREE="$wt" GIT_INDEX_FILE="$index_path" \
+    git -C "$wt" merge --ff-only "$src_rev" 2>&1); then
+    echo "$label: skipped: fast-forward failed: $(first_line "$out")"
+    return 1
+  fi
+  after=$(git -C "$wt" rev-parse --short HEAD)
+  echo "$label: updated $before..$after"
+  trap - EXIT
+  release_ff_locks
+)
+
 # Fast-forward local <dest> to <src> without checking it out.
 ff_update_ref() {
   local dir=$1 label=$2 dest=$3 src=$4 src_label=${5:-$4}
-  local src_rev dest_rev cur wt before after out
+  local src_rev dest_rev cur wt before after
 
   if ! src_rev=$(git -C "$dir" rev-parse --verify --quiet "${src}^{commit}" 2>/dev/null); then
     echo "$label: skipped: $src_label does not exist"
@@ -95,14 +182,8 @@ ff_update_ref() {
 
   wt=$(branch_worktree "$dir" "$dest" || true)
   if [ -n "$wt" ]; then
-    if git_operation_in_progress "$wt"; then
-      echo "$label: skipped: git operation in progress"
-      return 1
-    fi
-    if [ -n "$(dirty_status "$wt" no)" ]; then
-      echo "$label: skipped: dirty working tree"
-      return 1
-    fi
+    ff_checked_out_ref "$wt" "$label" "$dest" "$src_rev" "$src_label" "$dest_rev"
+    return $?
   fi
 
   if [ "$dest_rev" = "$src_rev" ]; then
@@ -115,12 +196,7 @@ ff_update_ref() {
   fi
 
   before=$(git -C "$dir" rev-parse --short "$dest_rev")
-  if [ -n "$wt" ]; then
-    if ! out=$(git -C "$wt" merge --ff-only "$src_rev" 2>&1); then
-      echo "$label: skipped: fast-forward failed: $(first_line "$out")"
-      return 1
-    fi
-  elif ! git -C "$dir" update-ref "refs/heads/$dest" "$src_rev" "$dest_rev"; then
+  if ! git -C "$dir" update-ref "refs/heads/$dest" "$src_rev" "$dest_rev"; then
     echo "$label: skipped: fast-forward failed"
     return 1
   fi
@@ -164,14 +240,6 @@ push_mirror_if_safe() {
   echo "origin/$MIRROR_BRANCH: pushed $before..$after"
 }
 
-abort_owned_merge() {
-  local dir=$1 owned=$2
-  [ "$owned" = yes ] || return 0
-  if git -C "$dir" rev-parse --verify --quiet MERGE_HEAD >/dev/null 2>&1; then
-    git -C "$dir" merge --abort >/dev/null 2>&1 || true
-  fi
-}
-
 git_operation_in_progress() {
   local dir=$1 name path
   for name in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD REBASE_HEAD BISECT_LOG rebase-merge rebase-apply sequencer; do
@@ -186,7 +254,7 @@ git_operation_in_progress() {
 # Merge local master into Themis. Never switches HEAD to master.
 merge_themis() {
   local dir=$1 source_rev=${2:-} source_error=${3:-"local $MIRROR_BRANCH is not at $UPSTREAM_REF"}
-  local cur local_rev instr before after out files f merge_owned=no
+  local cur local_rev instr before after out files f
   FF_STATUS="skipped"
   FF_INSTR=""
 
@@ -236,7 +304,6 @@ merge_themis() {
   fi
 
   before=$(git -C "$dir" rev-parse --short "$local_rev")
-  merge_owned=yes
   if out=$(git -C "$dir" -c merge.ff=true merge --no-edit "$source_rev" 2>&1); then
     after=$(git -C "$dir" rev-parse --short HEAD)
     instr=$(changed_instr "$dir" "$local_rev")
@@ -256,11 +323,9 @@ merge_themis() {
     while IFS= read -r f; do
       [ -n "$f" ] && echo "conflict: $f"
     done <<< "$files"
-    abort_owned_merge "$dir" "$merge_owned"
     return 0
   fi
   echo "firstmate: skipped: merge failed: $(first_line "$out")"
-  abort_owned_merge "$dir" "$merge_owned"
 }
 
 # --- main firstmate repo ---------------------------------------------------
