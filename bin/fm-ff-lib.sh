@@ -5,7 +5,9 @@
 # This is the one implementation of "advance a firstmate checkout to a base by a
 # clean fast-forward, never forcing, merging, or stashing" used by every sync
 # path:
-#   - /updatefirstmate (bin/fm-update.sh) pulls from origin: base_mode "origin".
+#   - /updatefirstmate (bin/fm-update.sh) fast-forwards secondmate homes from
+#     origin (base_mode "origin"). The running Themis checkout is merged in
+#     fm-update.sh, not here.
 #   - the local-HEAD secondmate sync (bin/fm-spawn.sh on launch, bin/fm-bootstrap.sh
 #     on startup) follows the PRIMARY checkout's current default-branch commit:
 #     base_mode is that local commit, with NO fetch and no origin dependency.
@@ -191,19 +193,18 @@ validate_secondmate_home() {
 }
 
 # A single fetch refreshes every worktree that shares an object store, so fetch
-# each distinct git-common-dir at most once. Used ONLY by the origin base mode;
-# the local-HEAD sync never fetches.
+# each distinct git-common-dir+remote at most once. Used by origin base mode and
+# by fm-update.sh's upstream fetch; the local-HEAD sync never fetches.
 FETCHED=""
 fetch_once() {
-  local dir=$1 common
+  local dir=$1 remote=${2:-origin} common key
   common=$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
-  if [ -n "$common" ]; then
-    case " $FETCHED " in
-      *" $common "*) return 0 ;;
-    esac
-  fi
-  if git -C "$dir" fetch origin --prune --quiet 2>/dev/null; then
-    [ -n "$common" ] && FETCHED="$FETCHED $common"
+  key="${common:-$dir}::$remote"
+  case " $FETCHED " in
+    *" $key "*) return 0 ;;
+  esac
+  if git -C "$dir" fetch "$remote" --prune --quiet 2>/dev/null; then
+    FETCHED="$FETCHED $key"
     return 0
   fi
   return 1
