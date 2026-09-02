@@ -409,10 +409,32 @@ test_failed_upstream_fetch_does_not_use_stale_ref() {
   pass "T14 failed upstream fetch does not trust its stale tracking ref"
 }
 
+test_upstream_main_fetch_ignores_narrow_remote_config() {
+  local w out kun_rev
+  w=$(new_world t14-explicit-upstream)
+  git -C "$w/seed" branch side
+  git -C "$w/seed" push -q origin side
+  git -C "$w/main" config --replace-all remote.upstream.fetch \
+    '+refs/heads/side:refs/remotes/upstream/side'
+  bump_kun "$w" readme
+  kun_rev=$(git -C "$w/seed" rev-parse HEAD)
+
+  out=$(run_update "$w")
+
+  assert_contains "$out" "firstmate: updated " "explicit upstream main refspec reaches Kun"
+  [ "$(git -C "$w/main" rev-parse upstream/main)" = "$kun_rev" ] \
+    || fail "upstream/main stayed stale after a successful fetch"
+  git -C "$w/main" merge-base --is-ancestor "$kun_rev" HEAD \
+    || fail "Themis did not receive explicitly fetched upstream/main"
+  grep -q 'r-readme' "$w/main/README.md" || fail "latest Kun change did not land"
+  pass "T14 upstream main fetch ignores narrow remote config"
+}
+
 test_dirty_master_skips_themis_merge() {
-  local w out before master_before
+  local w out before master_before head_path
   w=$(new_world t14-dirty)
   git -C "$w/main" worktree add -q "$w/master-wt" master
+  head_path=$(git -C "$w/master-wt" rev-parse --path-format=absolute --git-path HEAD)
   printf 'uncommitted mirror edit\n' >> "$w/master-wt/README.md"
   before=$(git -C "$w/main" rev-parse HEAD)
   master_before=$(git -C "$w/main" rev-parse refs/heads/master)
@@ -425,6 +447,7 @@ test_dirty_master_skips_themis_merge() {
   [ "$(git -C "$w/main" rev-parse refs/heads/master)" = "$master_before" ] || fail "dirty master moved"
   [ "$(git -C "$w/main" rev-parse HEAD)" = "$before" ] || fail "Themis moved after dirty master was skipped"
   grep -q 'uncommitted mirror edit' "$w/master-wt/README.md" || fail "dirty master edit was discarded"
+  [ ! -e "${head_path}.lock" ] || fail "dirty master left HEAD.lock behind"
   assert_still_themis "$w/main"
   pass "T14 dirty master is skipped before Themis merge"
 }
@@ -468,6 +491,49 @@ test_current_master_worktree_allows_themis_merge() {
   pass "T14 current master worktree permits the Themis merge"
 }
 
+test_checked_out_master_ignores_merge_options() {
+  local w out
+  w=$(new_world t14-master-options)
+  git -C "$w/main" worktree add -q "$w/master-wt" master
+  git -C "$w/main" config branch.master.mergeOptions --squash
+  bump_kun "$w" instr
+
+  out=$(run_update "$w")
+
+  assert_contains "$out" "master: updated " "master ignores configured squash"
+  [ "$(git -C "$w/main" rev-parse refs/heads/master)" = "$(git -C "$w/main" rev-parse upstream/main)" ] \
+    || fail "configured merge options prevented the master fast-forward"
+  [ -z "$(git -C "$w/master-wt" status --porcelain)" ] \
+    || fail "configured merge options dirtied the master worktree"
+  assert_still_themis "$w/main"
+  pass "T14 checked-out master ignores configured merge options"
+}
+
+test_themis_ignores_merge_options() {
+  local w out before kun_rev
+  w=$(new_world t14-themis-options)
+  before=$(git -C "$w/main" rev-parse HEAD)
+  git -C "$w/main" config branch.Themis.mergeOptions --no-commit
+  bump_kun "$w" instr
+  kun_rev=$(git -C "$w/seed" rev-parse HEAD)
+
+  out=$(run_update "$w")
+
+  assert_contains "$out" "firstmate: updated " "Themis ignores configured no-commit"
+  [ "$(git -C "$w/main" rev-parse HEAD)" != "$before" ] \
+    || fail "configured merge options prevented Themis from advancing"
+  git -C "$w/main" merge-base --is-ancestor "$before" HEAD \
+    || fail "Themis lost its pre-update commit"
+  git -C "$w/main" merge-base --is-ancestor "$kun_rev" HEAD \
+    || fail "Themis update omitted Kun"
+  ! git -C "$w/main" rev-parse --verify --quiet MERGE_HEAD >/dev/null \
+    || fail "Themis merge remained uncommitted"
+  [ -z "$(git -C "$w/main" status --porcelain)" ] \
+    || fail "configured merge options left Themis dirty"
+  assert_still_themis "$w/main"
+  pass "T14 Themis ignores configured merge options"
+}
+
 test_master_worktree_branch_switch_is_blocked() {
   local w out fakebin real_git master_before feature_before switch_worktree
   w=$(new_world t14-master-switch)
@@ -482,8 +548,16 @@ test_master_worktree_branch_switch_is_blocked() {
   real_git=$(command -v git)
   cat > "$fakebin/git" <<'SH'
 #!/usr/bin/env bash
+ff_only=no
+previous=""
+for argument in "$@"; do
+  if [ "$previous" = merge ] && [ "$argument" = --ff-only ]; then
+    ff_only=yes
+  fi
+  previous=$argument
+done
 if [ "${1:-}" = -C ] && [ "${2:-}" = "$FM_TEST_SWITCH_WORKTREE" ] \
-  && [ "${3:-}" = merge ] && [ "${4:-}" = --ff-only ]; then
+  && [ "$ff_only" = yes ]; then
   if env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE \
     "$FM_TEST_REAL_GIT" -C "$FM_TEST_SWITCH_WORKTREE" switch -q race-feature; then
     printf 'switched\n' > "$FM_TEST_SWITCH_RESULT"
@@ -668,9 +742,16 @@ test_foreign_merge_race_is_preserved() {
   real_git=$(command -v git)
   cat > "$fakebin/git" <<'SH'
 #!/usr/bin/env bash
+themis_merge=no
+previous=""
+for argument in "$@"; do
+  if [ "$previous" = merge ] && [ "$argument" = --ff ]; then
+    themis_merge=yes
+  fi
+  previous=$argument
+done
 if [ "${1:-}" = -C ] && [ "${2:-}" = "$FM_TEST_MERGE_REPO" ] \
-  && [ "${3:-}" = -c ] && [ "${4:-}" = merge.ff=true ] \
-  && [ "${5:-}" = merge ] && [ "${6:-}" = --no-edit ]; then
+  && [ "$themis_merge" = yes ]; then
   "$FM_TEST_REAL_GIT" -C "$FM_TEST_MERGE_REPO" merge --no-edit foreign-merge >/dev/null 2>&1 || true
 fi
 exec "$FM_TEST_REAL_GIT" "$@"
@@ -745,9 +826,12 @@ test_dirty_themis_skipped
 test_missing_upstream_skipped
 test_diverged_master_skipped
 test_failed_upstream_fetch_does_not_use_stale_ref
+test_upstream_main_fetch_ignores_narrow_remote_config
 test_dirty_master_skips_themis_merge
 test_clean_master_worktree_fast_forwards
 test_current_master_worktree_allows_themis_merge
+test_checked_out_master_ignores_merge_options
+test_themis_ignores_merge_options
 test_master_worktree_branch_switch_is_blocked
 test_preexisting_merge_is_preserved
 test_verified_upstream_commit_survives_master_race

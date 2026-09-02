@@ -197,17 +197,19 @@ validate_secondmate_home() {
 # by fm-update.sh's upstream fetch; the local-HEAD sync never fetches.
 FETCHED=""
 fetch_once() {
-  local dir=$1 remote=${2:-origin} common key
+  local dir=$1 remote=${2:-origin} refspec=${3:-} common key
   common=$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
-  key="${common:-$dir}::$remote"
+  key="${common:-$dir}::$remote::${refspec:-configured}"
   case " $FETCHED " in
     *" $key "*) return 0 ;;
   esac
-  if git -C "$dir" fetch "$remote" --prune --quiet 2>/dev/null; then
-    FETCHED="$FETCHED $key"
-    return 0
+  if [ -n "$refspec" ]; then
+    git -C "$dir" fetch "$remote" --prune --quiet "$refspec" 2>/dev/null || return 1
+  else
+    git -C "$dir" fetch "$remote" --prune --quiet 2>/dev/null || return 1
   fi
-  return 1
+  FETCHED="$FETCHED $key"
+  return 0
 }
 
 # Which watched instruction paths changed between HEAD and BASE (comma list).

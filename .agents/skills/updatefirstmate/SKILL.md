@@ -22,7 +22,7 @@ From a clean Themis checkout it fetches `upstream` (never invents that remote), 
 It fast-forwards Themis only when Themis is already an ancestor of `master`.
 If HEAD is not Themis, it skips that merge and reports `on <branch>, expected Themis`.
 It never checks out `master` as HEAD of the running home, never forces, never stashes, and never discards unlanded work.
-A merge conflict aborts, prints the conflicted paths, and leaves Themis untouched.
+A merge conflict prints the conflicted paths and remains in progress for resolution or abort.
 Secondmate homes stay on the existing origin fast-forward path.
 A tracked-files fast-forward leaves the gitignored operational dirs (data/, state/, config/, projects/, .no-mistakes/) untouched, so a secondmate's in-flight work is never disrupted.
 This touches only the firstmate repo and its own worktrees, never anything under `projects/`.
@@ -56,7 +56,7 @@ This touches only the firstmate repo and its own worktrees, never anything under
    Summarize what landed under `AGENTS.md` section 9 without firstmate's internal vocabulary: which parts of the fleet are now on the latest, and which were left as-is and why.
    For example: "Captain, firstmate and both second mates are now on the latest."
    Surface any skipped target whose reason needs the captain's attention - for instance a home with its own un-landed changes (diverged) or local edits (dirty), which were left untouched on purpose.
-   If the updater printed a merge conflict, say that Kun did not land and name the conflicted files.
+   If the updater printed a merge conflict, say that Kun did not land, name the conflicted files, and say that the merge remains in progress for resolution or abort.
 
 ## Safety
 

@@ -75,8 +75,8 @@ branch_worktree() {
 
 ff_checked_out_ref() (
   local wt=$1 label=$2 dest=$3 src_rev=$4 src_label=$5 expected_rev=$6
-  local head_path head_lock lock_token head_ref current_rev before after out
-  local git_dir common_dir index_path txn_git_dir=""
+  local head_path="" head_lock="" lock_token="" head_ref current_rev before after after_rev out
+  local git_dir="" common_dir="" index_path="" txn_git_dir=""
 
   head_path=$(git -C "$wt" rev-parse --path-format=absolute --git-path HEAD 2>/dev/null || true)
   [ -n "$head_path" ] || {
@@ -150,11 +150,18 @@ ff_checked_out_ref() (
 
   before=$(git -C "$wt" rev-parse --short "$current_rev")
   if ! out=$(GIT_DIR="$txn_git_dir" GIT_WORK_TREE="$wt" GIT_INDEX_FILE="$index_path" \
-    git -C "$wt" merge --ff-only "$src_rev" 2>&1); then
+    git -C "$wt" -c "branch.$dest.mergeOptions=" -c merge.autoStash=false \
+      merge --ff-only --commit --no-squash --no-edit "$src_rev" 2>&1); then
     echo "$label: skipped: fast-forward failed: $(first_line "$out")"
     return 1
   fi
-  after=$(git -C "$wt" rev-parse --short HEAD)
+  after_rev=$(git -C "$wt" rev-parse HEAD 2>/dev/null || true)
+  if [ "$after_rev" != "$src_rev" ] || git_operation_in_progress "$wt" \
+    || [ -n "$(dirty_status "$wt" no)" ]; then
+    echo "$label: skipped: fast-forward did not complete"
+    return 1
+  fi
+  after=$(git -C "$wt" rev-parse --short "$after_rev")
   echo "$label: updated $before..$after"
   trap - EXIT
   release_ff_locks
@@ -254,7 +261,7 @@ git_operation_in_progress() {
 # Merge local master into Themis. Never switches HEAD to master.
 merge_themis() {
   local dir=$1 source_rev=${2:-} source_error=${3:-"local $MIRROR_BRANCH is not at $UPSTREAM_REF"}
-  local cur local_rev instr before after out files f
+  local cur local_rev merged_rev instr before after out files f
   FF_STATUS="skipped"
   FF_INSTR=""
 
@@ -304,8 +311,18 @@ merge_themis() {
   fi
 
   before=$(git -C "$dir" rev-parse --short "$local_rev")
-  if out=$(git -C "$dir" -c merge.ff=true merge --no-edit "$source_rev" 2>&1); then
-    after=$(git -C "$dir" rev-parse --short HEAD)
+  if out=$(git -C "$dir" -c "branch.$THEMIS_BRANCH.mergeOptions=" -c merge.autoStash=false \
+    merge --ff --commit --no-squash --no-edit "$source_rev" 2>&1); then
+    merged_rev=$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)
+    if [ -z "$merged_rev" ] \
+      || ! git -C "$dir" merge-base --is-ancestor "$local_rev" "$merged_rev" 2>/dev/null \
+      || ! git -C "$dir" merge-base --is-ancestor "$source_rev" "$merged_rev" 2>/dev/null \
+      || git_operation_in_progress "$dir" \
+      || [ -n "$(dirty_status "$dir" no)" ]; then
+      echo "firstmate: skipped: merge did not complete"
+      return 0
+    fi
+    after=$(git -C "$dir" rev-parse --short "$merged_rev")
     instr=$(changed_instr "$dir" "$local_rev")
     FF_STATUS="updated"
     FF_INSTR="$instr"
@@ -340,7 +357,8 @@ else
   if ! git -C "$FM_ROOT" remote get-url "$UPSTREAM_REMOTE" >/dev/null 2>&1; then
     echo "upstream: skipped: no $UPSTREAM_REMOTE remote"
     echo "$MIRROR_BRANCH: skipped: $mirror_error"
-  elif ! fetch_once "$FM_ROOT" "$UPSTREAM_REMOTE"; then
+  elif ! fetch_once "$FM_ROOT" "$UPSTREAM_REMOTE" \
+    "refs/heads/main:refs/remotes/$UPSTREAM_REMOTE/main"; then
     echo "upstream: skipped: fetch failed"
     echo "$MIRROR_BRANCH: skipped: $mirror_error"
   else
