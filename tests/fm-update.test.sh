@@ -163,6 +163,23 @@ test_reread_gate_is_instruction_only() {
   pass "T3 reread gates on instruction surface, nudge on advancement"
 }
 
+test_reread_uses_merged_instruction_tree() {
+  local w out
+  w=$(new_world t3-merged-tree)
+  printf 'themis-agents\n' > "$w/main/AGENTS.md"
+  git -C "$w/main" add AGENTS.md
+  git -C "$w/main" commit -qm themis-agents
+  bump_kun "$w" readme
+
+  out=$(run_update "$w")
+
+  assert_contains "$out" "firstmate: updated " "Themis merged the README-only Kun change"
+  assert_contains "$out" "reread-firstmate: no" "unchanged merged instructions do not trigger reread"
+  grep -qx 'themis-agents' "$w/main/AGENTS.md" || fail "Themis instruction customization changed"
+  grep -q 'r-readme' "$w/main/README.md" || fail "Kun README change did not land"
+  pass "T3 reread follows the merged instruction tree"
+}
+
 # --- T4: dirty secondmate is skipped, its edit preserved --------------------
 test_dirty_secondmate_skipped() {
   local w out
@@ -412,6 +429,123 @@ test_dirty_master_skips_themis_merge() {
   pass "T14 dirty master is skipped before Themis merge"
 }
 
+test_clean_master_worktree_fast_forwards() {
+  local w out
+  w=$(new_world t14-clean-master)
+  git -C "$w/main" worktree add -q "$w/master-wt" master
+  bump_kun "$w" instr
+
+  out=$(run_update "$w")
+
+  assert_contains "$out" "master: updated " "clean checked-out master fast-forwarded"
+  assert_contains "$out" "firstmate: updated " "Themis merged the fast-forwarded master"
+  [ "$(head_branch "$w/master-wt")" = master ] || fail "master worktree left master"
+  [ "$(git -C "$w/master-wt" rev-parse HEAD)" = "$(git -C "$w/main" rev-parse upstream/main)" ] \
+    || fail "clean master worktree did not reach upstream/main"
+  grep -qx 'v2' "$w/master-wt/AGENTS.md" || fail "clean master worktree did not update its files"
+  assert_still_themis "$w/main"
+  pass "T14 clean master worktree fast-forwards safely"
+}
+
+test_current_master_worktree_allows_themis_merge() {
+  local w out upstream_rev
+  w=$(new_world t14-current-master)
+  bump_kun "$w" instr
+  git -C "$w/main" fetch -q upstream
+  upstream_rev=$(git -C "$w/main" rev-parse upstream/main)
+  git -C "$w/main" update-ref refs/heads/master "$upstream_rev"
+  git -C "$w/main" worktree add -q "$w/master-wt" master
+
+  out=$(run_update "$w")
+
+  assert_contains "$out" "master: already current" "current checked-out master is trusted"
+  assert_contains "$out" "firstmate: updated " "Themis merged the current master"
+  [ "$(git -C "$w/main" rev-parse HEAD)" != "$upstream_rev" ] \
+    || fail "Themis unique commit was lost instead of merged"
+  git -C "$w/main" merge-base --is-ancestor "$upstream_rev" HEAD \
+    || fail "Themis did not contain the current checked-out master"
+  assert_still_themis "$w/main"
+  pass "T14 current master worktree permits the Themis merge"
+}
+
+test_preexisting_merge_is_preserved() {
+  local w out before merge_head_before
+  w=$(new_world t14-preexisting-merge)
+  printf 'themis-agents\n' > "$w/main/AGENTS.md"
+  git -C "$w/main" add AGENTS.md
+  git -C "$w/main" commit -qm themis-agents
+  git -C "$w/main" worktree add -q -b preexisting-other "$w/preexisting-other" HEAD~1
+  printf 'other-agents\n' > "$w/preexisting-other/AGENTS.md"
+  git -C "$w/preexisting-other" add AGENTS.md
+  git -C "$w/preexisting-other" commit -qm other-agents
+  git -C "$w/main" worktree remove "$w/preexisting-other"
+  if git -C "$w/main" merge --no-edit preexisting-other >/dev/null 2>&1; then
+    fail "precondition: expected a conflicting pre-existing merge"
+  fi
+  git -C "$w/main" checkout --ours AGENTS.md
+  git -C "$w/main" add AGENTS.md
+  [ -z "$(git -C "$w/main" status --porcelain)" ] \
+    || fail "precondition: resolved merge should have an empty porcelain status"
+  before=$(git -C "$w/main" rev-parse HEAD)
+  merge_head_before=$(git -C "$w/main" rev-parse MERGE_HEAD)
+  bump_kun "$w" readme
+
+  out=$(run_update "$w")
+
+  assert_contains "$out" "firstmate: skipped: git operation in progress" "pre-existing merge is reported"
+  [ "$(git -C "$w/main" rev-parse HEAD)" = "$before" ] || fail "pre-existing merge moved HEAD"
+  [ "$(git -C "$w/main" rev-parse MERGE_HEAD)" = "$merge_head_before" ] \
+    || fail "pre-existing merge was aborted or replaced"
+  grep -qx 'themis-agents' "$w/main/AGENTS.md" || fail "pre-existing merge resolution changed"
+  pass "T14 pre-existing merge remains in progress"
+}
+
+test_verified_upstream_commit_survives_master_race() {
+  local w out rogue fakebin real_git rogue_rev kun_rev
+  w=$(new_world t14-master-race)
+  bump_kun "$w" instr
+  kun_rev=$(git -C "$w/seed" rev-parse HEAD)
+  rogue="$w/rogue"
+  git clone -q "$w/origin.git" "$rogue"
+  printf 'rogue\n' > "$rogue/ROGUE.md"
+  git -C "$rogue" add ROGUE.md
+  git -C "$rogue" commit -qm rogue-master
+  rogue_rev=$(git -C "$rogue" rev-parse HEAD)
+  git -C "$w/main" fetch -q "$rogue" master
+  fakebin="$w/fakebin"
+  mkdir -p "$fakebin"
+  real_git=$(command -v git)
+  cat > "$fakebin/git" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -C ] && [ "${2:-}" = "$FM_TEST_MOVE_REPO" ] \
+  && [ "${3:-}" = fetch ] && [ "${4:-}" = origin ]; then
+  "$FM_TEST_REAL_GIT" "$@"
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    "$FM_TEST_REAL_GIT" -C "$FM_TEST_MOVE_REPO" update-ref refs/heads/master "$FM_TEST_MOVE_REV"
+  fi
+  exit "$rc"
+fi
+exec "$FM_TEST_REAL_GIT" "$@"
+SH
+  chmod +x "$fakebin/git"
+
+  out=$(PATH="$fakebin:$PATH" FM_TEST_REAL_GIT="$real_git" \
+    FM_TEST_MOVE_REPO="$w/main" FM_TEST_MOVE_REV="$rogue_rev" \
+    FM_ROOT_OVERRIDE="$w/main" FM_HOME="$w/home" "$UPDATE" 2>/dev/null)
+
+  assert_contains "$out" "firstmate: updated " "Themis merged the verified Kun commit"
+  [ "$(git -C "$w/main" rev-parse refs/heads/master)" = "$rogue_rev" ] \
+    || fail "precondition: the race did not move master"
+  git -C "$w/main" merge-base --is-ancestor "$kun_rev" HEAD \
+    || fail "Themis omitted the verified Kun commit"
+  [ ! -e "$w/main/ROGUE.md" ] || fail "Themis merged the raced master commit"
+  [ "$(git -C "$w/origin.git" rev-parse refs/heads/master)" = "$kun_rev" ] \
+    || fail "origin/master did not receive the verified Kun commit"
+  assert_still_themis "$w/main"
+  pass "T14 verified Kun commit survives a moving master ref"
+}
+
 test_remote_controller_updates_origin_only_root() {
   local w origin seed code home out
   w="$TMP_ROOT/remote-controller"
@@ -514,6 +648,7 @@ test_themis_fast_forwards_when_ancestor() {
 
 test_merges_kun_into_themis
 test_reread_gate_is_instruction_only
+test_reread_uses_merged_instruction_tree
 test_dirty_secondmate_skipped
 test_diverged_secondmate_skipped
 test_idempotent_already_current
@@ -526,6 +661,10 @@ test_missing_upstream_skipped
 test_diverged_master_skipped
 test_failed_upstream_fetch_does_not_use_stale_ref
 test_dirty_master_skips_themis_merge
+test_clean_master_worktree_fast_forwards
+test_current_master_worktree_allows_themis_merge
+test_preexisting_merge_is_preserved
+test_verified_upstream_commit_survives_master_race
 test_remote_controller_updates_origin_only_root
 test_unsafe_origin_push_does_not_block_themis
 test_merge_conflict_aborts

@@ -75,11 +75,11 @@ branch_worktree() {
 
 # Fast-forward local <dest> to <src> without checking it out.
 ff_update_ref() {
-  local dir=$1 label=$2 dest=$3 src=$4
-  local src_rev dest_rev cur wt before after
+  local dir=$1 label=$2 dest=$3 src=$4 src_label=${5:-$4}
+  local src_rev dest_rev cur wt before after out
 
   if ! src_rev=$(git -C "$dir" rev-parse --verify --quiet "${src}^{commit}" 2>/dev/null); then
-    echo "$label: skipped: $src does not exist"
+    echo "$label: skipped: $src_label does not exist"
     return 1
   fi
   if ! dest_rev=$(git -C "$dir" rev-parse --verify --quiet "refs/heads/${dest}^{commit}" 2>/dev/null); then
@@ -95,12 +95,14 @@ ff_update_ref() {
 
   wt=$(branch_worktree "$dir" "$dest" || true)
   if [ -n "$wt" ]; then
+    if git_operation_in_progress "$wt"; then
+      echo "$label: skipped: git operation in progress"
+      return 1
+    fi
     if [ -n "$(dirty_status "$wt" no)" ]; then
       echo "$label: skipped: dirty working tree"
       return 1
     fi
-    echo "$label: skipped: checked out in another worktree"
-    return 1
   fi
 
   if [ "$dest_rev" = "$src_rev" ]; then
@@ -108,12 +110,17 @@ ff_update_ref() {
     return 0
   fi
   if ! git -C "$dir" merge-base --is-ancestor "$dest_rev" "$src_rev" 2>/dev/null; then
-    echo "$label: skipped: diverged from $src"
+    echo "$label: skipped: diverged from $src_label"
     return 1
   fi
 
   before=$(git -C "$dir" rev-parse --short "$dest_rev")
-  if ! git -C "$dir" update-ref "refs/heads/$dest" "$src_rev" "$dest_rev"; then
+  if [ -n "$wt" ]; then
+    if ! out=$(git -C "$wt" merge --ff-only "$src_rev" 2>&1); then
+      echo "$label: skipped: fast-forward failed: $(first_line "$out")"
+      return 1
+    fi
+  elif ! git -C "$dir" update-ref "refs/heads/$dest" "$src_rev" "$dest_rev"; then
     echo "$label: skipped: fast-forward failed"
     return 1
   fi
@@ -122,14 +129,14 @@ ff_update_ref() {
 }
 
 push_mirror_if_safe() {
-  local dir=$1 local_rev remote_rev kun_rev before after out
+  local dir=$1 verified_rev=$2 remote_rev before after out
 
   if ! git -C "$dir" remote get-url origin >/dev/null 2>&1; then
     echo "origin/$MIRROR_BRANCH: skipped: no origin remote"
     return 0
   fi
-  if ! local_rev=$(git -C "$dir" rev-parse --verify --quiet "refs/heads/${MIRROR_BRANCH}^{commit}" 2>/dev/null); then
-    echo "origin/$MIRROR_BRANCH: skipped: no local $MIRROR_BRANCH branch"
+  if ! git -C "$dir" cat-file -e "${verified_rev}^{commit}" 2>/dev/null; then
+    echo "origin/$MIRROR_BRANCH: skipped: verified $UPSTREAM_REF commit is unavailable"
     return 0
   fi
   if ! fetch_once "$dir" origin; then
@@ -140,42 +147,46 @@ push_mirror_if_safe() {
     echo "origin/$MIRROR_BRANCH: skipped: origin/$MIRROR_BRANCH does not exist"
     return 0
   fi
-  if ! kun_rev=$(git -C "$dir" rev-parse --verify --quiet "${UPSTREAM_REF}^{commit}" 2>/dev/null); then
-    echo "origin/$MIRROR_BRANCH: skipped: $UPSTREAM_REF does not exist"
-    return 0
-  fi
-  if [ "$local_rev" != "$kun_rev" ]; then
-    echo "origin/$MIRROR_BRANCH: skipped: local $MIRROR_BRANCH is not at $UPSTREAM_REF"
-    return 0
-  fi
-  if [ "$local_rev" = "$remote_rev" ]; then
+  if [ "$verified_rev" = "$remote_rev" ]; then
     echo "origin/$MIRROR_BRANCH: already current"
     return 0
   fi
-  if ! git -C "$dir" merge-base --is-ancestor "$remote_rev" "$local_rev" 2>/dev/null; then
+  if ! git -C "$dir" merge-base --is-ancestor "$remote_rev" "$verified_rev" 2>/dev/null; then
     echo "origin/$MIRROR_BRANCH: skipped: not a fast-forward"
     return 0
   fi
   before=$(git -C "$dir" rev-parse --short "$remote_rev")
-  after=$(git -C "$dir" rev-parse --short "$local_rev")
-  if ! out=$(git -C "$dir" push origin "$MIRROR_BRANCH" 2>&1); then
+  after=$(git -C "$dir" rev-parse --short "$verified_rev")
+  if ! out=$(git -C "$dir" push origin "$verified_rev:refs/heads/$MIRROR_BRANCH" 2>&1); then
     echo "origin/$MIRROR_BRANCH: skipped: push failed: $(first_line "$out")"
     return 0
   fi
   echo "origin/$MIRROR_BRANCH: pushed $before..$after"
 }
 
-abort_merge_if_needed() {
-  local dir=$1
+abort_owned_merge() {
+  local dir=$1 owned=$2
+  [ "$owned" = yes ] || return 0
   if git -C "$dir" rev-parse --verify --quiet MERGE_HEAD >/dev/null 2>&1; then
     git -C "$dir" merge --abort >/dev/null 2>&1 || true
   fi
 }
 
+git_operation_in_progress() {
+  local dir=$1 name path
+  for name in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD REBASE_HEAD BISECT_LOG rebase-merge rebase-apply sequencer; do
+    path=$(git -C "$dir" rev-parse --path-format=absolute --git-path "$name" 2>/dev/null || true)
+    if [ -n "$path" ] && [ -e "$path" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Merge local master into Themis. Never switches HEAD to master.
 merge_themis() {
-  local dir=$1 source_ready=${2:-yes} source_error=${3:-"local $MIRROR_BRANCH is not at $UPSTREAM_REF"}
-  local cur local_rev master_rev instr before after out files f
+  local dir=$1 source_rev=${2:-} source_error=${3:-"local $MIRROR_BRANCH is not at $UPSTREAM_REF"}
+  local cur local_rev instr before after out files f merge_owned=no
   FF_STATUS="skipped"
   FF_INSTR=""
 
@@ -197,16 +208,20 @@ merge_themis() {
     echo "firstmate: skipped: on $cur, expected $THEMIS_BRANCH"
     return 0
   fi
+  if git_operation_in_progress "$dir"; then
+    echo "firstmate: skipped: git operation in progress"
+    return 0
+  fi
   if [ -n "$(dirty_status "$dir" no)" ]; then
     echo "firstmate: skipped: dirty working tree"
     return 0
   fi
-  if [ "$source_ready" != yes ]; then
+  if [ -z "$source_rev" ]; then
     echo "firstmate: skipped: $source_error"
     return 0
   fi
-  if ! master_rev=$(git -C "$dir" rev-parse --verify --quiet "refs/heads/${MIRROR_BRANCH}^{commit}" 2>/dev/null); then
-    echo "firstmate: skipped: no local $MIRROR_BRANCH branch"
+  if ! git -C "$dir" cat-file -e "${source_rev}^{commit}" 2>/dev/null; then
+    echo "firstmate: skipped: verified $UPSTREAM_REF commit is unavailable"
     return 0
   fi
 
@@ -214,16 +229,17 @@ merge_themis() {
     echo "firstmate: skipped: cannot read HEAD"
     return 0
   }
-  if [ "$local_rev" = "$master_rev" ] || git -C "$dir" merge-base --is-ancestor "$master_rev" HEAD 2>/dev/null; then
+  if [ "$local_rev" = "$source_rev" ] || git -C "$dir" merge-base --is-ancestor "$source_rev" HEAD 2>/dev/null; then
     FF_STATUS="current"
     echo "firstmate: already current"
     return 0
   fi
 
-  instr=$(changed_instr "$dir" "$MIRROR_BRANCH")
-  before=$(git -C "$dir" rev-parse --short HEAD)
-  if out=$(git -C "$dir" -c merge.ff=true merge --no-edit "$MIRROR_BRANCH" 2>&1); then
+  before=$(git -C "$dir" rev-parse --short "$local_rev")
+  merge_owned=yes
+  if out=$(git -C "$dir" -c merge.ff=true merge --no-edit "$source_rev" 2>&1); then
     after=$(git -C "$dir" rev-parse --short HEAD)
+    instr=$(changed_instr "$dir" "$local_rev")
     FF_STATUS="updated"
     FF_INSTR="$instr"
     if [ -n "$instr" ]; then
@@ -240,11 +256,11 @@ merge_themis() {
     while IFS= read -r f; do
       [ -n "$f" ] && echo "conflict: $f"
     done <<< "$files"
-    abort_merge_if_needed "$dir"
+    abort_owned_merge "$dir" "$merge_owned"
     return 0
   fi
   echo "firstmate: skipped: merge failed: $(first_line "$out")"
-  abort_merge_if_needed "$dir"
+  abort_owned_merge "$dir" "$merge_owned"
 }
 
 # --- main firstmate repo ---------------------------------------------------
@@ -254,7 +270,7 @@ reread_firstmate="no"
 if [ "$UPDATE_MODE" = "remote-code-root" ]; then
   ff_target "$FM_ROOT" "firstmate" origin no no
 else
-  mirror_ready=no
+  verified_mirror_rev=""
   mirror_error="upstream was not refreshed"
   if ! git -C "$FM_ROOT" remote get-url "$UPSTREAM_REMOTE" >/dev/null 2>&1; then
     echo "upstream: skipped: no $UPSTREAM_REMOTE remote"
@@ -264,19 +280,21 @@ else
     echo "$MIRROR_BRANCH: skipped: $mirror_error"
   else
     mirror_error="local $MIRROR_BRANCH is not at $UPSTREAM_REF"
-    if ff_update_ref "$FM_ROOT" "$MIRROR_BRANCH" "$MIRROR_BRANCH" "$UPSTREAM_REF" \
-      && [ "$(git -C "$FM_ROOT" rev-parse "refs/heads/$MIRROR_BRANCH")" = \
-        "$(git -C "$FM_ROOT" rev-parse "$UPSTREAM_REF")" ]; then
-      mirror_ready=yes
+    upstream_rev=$(git -C "$FM_ROOT" rev-parse --verify --quiet "${UPSTREAM_REF}^{commit}" 2>/dev/null || true)
+    if [ -z "$upstream_rev" ]; then
+      echo "$MIRROR_BRANCH: skipped: $UPSTREAM_REF does not exist"
+    elif ff_update_ref "$FM_ROOT" "$MIRROR_BRANCH" "$MIRROR_BRANCH" "$upstream_rev" "$UPSTREAM_REF" \
+      && [ "$(git -C "$FM_ROOT" rev-parse "refs/heads/$MIRROR_BRANCH")" = "$upstream_rev" ]; then
+      verified_mirror_rev=$upstream_rev
     fi
   fi
 
-  if [ "$mirror_ready" = yes ]; then
-    push_mirror_if_safe "$FM_ROOT"
+  if [ -n "$verified_mirror_rev" ]; then
+    push_mirror_if_safe "$FM_ROOT" "$verified_mirror_rev"
   else
     echo "origin/$MIRROR_BRANCH: skipped: $mirror_error"
   fi
-  merge_themis "$FM_ROOT" "$mirror_ready" "$mirror_error"
+  merge_themis "$FM_ROOT" "$verified_mirror_rev" "$mirror_error"
 fi
 if [ "$FF_STATUS" = "updated" ] && [ -n "$FF_INSTR" ]; then
   reread_firstmate="yes"
