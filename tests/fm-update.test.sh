@@ -336,8 +336,9 @@ test_missing_upstream_skipped() {
   out=$(run_update "$w")
 
   assert_contains "$out" "upstream: skipped: no upstream remote" "missing upstream is reported"
-  assert_contains "$out" "master: skipped: upstream/main does not exist" "master is not invented without upstream"
-  assert_contains "$out" "firstmate: already current" "Themis merge uses existing local master"
+  assert_contains "$out" "master: skipped: upstream was not refreshed" "master is not trusted without upstream"
+  assert_contains "$out" "origin/master: skipped: upstream was not refreshed" "mirror push is skipped without upstream"
+  assert_contains "$out" "firstmate: skipped: upstream was not refreshed" "Themis does not use an unrefreshed mirror"
   [ "$(git -C "$w/main" rev-parse HEAD)" = "$before" ] || fail "Themis moved without upstream"
   grep -qx 'v1' "$w/main/AGENTS.md" || fail "Kun change landed without an upstream remote"
   assert_still_themis "$w/main"
@@ -359,6 +360,7 @@ test_diverged_master_skipped() {
 
   assert_contains "$out" "master: skipped: diverged from upstream/main" "diverged master skipped"
   assert_contains "$out" "origin/master: skipped: local master is not at upstream/main" "diverged master is not pushed"
+  assert_contains "$out" "firstmate: skipped: local master is not at upstream/main" "diverged master is not merged"
   [ "$(git -C "$w/main" rev-parse refs/heads/master)" = "$master_before" ] \
     || fail "diverged master moved"
   grep -qx 'v1' "$w/main/AGENTS.md" || fail "Kun change landed through a diverged master"
@@ -366,6 +368,87 @@ test_diverged_master_skipped() {
   assert_still_themis "$w/main"
   [ "$(git -C "$w/main" rev-parse HEAD)" != "$master_before" ] || fail "running home checked out master"
   pass "T14 diverged master is skipped and Kun does not land"
+}
+
+test_failed_upstream_fetch_does_not_use_stale_ref() {
+  local w out before master_before
+  w=$(new_world t14-fetch)
+  bump_kun "$w" instr
+  git -C "$w/main" fetch -q upstream
+  git -C "$w/main" remote set-url upstream "$w/missing-upstream.git"
+  before=$(git -C "$w/main" rev-parse HEAD)
+  master_before=$(git -C "$w/main" rev-parse refs/heads/master)
+
+  out=$(run_update "$w")
+
+  assert_contains "$out" "upstream: skipped: fetch failed" "failed upstream fetch is reported"
+  assert_contains "$out" "master: skipped: upstream was not refreshed" "stale upstream ref is not trusted"
+  assert_contains "$out" "firstmate: skipped: upstream was not refreshed" "stale upstream ref is not merged"
+  [ "$(git -C "$w/main" rev-parse refs/heads/master)" = "$master_before" ] \
+    || fail "master advanced from a stale upstream ref"
+  [ "$(git -C "$w/main" rev-parse HEAD)" = "$before" ] || fail "Themis moved after an upstream fetch failure"
+  grep -qx 'v1' "$w/main/AGENTS.md" || fail "stale Kun instructions landed after a fetch failure"
+  assert_still_themis "$w/main"
+  pass "T14 failed upstream fetch does not trust its stale tracking ref"
+}
+
+test_dirty_master_skips_themis_merge() {
+  local w out before master_before
+  w=$(new_world t14-dirty)
+  git -C "$w/main" worktree add -q "$w/master-wt" master
+  printf 'uncommitted mirror edit\n' >> "$w/master-wt/README.md"
+  before=$(git -C "$w/main" rev-parse HEAD)
+  master_before=$(git -C "$w/main" rev-parse refs/heads/master)
+  bump_kun "$w" instr
+
+  out=$(run_update "$w")
+
+  assert_contains "$out" "master: skipped: dirty working tree" "dirty master skipped"
+  assert_contains "$out" "firstmate: skipped: local master is not at upstream/main" "dirty master is not merged"
+  [ "$(git -C "$w/main" rev-parse refs/heads/master)" = "$master_before" ] || fail "dirty master moved"
+  [ "$(git -C "$w/main" rev-parse HEAD)" = "$before" ] || fail "Themis moved after dirty master was skipped"
+  grep -q 'uncommitted mirror edit' "$w/master-wt/README.md" || fail "dirty master edit was discarded"
+  assert_still_themis "$w/main"
+  pass "T14 dirty master is skipped before Themis merge"
+}
+
+test_remote_controller_updates_origin_only_root() {
+  local w origin seed code home out
+  w="$TMP_ROOT/remote-controller"
+  origin="$w/origin.git"
+  seed="$w/seed"
+  code="$w/code"
+  home="$w/home"
+  mkdir -p "$w"
+  git init -q --bare "$origin"
+  git -C "$origin" symbolic-ref HEAD refs/heads/main
+  git clone -q "$origin" "$seed" 2>/dev/null
+  printf 'v1\n' > "$seed/AGENTS.md"
+  mkdir -p "$seed/bin"
+  printf 'echo v1\n' > "$seed/bin/tool.sh"
+  git -C "$seed" add -A
+  git -C "$seed" commit -qm initial
+  git -C "$seed" push -q origin main
+  git clone -q "$origin" "$code"
+  git clone -q "$origin" "$home"
+  git -C "$home" checkout -q --detach HEAD
+  printf 'remote\n' > "$home/.fm-secondmate-home"
+  printf 'v2\n' > "$seed/AGENTS.md"
+  git -C "$seed" add AGENTS.md
+  git -C "$seed" commit -qm update
+  git -C "$seed" push -q origin main
+
+  out=$(FM_ROOT_OVERRIDE="$code" FM_HOME="$home" \
+    "$ROOT/bin/fm-remote-secondmate-control.sh" update remote)
+
+  assert_contains "$out" "synced: " "remote controller reports the persistent-home fast-forward"
+  [ "$(git -C "$code" rev-parse HEAD)" = "$(git -C "$code" rev-parse origin/main)" ] \
+    || fail "remote code root did not fast-forward from origin"
+  [ "$(head_branch "$code")" = main ] || fail "remote code root left its main branch"
+  [ "$(git -C "$home" rev-parse HEAD)" = "$(git -C "$code" rev-parse HEAD)" ] \
+    || fail "remote persistent home did not follow its code root"
+  grep -qx 'v2' "$home/AGENTS.md" || fail "remote persistent home did not receive the origin update"
+  pass "T14 remote controller keeps its origin-only update path"
 }
 
 test_unsafe_origin_push_does_not_block_themis() {
@@ -441,6 +524,9 @@ test_unsafe_secondmate_home_skipped_before_git_update
 test_dirty_themis_skipped
 test_missing_upstream_skipped
 test_diverged_master_skipped
+test_failed_upstream_fetch_does_not_use_stale_ref
+test_dirty_master_skips_themis_merge
+test_remote_controller_updates_origin_only_root
 test_unsafe_origin_push_does_not_block_themis
 test_merge_conflict_aborts
 test_themis_fast_forwards_when_ancestor

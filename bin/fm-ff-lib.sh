@@ -260,8 +260,8 @@ live_secondmate_meta_records() {
 #   FF_INSTR  = comma list of changed instruction paths (only when updated)
 #
 # base_mode selects where the fast-forward base comes from:
-#   origin       - fetch origin and advance to origin/<default> (the /updatefirstmate
-#                  path); requires an origin remote and network reachability.
+#   origin       - fetch origin and advance to origin/<default> (the secondmate and
+#                  remote-code-root paths); requires origin and network reachability.
 #   <commit-ish> - advance to that LOCAL commit with NO fetch and no origin
 #                  dependency (the local-HEAD secondmate sync). The commit must
 #                  already exist in the target's object store, which it always does
