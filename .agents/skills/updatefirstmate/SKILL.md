@@ -17,12 +17,13 @@ On this fork the running home lives on Themis, and GitHub default `master` is th
 Only `AGENTS.md`, `bin/`, and `.agents/skills/` are a running firstmate instruction surface; public `skills/` is installer-facing and is not loaded by firstmate.
 This skill performs that pull for the running Themis firstmate and every secondmate, without disturbing any in-flight work.
 
-`bin/fm-update.sh` owns the git mechanics.
+`bin/fm-update.sh` owns the Git mechanics.
 From a clean Themis checkout it fetches `upstream` (never invents that remote), fast-forwards local `master` to Kun, optionally pushes `origin/master` when that is a clean fast-forward of the GitHub mirror, and merges `master` into Themis so unique Themis commits remain.
 It fast-forwards Themis only when Themis is already an ancestor of `master`.
 If HEAD is not Themis, it skips that merge and reports `on <branch>, expected Themis`.
 It never checks out `master` as HEAD of the running home, never forces, never stashes, and never discards unlanded work.
 A merge conflict prints the conflicted paths and remains in progress for resolution or abort.
+If another merge failure leaves a merge in progress, the updater reports the original error and preserves that state for resolution or abort.
 Secondmate homes stay on the existing origin fast-forward path.
 A tracked-files fast-forward leaves the gitignored operational dirs (data/, state/, config/, projects/, .no-mistakes/) untouched, so a secondmate's in-flight work is never disrupted.
 This touches only the firstmate repo and its own worktrees, never anything under `projects/`.
@@ -34,7 +35,7 @@ This touches only the firstmate repo and its own worktrees, never anything under
    bin/fm-update.sh
    ```
    It updates the running Themis checkout from Kun as described above, then updates every registered local or remote secondmate home through its placement-specific guarded path.
-   It prints one status line per target (`updated <old>..<new>` / `already current` / `skipped: <reason>`), followed by two action lines that tell you exactly what to do next:
+   It prints one status line per target (`updated <old>..<new>` / `pushed <old>..<new>` / `already current` / `skipped: <reason>`), followed by two action lines that tell you exactly what to do next:
    - `reread-firstmate: yes|no`
    - `nudge-secondmates: fm-<id>...|none`
 
@@ -57,11 +58,14 @@ This touches only the firstmate repo and its own worktrees, never anything under
    For example: "Captain, firstmate and both second mates are now on the latest."
    Surface any skipped target whose reason needs the captain's attention - for instance a home with its own un-landed changes (diverged) or local edits (dirty), which were left untouched on purpose.
    If the updater printed a merge conflict, say that Kun did not land, name the conflicted files, and say that the merge remains in progress for resolution or abort.
+   If another failed merge remains in progress, relay the reported error and say that the merge needs resolution or abort.
 
 ## Safety
 
 - **Never force, stash, or discard unlanded work.**
-  Dirty, diverged, offline, and off-Themis running checkouts are skipped and reported.
+  A dirty or off-Themis running checkout is skipped and reported.
+  If upstream is missing or unreachable, the updater skips the Kun merge and reports the failure.
+  A dirty or diverged `master` is also skipped and reported.
   Local `master` moves only by fast-forward to Kun.
   Themis keeps unique commits by merging `master` rather than resetting onto Kun.
 - **Only the firstmate repo and its worktrees** are touched, never `projects/`.

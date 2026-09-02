@@ -13,7 +13,8 @@
 #   4. Merge master into the current Themis checkout so unique Themis commits
 #      remain. Fast-forward Themis only when it is already an ancestor of master.
 #   5. On merge conflict, print the conflicted paths and leave the merge in
-#      progress for resolution. Never force.
+#      progress for resolution. If another merge failure leaves a merge in
+#      progress, print the original error and preserve that state. Never force.
 # If HEAD is not Themis, skip that merge and report "on <branch>, expected Themis".
 # Never check out master as HEAD of the running home.
 # Never force, never stash, never discard unlanded work.
@@ -24,7 +25,7 @@
 #
 # The script does not re-read AGENTS.md or nudge secondmates itself. Those are
 # LLM / tmux actions the skill performs. Caller summary:
-#   - one status line per target (updated/already current/skipped)
+#   - one status line per target (updated/pushed/already current/skipped)
 #   - reread-firstmate: yes|no
 #   - nudge-secondmates: fm-<id>...|none
 #
@@ -44,8 +45,6 @@ UPDATE_MODE="themis"
 # shellcheck source=bin/fm-ff-lib.sh
 . "$SCRIPT_DIR/fm-ff-lib.sh"
 
-"$SCRIPT_DIR/fm-guard.sh" || true
-
 usage() { echo "usage: fm-update.sh [--remote-code-root|--help]" >&2; }
 
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
@@ -57,6 +56,12 @@ if [ "${1:-}" = "--remote-code-root" ]; then
   shift
 fi
 [ $# -eq 0 ] || { usage; exit 1; }
+
+if [ "$UPDATE_MODE" = "themis" ]; then
+  FM_GUARD_EXPECTED_BRANCH="$THEMIS_BRANCH" "$SCRIPT_DIR/fm-guard.sh" || true
+else
+  "$SCRIPT_DIR/fm-guard.sh" || true
+fi
 
 # Path of the worktree that has <branch> checked out, if any.
 branch_worktree() {

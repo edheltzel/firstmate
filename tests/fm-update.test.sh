@@ -101,6 +101,11 @@ run_update() {
   FM_ROOT_OVERRIDE="$w/main" FM_HOME="$w/home" "$UPDATE" 2>/dev/null
 }
 
+run_update_with_guard() {
+  local w=$1
+  FM_ROOT_OVERRIDE="$w/main" FM_HOME="$w/home" "$UPDATE" 2>&1
+}
+
 head_branch() {
   git -C "$1" symbolic-ref --short HEAD 2>/dev/null || echo ""
 }
@@ -145,6 +150,20 @@ test_merges_kun_into_themis() {
   [ "$(git -C "$w/sm1" rev-list --parents -n1 HEAD | wc -w | tr -d ' ')" -eq 2 ] \
     || fail "secondmate tip is not a single-parent fast-forward"
   pass "T1 Themis merge keeps customizations, secondmate stays origin FF"
+}
+
+test_themis_is_not_reported_as_a_tangle() {
+  local w out
+  w=$(new_world t2-themis-guard)
+  bump_kun "$w" readme
+
+  out=$(run_update_with_guard "$w")
+
+  assert_contains "$out" "firstmate: updated " "Themis update completed with the guard visible"
+  assert_not_contains "$out" "WORKTREE TANGLE" "valid Themis checkout was reported as tangled"
+  assert_not_contains "$out" "checkout master" "valid Themis update told the operator to check out master"
+  assert_still_themis "$w/main"
+  pass "T2 Themis is the expected running branch, not a worktree tangle"
 }
 
 # --- T3: README-only Kun change does not trigger a reread -------------------
@@ -844,6 +863,7 @@ test_themis_fast_forwards_when_ancestor() {
 }
 
 test_merges_kun_into_themis
+test_themis_is_not_reported_as_a_tangle
 test_reread_gate_is_instruction_only
 test_reread_uses_merged_instruction_tree
 test_dirty_secondmate_skipped
