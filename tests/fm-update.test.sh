@@ -795,6 +795,37 @@ test_merge_conflict_is_left_reported() {
   pass "T16 merge conflict remains reported for resolution"
 }
 
+test_nonconflict_merge_failure_is_reported() {
+  local w out before hooks_dir
+  w=$(new_world t16-hook-failure)
+  before=$(git -C "$w/main" rev-parse HEAD)
+  hooks_dir=$(git -C "$w/main" rev-parse --path-format=absolute --git-path hooks)
+  printf '%s\n' '#!/usr/bin/env bash' \
+    "printf 'merge hook rejected commit\\n' >&2" \
+    'exit 1' > "$hooks_dir/pre-merge-commit"
+  chmod +x "$hooks_dir/pre-merge-commit"
+  bump_kun "$w" readme
+
+  out=$(run_update "$w")
+
+  assert_contains "$out" "firstmate: skipped: merge failed: merge hook rejected commit" \
+    "nonconflict merge failure reports the hook error"
+  assert_contains "$out" "merge remains in progress" "nonconflict merge state is reported"
+  assert_contains "$out" "reread-firstmate: no" "failed merge does not trigger a reread"
+  assert_not_contains "$out" "firstmate: skipped: merge conflict" \
+    "clean merge failure is not mislabeled as a conflict"
+  [ "$(git -C "$w/main" rev-parse HEAD)" = "$before" ] \
+    || fail "failed merge moved Themis HEAD"
+  git -C "$w/main" rev-parse --verify --quiet MERGE_HEAD >/dev/null \
+    || fail "failed merge was not left in progress"
+  [ -z "$(git -C "$w/main" diff --name-only --diff-filter=U)" ] \
+    || fail "hook failure unexpectedly left unmerged paths"
+  [ -n "$(git -C "$w/main" status --porcelain)" ] \
+    || fail "failed merge did not preserve its staged result"
+  assert_still_themis "$w/main"
+  pass "T16 nonconflict merge failure remains actionable"
+}
+
 test_themis_fast_forwards_when_ancestor() {
   local w out
   w=$(new_world t17 no)
@@ -839,6 +870,7 @@ test_remote_controller_updates_origin_only_root
 test_unsafe_origin_push_does_not_block_themis
 test_foreign_merge_race_is_preserved
 test_merge_conflict_is_left_reported
+test_nonconflict_merge_failure_is_reported
 test_themis_fast_forwards_when_ancestor
 
 echo "# all fm-update tests passed"

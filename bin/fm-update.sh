@@ -335,11 +335,15 @@ merge_themis() {
   fi
 
   files=$(git -C "$dir" diff --name-only --diff-filter=U 2>/dev/null || true)
-  if git -C "$dir" rev-parse --verify --quiet MERGE_HEAD >/dev/null 2>&1; then
+  if [ -n "$files" ]; then
     echo "firstmate: skipped: merge conflict"
     while IFS= read -r f; do
       [ -n "$f" ] && echo "conflict: $f"
     done <<< "$files"
+    return 0
+  fi
+  if git -C "$dir" rev-parse --verify --quiet MERGE_HEAD >/dev/null 2>&1; then
+    echo "firstmate: skipped: merge failed: $(first_line "$out"); merge remains in progress"
     return 0
   fi
   echo "firstmate: skipped: merge failed: $(first_line "$out")"
