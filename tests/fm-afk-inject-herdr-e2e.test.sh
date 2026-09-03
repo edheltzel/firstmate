@@ -86,7 +86,7 @@ mkdir -p "$STATE_DIR"
 LOG_FILE="$STATE_DIR/submitted.log"
 : > "$LOG_FILE"
 
-CONTAINER_RAW=$(fm_backend_herdr_container_ensure /tmp) || fail "container_ensure failed"
+CONTAINER_RAW=$(fm_backend_herdr_container_ensure ship /tmp) || fail "container_ensure failed"
 CONTAINER=${CONTAINER_RAW%%$'\t'*}
 SEEDED_TAB_ID=${CONTAINER_RAW#*$'\t'}
 TASK_IDS=$(fm_backend_herdr_create_task "$CONTAINER" "fm-afk-e2e-supervisor" /tmp "$SEEDED_TAB_ID") \

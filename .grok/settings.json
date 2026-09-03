@@ -1,0 +1,11 @@
+{
+  "daidentity": {
+    "name": "Themis",
+    "voices": {
+      "main": {
+        "voiceId": "en-GB-LibbyNeural"
+      }
+    }
+  }
+}
+

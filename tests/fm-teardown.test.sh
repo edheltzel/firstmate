@@ -7,7 +7,9 @@
 # and GitHub reports a PR head that contains the current local work, or its content
 # is already in the up-to-date default branch.
 #
-# Covers three fixes:
+# Covers four fixes:
+#   - pooled-worktree ownership: stale task metadata must not tear down a
+#     recycled worktree now owned by another live task, even under --force.
 #   - local-only fork-remote: a fork IS a remote, so fork-pushed upstream-
 #     contribution PRs are teardown-eligible (the pre-fix code false-refused them).
 #   - squash-merge-then-delete-branch: the branch's own commits live nowhere on a
@@ -49,6 +51,13 @@
 #   (w) index.lock mtime read failure                         -> lock kept, REFUSE
 #   (x) transient lock cleared after first failed return      -> retry ALLOW
 #   (y) persistent lock (never clears, not provably stale)    -> REFUSE loudly
+#
+# Pooled-worktree ownership:
+#   (z) task A meta + recycled task B marker -> REFUSE without touching B
+#   (aa) missing pre-marker ownership claim  -> REFUSE, including under --force
+#   (ab) pre-marker meta + vanished project  -> REFUSE without touching worktree
+#   (ac) same task id under a new lease      -> REFUSE
+#   (ad) unreadable ownership claim          -> REFUSE
 set -u
 
 # shellcheck source=tests/lib.sh disable=SC1091
@@ -60,6 +69,19 @@ PR_CHECK="$ROOT/bin/fm-pr-check.sh"
 TMP_ROOT=$(fm_test_tmproot fm-teardown-tests)
 REAL_GIT_FOR_TEST=$(command -v git)
 export REAL_GIT_FOR_TEST
+# The worker signing identity is a fixture, not a host secret: generate an
+# ephemeral key pair in the case root so the suite runs anywhere, CI included.
+WORKER_SIGNING_KEY="$TMP_ROOT/worker-signing.pub"
+WORKER_SIGNER_PRINCIPAL="296298943+Atlas-Key@users.noreply.github.com"
+mkdir -p "$TMP_ROOT"
+ssh-keygen -q -t ed25519 -N '' -f "${WORKER_SIGNING_KEY%.pub}" \
+  || fail "could not create the portable worker signing fixture"
+WORKER_SIGNING_FINGERPRINT=$(ssh-keygen -lf "$WORKER_SIGNING_KEY" -E sha256 2>/dev/null \
+  | awk 'NF >= 2 { count++; value=$2 } END { if (count != 1) exit 1; print value }') \
+  || fail "worker Git signing fixture is unavailable: $WORKER_SIGNING_KEY"
+# Point the broker's pinned signing policy at the ephemeral fixture key. Only
+# the broker's synthetic test mode honors this, so the real pin is untouched.
+export FM_PR_IDENTITY_SIGNING_FINGERPRINT="$WORKER_SIGNING_FINGERPRINT"
 REAL_PS_FOR_TEST=$(command -v ps)
 export REAL_PS_FOR_TEST
 REAL_LSOF_FOR_TEST=$(command -v lsof)
@@ -175,6 +197,42 @@ SH
   printf '%s\n' "$case_dir"
 }
 
+add_compatible_tasks_axi() {
+  local case_dir=$1
+  cat > "$case_dir/fakebin/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = --version ]; then
+  printf '%s\n' '0.2.4'
+  exit 0
+fi
+if [ "${1:-}" = update ] && [ "${2:-}" = --help ]; then
+  printf '%s\n' 'usage: tasks-axi update <id> [flags]'
+  printf '%s\n' '  --body-file <path>'
+  printf '%s\n' '  --archive-body'
+  exit 0
+fi
+if [ "${1:-}" = mv ] && [ "${2:-}" = --help ]; then
+  printf '%s\n' 'usage: tasks-axi mv <id> [<id>...] --to <path-or-dir>'
+  exit 0
+fi
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/tasks-axi"
+}
+
+write_worktree_owner() {
+  local case_dir=$1 id=$2 token=${3:-fmw.AAAAAAAAAAAA} marker exclude
+  marker="$case_dir/wt/.fm-worktree-owner"
+  printf 'version=1\ntask_id=%s\ntoken=%s\n' "$id" "$token" > "$marker"
+  exclude=$(git -C "$case_dir/wt" rev-parse --git-path info/exclude)
+  case "$exclude" in
+    /*) : ;;
+    *) exclude="$case_dir/wt/$exclude" ;;
+  esac
+  grep -qxF '.fm-worktree-owner' "$exclude" 2>/dev/null \
+    || printf '%s\n' '.fm-worktree-owner' >> "$exclude"
+}
+
 # Write a meta file for the task. Args: case_dir mode kind
 write_meta() {
   local case_dir=$1 mode=$2 kind=$3
@@ -185,7 +243,114 @@ write_meta() {
     "project=$case_dir/project" \
     "kind=$kind" \
     "mode=$mode" \
-    "spawn_gen=teardown-test-task-x1"
+    "worktree_owner_token=fmw.AAAAAAAAAAAA"
+  write_worktree_owner "$case_dir" task-x1 fmw.AAAAAAAAAAAA
+}
+
+write_atlas_meta_and_binding() {
+  local case_dir=$1 head project_real
+  head=$(git -C "$case_dir/wt" rev-parse HEAD)
+  project_real=$(cd "$case_dir/project" && pwd -P)
+  printf '%s\n' \
+    '- Atlas [direct-PR pr-identity=atlas-pat] - synthetic broker teardown project (added 2026-07-23)' \
+    > "$case_dir/data/projects.md"
+  git -C "$case_dir/project" remote set-url origin https://github.com/example/repo.git
+  sed -i.bak "s|^project=.*|project=$project_real|" "$case_dir/state/task-x1.meta"
+  rm -f "$case_dir/state/task-x1.meta.bak"
+  printf '%s\n' \
+    'pr=https://github.com/example/repo/pull/7' \
+    "pr_head=$head" \
+    'pr_identity=atlas-pat' \
+    'pr_project_key=Atlas' \
+    'pr_repo=example/repo' \
+    'pr_branch=fm/task-x1' \
+    'pr_base=main' >> "$case_dir/state/task-x1.meta"
+  cat > "$case_dir/config/worker-git-identity" <<EOF
+[worker]
+ name = Atlas
+ email = atlas@rainyday.media
+ signingKey = $WORKER_SIGNING_KEY
+ fingerprint = $WORKER_SIGNING_FINGERPRINT
+ principal = $WORKER_SIGNER_PRINCIPAL
+[gpg]
+ format = ssh
+[commit]
+ gpgSign = true
+EOF
+  umask 077
+  printf '%s\n' \
+    'version=1' \
+    'task=task-x1' \
+    'profile=atlas-pat' \
+    'project_key=Atlas' \
+    'repo=example/repo' \
+    'branch=fm/task-x1' \
+    'base=main' \
+    "project=$project_real" > "$case_dir/state/task-x1.pr-binding"
+  chmod 0600 "$case_dir/state/task-x1.pr-binding"
+}
+
+wt_commit_atlas_file() {
+  local case_dir file content msg=${4:-atlas change}
+  case_dir=$1
+  file=$2
+  content=$3
+  printf '%s\n' "$content" > "$case_dir/wt/$file"
+  git -C "$case_dir/wt" add -- "$file"
+  GIT_AUTHOR_NAME=Atlas GIT_AUTHOR_EMAIL=atlas@rainyday.media \
+  GIT_COMMITTER_NAME=Atlas GIT_COMMITTER_EMAIL=atlas@rainyday.media \
+    git -C "$case_dir/wt" -c user.email=atlas@rainyday.media -c user.name=Atlas \
+      -c gpg.format=ssh -c user.signingKey="$WORKER_SIGNING_KEY" \
+      -c commit.gpgsign=true commit -q -m "$msg"
+}
+
+add_atlas_broker_merged_for_head_with_one_transient_failure() {
+  local case_dir head
+  case_dir=$1
+  head=$(git -C "$case_dir/wt" rev-parse HEAD)
+  cat > "$case_dir/atlas-pr.toon" <<EOF
+base:
+  ref: main
+head:
+  ref: fm/task-x1
+  sha: "$head"
+merged: true
+merged_at: "2026-07-23T00:00:00Z"
+state: merged
+user: Atlas-Key
+EOF
+  cat > "$case_dir/atlas-commits.toon" <<EOF
+[1]:
+  - sha: "$head"
+    author:
+      login: Atlas-Key
+    committer:
+      login: Atlas-Key
+EOF
+  : > "$case_dir/atlas-pr-read-count"
+  cat > "$case_dir/fakebin/gh-axi" <<'SH'
+#!/usr/bin/env bash
+set -u
+case "$*" in
+  --version) printf '%s\n' '0.1.27' ;;
+  *'api /repos/example/repo/pulls/7/commits?per_page=100&page=2'*) printf '[0]:\n' ;;
+  *'api /repos/example/repo/pulls/7/commits?per_page=100&page=1'*) cat "$FM_ATLAS_COMMITS" ;;
+  *'api /repos/example/repo/pulls/7/commits'*) cat "$FM_ATLAS_COMMITS" ;;
+  *'api /repos/example/repo/pulls/7'*)
+    read_count=0
+    [ ! -s "$FM_ATLAS_READ_COUNT" ] || read_count=$(cat "$FM_ATLAS_READ_COUNT")
+    read_count=$((read_count + 1))
+    printf '%s\n' "$read_count" > "$FM_ATLAS_READ_COUNT"
+    if [ "$read_count" -eq 1 ]; then
+      printf 'HTTP 503\n' >&2
+      exit 1
+    fi
+    cat "$FM_ATLAS_PR"
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$case_dir/fakebin/gh-axi"
 }
 
 # Commit something on the worktree's task branch. Args: case_dir [message]
@@ -520,34 +685,14 @@ SH
 # Run teardown with PATH mocking. Args: case_dir [extra args...]
 run_teardown() {
   local case_dir=$1; shift
-  # FM_DATA_OVERRIDE is pinned to the case dir because teardown closes this
-  # home's backlog item itself; without it $DATA would resolve to the real
-  # repo's own home and a test could mutate live records.
+  mkdir -p "$case_dir/data"
   FM_ROOT_OVERRIDE="$ROOT" \
+  FM_HOME="$case_dir" \
   FM_STATE_OVERRIDE="$case_dir/state" \
   FM_DATA_OVERRIDE="$case_dir/data" \
   FM_CONFIG_OVERRIDE="$case_dir/config" \
   PATH="$case_dir/fakebin:${FM_TEARDOWN_TEST_PATH:-$PATH}" \
     "$TEARDOWN" task-x1 "$@"
-}
-
-# Seed a real backlog carrying task-x1 as In flight, so a teardown in this case
-# has a row to close. Uses the real tasks-axi (the fixture's default fakebin has
-# no tasks-axi stub, so PATH resolves the installed one).
-seed_backlog_in_flight() {
-  local case_dir=$1 kind=${2:-ship}
-  mkdir -p "$case_dir/data"
-  printf '%s\n' '# Backlog' '' '## In flight' '' '## Queued' '' '## Done' \
-    > "$case_dir/data/backlog.md"
-  tasks-axi add task-x1 "teardown fixture task" --kind "$kind" \
-    --file "$case_dir/data/backlog.md" >/dev/null
-  tasks-axi start task-x1 --file "$case_dir/data/backlog.md" >/dev/null
-}
-
-backlog_row_state() {
-  local case_dir=$1
-  tasks-axi show task-x1 --file "$case_dir/data/backlog.md" 2>/dev/null |
-    sed -n 's/^  state: *//p' | head -1
 }
 
 # Build the teardown test's executable search path without lsof, regardless of
@@ -965,6 +1110,32 @@ test_gh_error_and_content_absent_refuses() {
   pass "gh lookup error with content not in default refuses (fail-safe)"
 }
 
+test_atlas_teardown_retries_broker_read_and_proves_merged_head() {
+  local case_dir rc read_count
+  case_dir=$(make_case atlas-broker-retry)
+  write_meta "$case_dir" no-mistakes ship
+  wt_commit_atlas_file "$case_dir" feature.txt atlas "Atlas broker change"
+  write_atlas_meta_and_binding "$case_dir"
+  add_atlas_broker_merged_for_head_with_one_transient_failure "$case_dir"
+
+  export FM_PR_IDENTITY_TEST_MODE=1
+  export FM_PR_IDENTITY_GH_AXI="$case_dir/fakebin/gh-axi"
+  export FM_ATLAS_PR="$case_dir/atlas-pr.toon"
+  export FM_ATLAS_COMMITS="$case_dir/atlas-commits.toon"
+  export FM_ATLAS_READ_COUNT="$case_dir/atlas-pr-read-count"
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  unset FM_PR_IDENTITY_TEST_MODE FM_PR_IDENTITY_GH_AXI FM_ATLAS_PR FM_ATLAS_COMMITS FM_ATLAS_READ_COUNT
+
+  expect_code 0 "$rc" "atlas-broker-retry: teardown should succeed after a transient broker read failure"
+  read_count=$(cat "$case_dir/atlas-pr-read-count")
+  [ "$read_count" = 2 ] || fail "atlas-broker-retry: teardown did not perform one bounded broker retry"
+  ! grep -q REFUSED "$case_dir/stderr" || fail "atlas-broker-retry: teardown refused a verified merged PR"
+  pass "Atlas teardown uses a bounded broker retry and verifies the merged PR head before cleanup"
+}
+
 test_stale_index_lock_cleared_and_teardown_succeeds() {
   local case_dir rc lock
   case_dir=$(make_case stale-index-lock)
@@ -1303,6 +1474,236 @@ test_fractional_legacy_retry_wait_refuses_without_arithmetic_error() {
   pass "fractional legacy retry wait remains supported without arithmetic"
 }
 
+test_recycled_worktree_owner_mismatch_refuses_without_touching_live_task() {
+  local case_dir rc victim_head marker treehouse_called tmux_called
+  case_dir=$(make_case recycled-worktree-owner)
+  write_meta "$case_dir" local-only ship
+
+  # Task A finished and its slot was returned outside this test. Treehouse then
+  # leased the same path to task B, which has clean, remotely preserved work and
+  # is actively using its branch. Task A's stale meta still names that path.
+  git -C "$case_dir/wt" checkout -q -b fm/task-b main
+  wt_commit_file "$case_dir" victim.txt "task B live work" "task B pipeline work"
+  git -C "$case_dir/wt" push -q origin fm/task-b
+  git -C "$case_dir/project" fetch -q origin
+  write_worktree_owner "$case_dir" task-b fmw.BBBBBBBBBBBB
+  marker="$case_dir/wt/.fm-worktree-owner"
+  victim_head=$(git -C "$case_dir/wt" rev-parse HEAD)
+  treehouse_called="$case_dir/treehouse-called"
+  tmux_called="$case_dir/tmux-called"
+
+  cat > "$case_dir/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+: > "${FM_TREEHOUSE_CALLED:?}"
+exit 0
+SH
+  cat > "$case_dir/fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+: > "${FM_TMUX_CALLED:?}"
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/treehouse" "$case_dir/fakebin/tmux"
+
+  set +e
+  FM_TREEHOUSE_CALLED="$treehouse_called" FM_TMUX_CALLED="$tmux_called" \
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "recycled-worktree-owner: task A teardown must refuse task B's live worktree"
+  assert_grep "task-b" "$case_dir/stderr" \
+    "recycled-worktree-owner: refusal did not name the current owner task B"
+  assert_grep "task-x1" "$case_dir/stderr" \
+    "recycled-worktree-owner: refusal did not name stale task A"
+  [ "$(git -C "$case_dir/wt" rev-parse --abbrev-ref HEAD)" = fm/task-b ] \
+    || fail "recycled-worktree-owner: task B branch was detached or deleted"
+  [ "$(git -C "$case_dir/wt" rev-parse HEAD)" = "$victim_head" ] \
+    || fail "recycled-worktree-owner: task B HEAD changed"
+  [ "$(cat "$case_dir/wt/victim.txt")" = "task B live work" ] \
+    || fail "recycled-worktree-owner: task B content changed"
+  assert_grep 'task_id=task-b' "$marker" \
+    "recycled-worktree-owner: task B ownership marker changed"
+  assert_absent "$treehouse_called" \
+    "recycled-worktree-owner: treehouse return ran against task B"
+  assert_absent "$tmux_called" \
+    "recycled-worktree-owner: task A endpoint cleanup ran after ownership refusal"
+  assert_present "$case_dir/state/task-x1.meta" \
+    "recycled-worktree-owner: stale task metadata was removed despite refusal"
+
+  set +e
+  FM_TREEHOUSE_CALLED="$treehouse_called" FM_TMUX_CALLED="$tmux_called" \
+    run_teardown "$case_dir" --force > "$case_dir/force-stdout" 2> "$case_dir/force-stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "recycled-worktree-owner: --force must not seize task B's worktree"
+  assert_grep "task-b" "$case_dir/force-stderr" \
+    "recycled-worktree-owner: forced refusal did not name current owner task B"
+  [ "$(git -C "$case_dir/wt" rev-parse --abbrev-ref HEAD)" = fm/task-b ] \
+    || fail "recycled-worktree-owner: --force detached or deleted task B branch"
+  [ "$(git -C "$case_dir/wt" rev-parse HEAD)" = "$victim_head" ] \
+    || fail "recycled-worktree-owner: --force changed task B HEAD"
+  assert_absent "$treehouse_called" \
+    "recycled-worktree-owner: --force called treehouse return against task B"
+  assert_absent "$tmux_called" \
+    "recycled-worktree-owner: --force killed an endpoint after ownership refusal"
+  pass "stale task A teardown refuses recycled task B worktree without touching it, even under --force"
+}
+
+test_missing_worktree_owner_refuses_including_force() {
+  local case_dir rc
+  case_dir=$(make_case missing-worktree-owner)
+  write_meta "$case_dir" local-only ship
+  rm -f "$case_dir/wt/.fm-worktree-owner"
+  sed -i.bak '/^worktree_owner_token=/d' "$case_dir/state/task-x1.meta"
+  rm -f "$case_dir/state/task-x1.meta.bak"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "missing-worktree-owner: legacy task without a marker must refuse"
+  assert_grep "ownership marker" "$case_dir/stderr" \
+    "missing-worktree-owner: refusal did not identify the missing ownership claim"
+  assert_present "$case_dir/state/task-x1.meta" \
+    "missing-worktree-owner: refusal removed task metadata"
+
+  set +e
+  run_teardown "$case_dir" --force > "$case_dir/force-stdout" 2> "$case_dir/force-stderr"
+  rc=$?
+  set -e
+  expect_code 1 "$rc" "missing-worktree-owner: --force must not bypass missing ownership"
+  assert_grep "--force cannot bypass" "$case_dir/force-stderr" \
+    "missing-worktree-owner: forced refusal did not explain the ownership boundary"
+  assert_present "$case_dir/state/task-x1.meta" \
+    "missing-worktree-owner: forced refusal removed task metadata"
+  pass "missing pre-change ownership markers refuse cleanup, including under --force"
+}
+
+test_pre_marker_meta_with_missing_project_refuses_without_touching_worktree() {
+  local case_dir rc stale_project wt_branch wt_head wt_status treehouse_called tmux_called
+  case_dir=$(make_case pre-marker-missing-project)
+  write_meta "$case_dir" local-only ship
+
+  # This reproduces checkpoint-incomplete-omp-plan-c3: its pre-marker metadata
+  # names /Users/ed/Developer/Firstmate after that project path vanished, while
+  # its recorded pooled worktree still exists at the original lease path.
+  stale_project="$case_dir/Developer/Firstmate"
+  sed -i.bak "s|^project=.*|project=$stale_project|" "$case_dir/state/task-x1.meta"
+  sed -i.bak '/^worktree_owner_token=/d' "$case_dir/state/task-x1.meta"
+  rm -f "$case_dir/state/task-x1.meta.bak" "$case_dir/wt/.fm-worktree-owner"
+  [ ! -e "$stale_project" ] \
+    || fail "pre-marker-missing-project: stale project path unexpectedly exists"
+  [ -d "$case_dir/wt" ] \
+    || fail "pre-marker-missing-project: recorded pooled worktree does not exist"
+
+  wt_branch=$(git -C "$case_dir/wt" rev-parse --abbrev-ref HEAD)
+  wt_head=$(git -C "$case_dir/wt" rev-parse HEAD)
+  wt_status=$(git -C "$case_dir/wt" status --porcelain)
+  treehouse_called="$case_dir/treehouse-called"
+  tmux_called="$case_dir/tmux-called"
+  cat > "$case_dir/fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+: > "${FM_TREEHOUSE_CALLED:?}"
+exit 0
+SH
+  cat > "$case_dir/fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+: > "${FM_TMUX_CALLED:?}"
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/treehouse" "$case_dir/fakebin/tmux"
+
+  set +e
+  FM_TREEHOUSE_CALLED="$treehouse_called" FM_TMUX_CALLED="$tmux_called" \
+    run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "pre-marker-missing-project: teardown must refuse before using a vanished project path"
+  assert_grep "no Treehouse ownership token" "$case_dir/stderr" \
+    "pre-marker-missing-project: refusal did not exercise the pre-marker ownership branch"
+  assert_not_contains "$(cat "$case_dir/stderr")" "cannot determine default branch" \
+    "pre-marker-missing-project: teardown reached project-path-dependent safety checks"
+  assert_present "$case_dir/state/task-x1.meta" \
+    "pre-marker-missing-project: refusal removed stale metadata"
+  assert_absent "$treehouse_called" \
+    "pre-marker-missing-project: treehouse return touched the pooled worktree"
+  assert_absent "$tmux_called" \
+    "pre-marker-missing-project: endpoint cleanup ran after ownership refusal"
+  [ "$(git -C "$case_dir/wt" rev-parse --abbrev-ref HEAD)" = "$wt_branch" ] \
+    || fail "pre-marker-missing-project: worktree branch changed"
+  [ "$(git -C "$case_dir/wt" rev-parse HEAD)" = "$wt_head" ] \
+    || fail "pre-marker-missing-project: worktree HEAD changed"
+  [ "$(git -C "$case_dir/wt" status --porcelain)" = "$wt_status" ] \
+    || fail "pre-marker-missing-project: worktree contents changed"
+
+  set +e
+  FM_TREEHOUSE_CALLED="$treehouse_called" FM_TMUX_CALLED="$tmux_called" \
+    run_teardown "$case_dir" --force > "$case_dir/force-stdout" 2> "$case_dir/force-stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "pre-marker-missing-project: --force must not bypass pre-marker ownership"
+  assert_grep "--force cannot bypass ownership" "$case_dir/force-stderr" \
+    "pre-marker-missing-project: forced refusal did not explain the ownership boundary"
+  assert_not_contains "$(cat "$case_dir/force-stderr")" "cannot determine default branch" \
+    "pre-marker-missing-project: forced teardown reached the vanished project path"
+  assert_present "$case_dir/state/task-x1.meta" \
+    "pre-marker-missing-project: forced refusal removed stale metadata"
+  assert_absent "$treehouse_called" \
+    "pre-marker-missing-project: --force called treehouse return"
+  assert_absent "$tmux_called" \
+    "pre-marker-missing-project: --force killed the recorded endpoint"
+  [ "$(git -C "$case_dir/wt" rev-parse --abbrev-ref HEAD)" = "$wt_branch" ] \
+    || fail "pre-marker-missing-project: --force changed the worktree branch"
+  [ "$(git -C "$case_dir/wt" rev-parse HEAD)" = "$wt_head" ] \
+    || fail "pre-marker-missing-project: --force changed worktree HEAD"
+  [ "$(git -C "$case_dir/wt" status --porcelain)" = "$wt_status" ] \
+    || fail "pre-marker-missing-project: --force changed worktree contents"
+  pass "pre-marker metadata with a vanished project path preserves its pooled worktree, including under --force"
+}
+
+test_recycled_same_task_id_with_new_token_refuses() {
+  local case_dir rc
+  case_dir=$(make_case recycled-same-task-id)
+  write_meta "$case_dir" local-only ship
+  write_worktree_owner "$case_dir" task-x1 fmw.BBBBBBBBBBBB
+
+  set +e
+  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "recycled-same-task-id: a fresh lease token must refuse stale same-id metadata"
+  assert_grep "different lease" "$case_dir/stderr" \
+    "recycled-same-task-id: refusal did not identify the lease-token mismatch"
+  assert_present "$case_dir/state/task-x1.meta" \
+    "recycled-same-task-id: refusal removed stale metadata"
+  pass "a recycled worktree refuses stale metadata even when the new task reuses the same id"
+}
+
+test_unreadable_worktree_owner_refuses() {
+  local case_dir rc marker
+  case_dir=$(make_case unreadable-worktree-owner)
+  write_meta "$case_dir" local-only ship
+  marker="$case_dir/wt/.fm-worktree-owner"
+  chmod 000 "$marker"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+  chmod 600 "$marker"
+
+  expect_code 1 "$rc" "unreadable-worktree-owner: unreadable marker must refuse"
+  assert_grep "unreadable or invalid" "$case_dir/stderr" \
+    "unreadable-worktree-owner: refusal did not explain the ownership read failure"
+  assert_present "$case_dir/state/task-x1.meta" \
+    "unreadable-worktree-owner: refusal removed task metadata"
+  pass "unreadable worktree ownership markers refuse cleanup"
+}
+
 test_local_only_force_overrides_unpushed() {
   local case_dir rc
   case_dir=$(make_case force-override)
@@ -1580,6 +1981,10 @@ SH
   [ "$rc" -ne 0 ] || fail "herdr-preflight-$mode: teardown continued without its required preflight"
   assert_grep "nothing was changed" "$case_dir/stderr" \
     "herdr-preflight-$mode: the retryable pre-return refusal was not explained visibly"
+  if [ "$mode" = missing-adapter ]; then
+    assert_grep "restore the adapter and rerun teardown" "$case_dir/stderr" \
+      "herdr-preflight-missing-adapter: refusal did not explain the retry"
+  fi
   [ -d "$case_dir/wt" ] || fail "herdr-preflight-$mode: refusal removed the isolated copy"
   [ "$(git -C "$case_dir/wt" rev-parse --abbrev-ref HEAD 2>/dev/null)" = "fm/task-x1" ] \
     || fail "herdr-preflight-$mode: refusal dropped the task branch"
@@ -1602,14 +2007,16 @@ test_herdr_flat_teardown_preflight_refuses_before_changes() {
 }
 
 configure_secondmate_with_herdr_child() {  # <case-dir>
-  local case_dir=$1 home="$1/secondmate-home"
+  local case_dir home
+  case_dir=$1
+  home="$TMP_ROOT/$(basename "$case_dir")-secondmate-home"
   mkdir -p "$home/state" "$home/data" "$home/config" "$home/projects"
   printf '%s\n' task-x1 > "$home/.fm-secondmate-home"
   printf '%s\n' "home=$home" >> "$case_dir/state/task-x1.meta"
   fm_write_meta "$home/state/child-herdr.meta" \
     "window=childsession:wC:p1" \
     "endpoint_task_id=child-herdr" \
-    "worktree=$case_dir/wt" \
+    "worktree=$case_dir/child-wt" \
     "project=$case_dir/project" \
     "kind=ship" \
     "mode=local-only" \
@@ -1656,7 +2063,7 @@ test_forced_secondmate_herdr_child_preflight_refuses_before_changes() {
   case_dir=$(make_case herdr-child-preflight)
   write_meta "$case_dir" local-only secondmate
   configure_secondmate_with_herdr_child "$case_dir"
-  home="$case_dir/secondmate-home"
+  home="$TMP_ROOT/$(basename "$case_dir")-secondmate-home"
   log="$case_dir/herdr.log"; closed="$case_dir/closed"; thlog="$case_dir/treehouse.log"
   : > "$log"; : > "$thlog"
   cat > "$case_dir/fakebin/treehouse" <<SH
@@ -1779,7 +2186,7 @@ test_forced_secondmate_herdr_child_retains_records_when_close_unconfirmed() {
   case_dir=$(make_case herdr-child-unconfirmed-close)
   write_meta "$case_dir" local-only secondmate
   configure_secondmate_with_herdr_child "$case_dir"
-  home="$case_dir/secondmate-home"
+  home="$TMP_ROOT/$(basename "$case_dir")-secondmate-home"
   log="$case_dir/herdr.log"; closed="$case_dir/closed"; : > "$log"
   rc=0
   FM_FAKE_HERDR_LOG="$log" FM_FAKE_HERDR_CLOSED="$closed" FM_FAKE_HERDR_PRESENCE_UNKNOWN=1 \
@@ -1796,9 +2203,18 @@ test_forced_secondmate_herdr_child_retains_records_when_close_unconfirmed() {
 }
 
 configure_nested_secondmate_with_herdr_grandchild() {  # <case-dir>
-  local case_dir=$1 home="$1/secondmate-home" nested_home="$1/secondmate-home/nested-home"
+  local case_dir home nested_home grandchild_wt exclude
+  case_dir=$1
+  home="$TMP_ROOT/$(basename "$case_dir")-secondmate-home"
+  nested_home="$home/nested-home"
+  grandchild_wt="$TMP_ROOT/$(basename "$case_dir")-grandchild-wt"
   mkdir -p "$home/state" "$home/data" "$home/config" "$home/projects"
   mkdir -p "$nested_home/state" "$nested_home/data" "$nested_home/config" "$nested_home/projects"
+  git -C "$case_dir/project" worktree add -q -b "fm/$(basename "$case_dir")-grandchild" "$grandchild_wt" main
+  printf 'version=1\ntask_id=grandchild-herdr\ntoken=fmw.GGGGGGGGGGGG\n' > "$grandchild_wt/.fm-worktree-owner"
+  exclude=$(git -C "$grandchild_wt" rev-parse --git-path info/exclude)
+  case "$exclude" in /*) : ;; *) exclude="$grandchild_wt/$exclude" ;; esac
+  printf '%s\n' '.fm-worktree-owner' >> "$exclude"
   printf '%s\n' task-x1 > "$home/.fm-secondmate-home"
   printf '%s\n' nested-sm > "$nested_home/.fm-secondmate-home"
   printf '%s\n' "home=$home" >> "$case_dir/state/task-x1.meta"
@@ -1813,10 +2229,11 @@ configure_nested_secondmate_with_herdr_grandchild() {  # <case-dir>
   fm_write_meta "$nested_home/state/grandchild-herdr.meta" \
     "window=grandchildsession:wG:p1" \
     "endpoint_task_id=grandchild-herdr" \
-    "worktree=$case_dir/wt" \
+    "worktree=$grandchild_wt" \
     "project=$case_dir/project" \
     "kind=ship" \
     "mode=local-only" \
+    "worktree_owner_token=fmw.GGGGGGGGGGGG" \
     "backend=herdr" \
     "herdr_session=grandchildsession" \
     "herdr_workspace_id=wG" \
@@ -1851,7 +2268,7 @@ test_forced_teardown_retains_nested_secondmate_home_when_grandchild_close_unconf
   case_dir=$(make_case herdr-grandchild-unconfirmed-close)
   write_meta "$case_dir" local-only secondmate
   configure_nested_secondmate_with_herdr_grandchild "$case_dir"
-  home="$case_dir/secondmate-home"; nested_home="$home/nested-home"
+  home="$TMP_ROOT/$(basename "$case_dir")-secondmate-home"; nested_home="$home/nested-home"
   log="$case_dir/herdr.log"; closed="$case_dir/closed"; : > "$log"
   rc=0
   FM_FAKE_HERDR_LOG="$log" FM_FAKE_HERDR_CLOSED="$closed" \
@@ -1994,26 +2411,6 @@ test_herdr_projection_teardown_retains_journal_when_close_unconfirmed() {
   assert_not_contains "$(cat "$log")" "workspace close" \
     "unconfirmed projected close must not escalate to workspace cleanup"
   pass "herdr projection teardown retains every record when post-close presence is unknown"
-}
-
-test_herdr_projection_teardown_surfaces_restore_failure_without_blocking_cleanup() {
-  local case_dir log closed restored
-  case_dir=$(make_case herdr-projection-restore-failure)
-  write_meta "$case_dir" local-only ship
-  configure_herdr_projection_teardown_case "$case_dir"
-  log="$case_dir/herdr.log"; closed="$case_dir/closed"; restored="$case_dir/restored"; : > "$log"
-
-  FM_FAKE_HERDR_LOG="$log" FM_FAKE_HERDR_CLOSED="$closed" FM_FAKE_HERDR_RESTORED="$restored" \
-    FM_FAKE_HERDR_RESTORE_FAIL=1 \
-    run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr" \
-    || fail "herdr-projection-restore-failure: a confirmed close with a failed focus restore blocked teardown"
-  [ -e "$closed" ] \
-    || fail "herdr-projection-restore-failure: regression did not exercise the exact projected-pane close"
-  [ ! -e "$case_dir/state/task-x1.herdr-presentation" ] \
-    || fail "herdr-projection-restore-failure: confirmed closure did not retire the presentation journal"
-  assert_grep "exact-tab restoration failed" "$case_dir/stderr" \
-    "herdr-projection-restore-failure: teardown swallowed the focus helper's restore warning"
-  pass "herdr projection teardown surfaces failed focus restoration without turning confirmed cleanup into a hard failure"
 }
 
 # --- Fix 1: conclude/abort the task's own parked no-mistakes run before the
@@ -2612,6 +3009,11 @@ test_local_only_truly_unpushed_refuses
 test_local_only_merged_to_local_main_allows
 test_no_mistakes_origin_remote_allows
 test_no_mistakes_truly_unpushed_refuses
+test_recycled_worktree_owner_mismatch_refuses_without_touching_live_task
+test_missing_worktree_owner_refuses_including_force
+test_pre_marker_meta_with_missing_project_refuses_without_touching_worktree
+test_recycled_same_task_id_with_new_token_refuses
+test_unreadable_worktree_owner_refuses
 test_local_only_force_overrides_unpushed
 test_teardown_missing_busy_sidecar_completes
 test_herdr_teardown_clears_escalation_marker
@@ -2636,6 +3038,7 @@ test_content_in_default_fallback_allows
 test_content_fallback_refreshes_stale_origin_ref
 test_dirty_worktree_refuses
 test_gh_error_and_content_absent_refuses
+test_atlas_teardown_retries_broker_read_and_proves_merged_head
 test_stale_index_lock_cleared_and_teardown_succeeds
 test_live_index_lock_is_never_removed_and_teardown_refuses
 test_lsof_error_never_clears_index_lock

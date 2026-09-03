@@ -16,12 +16,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 # shellcheck source=bin/fm-classify-lib.sh
 . "$SCRIPT_DIR/fm-classify-lib.sh"
-# shellcheck source=bin/fm-line-cap-lib.sh
-. "$SCRIPT_DIR/fm-line-cap-lib.sh"
-# shellcheck source=bin/fm-timeout-lib.sh
-. "$SCRIPT_DIR/fm-timeout-lib.sh"
-# shellcheck source=bin/fm-lease-lib.sh
-. "$SCRIPT_DIR/fm-lease-lib.sh"
 
 DRAIN_TMP=
 DRAIN_VIEW_TMP=
@@ -167,240 +161,28 @@ esac
 # Reuse fm-guard.sh's model-aware alarm and FM_GUARD_GRACE instead of duplicating
 # its supervision verdict. Under Claude's between-turns auto-arm model, a normal
 # fire leaves a recent beacon well inside grace and stays silent mid-turn. Under
-# the Pi extension model, a fresh beacon also stays silent during a genuinely
-# unheld-lock hand-off only while the live session proves extension ownership.
-# Persistent-watcher models still require the live identity-matched watcher.
-# Never let a guard hiccup change the drain's exit status.
+# persistent-watcher models, the guard also requires the live identity-matched
+# watcher. Call after the queue is emptied so guard never re-prints its own
+# queued-wakes notice for the records this run just drained, and never let a
+# guard hiccup change the drain's exit status.
 assert_watcher_liveness() {
   "$SCRIPT_DIR/fm-guard.sh" || true
 }
 
-# Mark presentation-stage inactive terminal outcomes only after the handling
-# turn has completed and before this acknowledgement consumes its queue rows.
-# The helper ignores non-presentation and legacy keys, so this is a narrow
-# receipt path rather than a second interpretation of general check wakes.
-inactive_outcome_fingerprints() { # <sequence> <key-prefix> [<rows-file>]
-  local cutoff=$1 prefix=$2 rows=${3:-} epoch seq kind key payload
-  while IFS=$(printf '\t') read -r epoch seq kind key payload; do
-    [ "$kind" = check ] || continue
-    case "$seq" in ''|*[!0-9]*) continue ;; esac
-    [ "$seq" -le "$cutoff" ] || continue
-    if [ -n "$rows" ] && ! grep -qxF "$seq" "$rows"; then continue; fi
-    case "$key" in
-      "$prefix"*) printf '%s\n' "${key#"$prefix"}" ;;
-    esac
-  done < "$FM_WAKE_QUEUE"
-}
-
-acknowledge_inactive_outcomes() { # <mode> <newline-separated-fingerprints>
-  local mode=$1 fingerprints=$2 fingerprint
-  while IFS= read -r fingerprint; do
-    [ -n "$fingerprint" ] || continue
-    "$SCRIPT_DIR/fm-inactive-reconcile.sh" "$mode" "$fingerprint" || return 1
-  done <<< "$fingerprints"
-}
-
-BRANCH_OUTCOME_INDEX_VERSION=fm-branch-outcome-index-v1
-BRANCH_OUTCOME_INDEX_MAX_BYTES=512
-BRANCH_OUTCOME_INDEX_STATE=ok
-BRANCH_OUTCOME_INDEX_ENDPOINT=
-BRANCH_OUTCOME_INDEX_IDENT=
-STATUS_OUTCOME_BACKSTOP_ACKNOWLEDGED=
-outcome_index_ready_ok() { # <ready-path>
-  local seq
-  [ -f "$1" ] && [ -r "$1" ] && [ ! -L "$1" ] || return 1
-  seq=$(LC_ALL=C command cat "$1" 2>/dev/null) || return 1
-  case "$seq" in ''|*[!0-9]*) return 1 ;; esac
-  return 0
-}
-
-load_branch_outcome_index() { # <task>
-  local task=$1 path data version seq endpoint ident extra size
-  BRANCH_OUTCOME_INDEX_STATE=ok
-  BRANCH_OUTCOME_INDEX_ENDPOINT=
-  BRANCH_OUTCOME_INDEX_IDENT=
-  case "$task" in ''|*[!A-Za-z0-9._-]*) return 0 ;; esac
-  path="$STATE/.$task.branch-outcome-index"
-  [ -e "$path" ] || [ -L "$path" ] || return 0
-  if [ ! -f "$path" ] || [ ! -r "$path" ] || [ -L "$path" ]; then
-    BRANCH_OUTCOME_INDEX_STATE=invalid
-    return 0
-  fi
-  size=$(_fm_status_file_size "$path") || { BRANCH_OUTCOME_INDEX_STATE=invalid; return 0; }
-  size=${size//[[:space:]]/}
-  case "$size" in ''|*[!0-9]*) BRANCH_OUTCOME_INDEX_STATE=invalid; return 0 ;; esac
-  if [ "$size" -gt "$BRANCH_OUTCOME_INDEX_MAX_BYTES" ]; then
-    BRANCH_OUTCOME_INDEX_STATE=invalid
-    return 0
-  fi
-  data=$(LC_ALL=C command cat "$path" 2>/dev/null) \
-    || { BRANCH_OUTCOME_INDEX_STATE=invalid; return 0; }
-  case "$data" in *$'\n'*) BRANCH_OUTCOME_INDEX_STATE=invalid; return 0 ;; esac
-  IFS=$(printf '\t') read -r version seq endpoint ident extra <<EOF
-$data
-EOF
-  if [ "$version" != "$BRANCH_OUTCOME_INDEX_VERSION" ] || [ -n "$extra" ]; then
-    BRANCH_OUTCOME_INDEX_STATE=invalid
-    return 0
-  fi
-  case "$seq:$endpoint" in *[!0-9:]*) BRANCH_OUTCOME_INDEX_STATE=invalid; return 0 ;; esac
-  [ -n "$seq" ] && [ -n "$endpoint" ] && [ -n "$ident" ] \
-    && [ "${#seq}" -le 16 ] && [ "${#endpoint}" -le 16 ] \
-    && [ "$seq" -le 9007199254740991 ] && [ "$endpoint" -le 9007199254740991 ] \
-    || { BRANCH_OUTCOME_INDEX_STATE=invalid; return 0; }
-  BRANCH_OUTCOME_INDEX_ENDPOINT=$endpoint
-  BRANCH_OUTCOME_INDEX_IDENT=$ident
-}
-
-print_status_outcome_backstop_section() {  # <task-and-endpoint-snapshot>
-  local snapshot=$1 task endpoint ident event event_endpoint line verb key receipt store lock ready
-  local output='' used=0 shown=0 omitted=0 bytes item_bytes=220 global_bytes=4000 rc=0
-  [ "$ACTOR" = main ] || return 0
-
-  store="$STATE/branch-outcomes.jsonl"
-  lock="$STATE/.branch-outcomes.lock"
-  if [ -e "$store" ] || [ -L "$store" ]; then
-    if [ ! -f "$store" ] || [ ! -r "$store" ] || [ -L "$store" ]; then
-      printf 'STATUS OUTCOME BACKSTOP SKIPPED: branch outcome history could not be read safely; repair it before relying on drain recovery.\n'
-      return 0
-    fi
-    if ! fm_lock_acquire_wait_bounded "$lock" "$PRESENTATION_LOCK_TIMEOUT"; then
-      printf 'STATUS OUTCOME BACKSTOP SKIPPED: branch outcome history is busy; retry on the next drain.\n'
-      return 0
-    fi
-    ready="$STATE/.branch-outcome-index-ready"
-    if ! outcome_index_ready_ok "$ready"; then
-      if ! "$SCRIPT_DIR/fm-branch-outcome.sh" processed-init --held-lock >/dev/null 2>&1 \
-        || ! outcome_index_ready_ok "$ready"; then
-        fm_lock_release "$lock"
-        printf 'STATUS OUTCOME BACKSTOP SKIPPED: bounded outcome indexes could not be rebuilt because the outcome store is unsafe; repair it before relying on drain recovery.\n'
-        return 0
-      fi
-    fi
-  fi
-
-  STATUS_OUTCOME_BACKSTOP_ACKNOWLEDGED=
-  while IFS=$(printf '\t') read -r task endpoint ident; do
-    [ -n "$task" ] || continue
-    receipt=$(status_outcome_backstop_cursor_offset "$STATE/$task.status") || { rc=1; break; }
-    [ "$receipt" -lt "$endpoint" ] || continue
-    status_snapshot_latest_event "$STATE/$task.status" "$endpoint" "$ident" || continue
-    event=$FM_STATUS_SNAPSHOT_EVENT_LINE
-    event_endpoint=$FM_STATUS_SNAPSHOT_EVENT_ENDPOINT
-    [ "$receipt" -lt "$event_endpoint" ] || continue
-    status_is_captain_relevant "$event" || continue
-    verb=$(status_line_verb "$event")
-    case "$verb" in
-      needs-decision|blocked)
-        key=$(_fm_decision_key "$event") || key=
-        # Parseable decisions belong exclusively to the durable fold. That
-        # includes reserved-key transitions the fold rejects; resurfacing one
-        # here would let a foreign writer bypass the namespace guard. A line
-        # with malformed key syntax has no fold representation, so the
-        # captain-facing backstop remains its only safe presentation path.
-        [ -z "$key" ] || continue
-        ;;
-    esac
-    load_branch_outcome_index "$task"
-    if [ "$BRANCH_OUTCOME_INDEX_STATE" != ok ]; then
-      rc=2
-      break
-    fi
-    if [ -n "$BRANCH_OUTCOME_INDEX_ENDPOINT" ] \
-      && [ "$BRANCH_OUTCOME_INDEX_IDENT" = "$ident" ] \
-      && [ "$BRANCH_OUTCOME_INDEX_ENDPOINT" -ge "$event_endpoint" ]; then
-      continue
-    fi
-
-    line="$task $event"
-    fm_cap_line_var "$line" $((item_bytes - 1))
-    line=$FM_LINE_CAP_LINE
-    bytes=$(( ${#line} + 1 ))
-    if [ $((used + bytes)) -gt "$global_bytes" ]; then
-      omitted=$((omitted + 1))
-      continue
-    fi
-    output="$output$line
-"
-    STATUS_OUTCOME_BACKSTOP_ACKNOWLEDGED="$STATUS_OUTCOME_BACKSTOP_ACKNOWLEDGED$task$(printf '\t')$event_endpoint
-"
-    used=$((used + bytes))
-    shown=$((shown + 1))
-  done <<EOF
-$snapshot
-EOF
-
-  if [ -e "$store" ] || [ -L "$store" ]; then fm_lock_release "$lock"; fi
-  if [ "$rc" -eq 1 ]; then return 1; fi
-  if [ "$rc" -eq 2 ]; then
-    printf 'STATUS OUTCOME BACKSTOP SKIPPED: a bounded task outcome index could not be read safely; repair it before relying on drain recovery.\n'
-    STATUS_OUTCOME_BACKSTOP_ACKNOWLEDGED=
-    return 0
-  fi
-  [ "$shown" -gt 0 ] || [ "$omitted" -gt 0 ] || return 0
-  printf 'STATUS OUTCOME BACKSTOP (newest captain-facing task event has no covering branch outcome):\n' || return 1
-  printf '%s' "$output" || return 1
-  if [ "$omitted" -gt 0 ]; then
-    printf 'STATUS OUTCOME BACKSTOP: %d more omitted (byte cap)\n' "$omitted" || return 1
-  fi
-}
-
-# Print still-unread informational status lines (note: answers and pending-reply
-# resolutions) that the OPEN DECISIONS fold never carries. Uses the same
-# cursor-backed unread span as the annotation path, and runs on every drain -
-# including the empty-queue fast path - so a buried answer cannot be swallowed
-# when the fold later advances the cursor. Prints nothing when nothing is
-# unread, which is the common case.
-print_unread_status_section() {
-  local snapshot=${1:-} unread task line shown=0
-
-  if [ -n "$snapshot" ]; then
-    unread=$(scan_unread_surface_snapshot "$STATE" "$snapshot") || return 1
-  else
-    unread=$(scan_unread_surface_lines "$STATE") || return 1
-  fi
-  [ -n "$unread" ] || return 0
-
-  while IFS=$(printf '\t') read -r task line; do
-    [ -n "$task" ] || continue
-    [ -n "$line" ] || continue
-    line="$task $line"
-    if [ "$shown" -eq 0 ]; then
-      printf 'UNREAD STATUS (new since last drain, not re-printed after this presentation):\n' || return 1
-    fi
-    printf '%s\n' "$line" || return 1
-    shown=$((shown + 1))
-  done <<EOF
-$unread
-EOF
-
-  [ "$shown" -gt 0 ] || return 0
-}
-
 # Print the consolidated OPEN DECISIONS section: every still-open
 # needs-decision/blocked, fleet-wide, folded from the durable status logs by
-# fm-classify-lib.sh's status_open_decisions fold (via its cursor-backed
-# scan_open_decisions_incremental wrapper) rather than from the annotations
-# above, so a decision buried under later unrelated appends cannot be silently
-# missed. Informational `note:` lines and pending-reply resolutions are not
-# decisions; print_unread_status_section owns their one-shot surface. Runs on
+# fm-classify-lib.sh's status_open_decisions (via its scan_open_decisions
+# wrapper) rather than from the latest-line annotations above, so a decision
+# buried under later unrelated appends cannot be silently missed. Runs on
 # every drain - including the empty-queue fast path - because the decision can
-# still be open even when nothing new is queued for
-# its task this turn. The incremental wrapper bounds this scan's cost to bytes
-# appended to each task's status log since the LAST drain, not that log's whole
-# lifetime, while still never dropping an old buried decision (see
-# fm-classify-lib.sh's "incremental (cursor-backed) open-decisions fold").
+# still be open even when nothing new is queued for its task this turn.
 # Bounded and silent: prints nothing when no decision is open, which is the
 # common case.
 print_open_decisions_section() {
-  local snapshot=${1:-} open task key verb note line item_bytes=220 global_bytes=4000
-  local output='' used=0 shown=0 omitted=0 bytes
+  local open task key verb note line item_bytes=220 global_bytes=4000
+  local output='' used=0 shown=0 omitted=0 bytes suffix keep
 
-  if [ -n "$snapshot" ]; then
-    open=$(scan_open_decisions_snapshot "$STATE" "$snapshot") || return 1
-  else
-    open=$(scan_open_decisions_incremental "$STATE") || return 1
-  fi
+  open=$(scan_open_decisions "$STATE") || return 0
   [ -n "$open" ] || return 0
 
   while IFS=$(printf '\t') read -r task key verb note; do
@@ -408,11 +190,11 @@ print_open_decisions_section() {
     line="$task"
     [ "$key" = default ] || line="$line [key=$key]"
     line="$line $verb: $note"
-    # The shared cut counts the item's own characters; the trailing newline this
-    # section's global budget also pays for is this caller's, so the per-item
-    # allowance passed down is one short of the cap.
-    fm_cap_line_var "$line" $((item_bytes - 1))
-    line=$FM_LINE_CAP_LINE
+    if [ $(( ${#line} + 1 )) -gt "$item_bytes" ]; then
+      suffix=' [truncated]'
+      keep=$((item_bytes - ${#suffix} - 1))
+      line="${line:0:$keep}$suffix"
+    fi
     bytes=$(( ${#line} + 1 ))
     if [ $((used + bytes)) -gt "$global_bytes" ]; then
       omitted=$((omitted + 1))
@@ -427,137 +209,11 @@ $open
 EOF
 
   [ "$shown" -gt 0 ] || [ "$omitted" -gt 0 ] || return 0
-  printf 'OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):\n' || return 1
-  printf '%s' "$output" || return 1
+  printf 'OPEN DECISIONS (still open, folded from the durable status logs - not just the latest line):\n'
+  printf '%s' "$output"
   if [ "$omitted" -gt 0 ]; then
-    printf 'OPEN DECISIONS: %d more omitted (byte cap)\n' "$omitted" || return 1
+    printf 'OPEN DECISIONS: %d more omitted (byte cap)\n' "$omitted"
   fi
-  # Answerer-closes hint, printed at exactly the moment an answer gets written:
-  # the send that answers a listed decision also closes it, so closure never
-  # depends on the busy worker writing a matching resolved line (contract:
-  # bin/fm-send.sh header).
-  printf "OPEN DECISIONS: close one by answering it: bin/fm-send.sh <task> --resolve-key <key> '<answer>'\n" || return 1
-}
-
-# Print the RECORD DIVERGENCE section: every captain call whose two records
-# contradict each other - the status log says a key was resolved outright while
-# the task held for the captain is still open. Nothing here closes anything; the
-# section exists because posting the resolution alone reads as complete on the
-# status side, so the durable record can keep saying the captain owes an answer
-# with no warning at all. bin/fm-captain-hold.sh's `diverged` owns which pairs
-# count and why; this prints what it reports.
-#
-# Bounded and silent like OPEN DECISIONS above: nothing prints when the two
-# records agree, which is the common case. If tasks-axi is unavailable, the
-# guard cannot read the structured record and stays silent. A guard failure
-# never changes the drain's exit status - a supervision turn must still present
-# its wakes when the backlog tool is having a bad day.
-print_record_divergence_section() {
-  local diverged task origin key title line shown=0 omitted=0 bound
-  local output='' used=0 bytes item_bytes=220 global_bytes=2000
-
-  # A non-positive bound is not a bound (bin/fm-timeout-lib.sh), so a bad
-  # override falls back to the default rather than disabling the deadline.
-  bound=${FM_DIVERGENCE_TIMEOUT:-20}
-  case "$bound" in ''|*[!0-9]*|0) bound=20 ;; esac
-
-  # Bounded, because this runs at the top of every supervision turn: a backlog
-  # tool having a bad day must cost the drain a few seconds at worst, never the
-  # presentation of the wakes it exists to deliver.
-  diverged=$(fm_run_timed "$bound" "$SCRIPT_DIR/fm-captain-hold.sh" diverged 2>/dev/null) || return 0
-  [ -n "$diverged" ] || return 0
-
-  while IFS=$(printf '\t') read -r task origin key title; do
-    [ -n "$task" ] || continue
-    line="$task [key=$key] reads resolved in $origin's status log but is still held for the captain"
-    [ -z "$title" ] || line="$line: $title"
-    fm_cap_line_var "$line" $((item_bytes - 1))
-    line=$FM_LINE_CAP_LINE
-    bytes=$(( ${#line} + 1 ))
-    if [ $((used + bytes)) -gt "$global_bytes" ]; then
-      omitted=$((omitted + 1))
-      continue
-    fi
-    output="$output$line
-"
-    used=$((used + bytes))
-    shown=$((shown + 1))
-  done <<EOF
-$diverged
-EOF
-
-  [ "$shown" -gt 0 ] || [ "$omitted" -gt 0 ] || return 0
-  printf 'RECORD DIVERGENCE (answered in the status log, still held in the backlog - nothing was closed automatically):\n' || return 1
-  printf '%s' "$output" || return 1
-  if [ "$omitted" -gt 0 ]; then
-    printf 'RECORD DIVERGENCE: %d more omitted (byte cap)\n' "$omitted" || return 1
-  fi
-  # Both directions, deliberately. The status resolution is not proof the
-  # captain ruled: a call can dissolve, or turn out to have been a question of
-  # fact. Reconcile with what actually happened - never by closing on the
-  # strength of this line.
-  printf 'RECORD DIVERGENCE: reconcile each one - record the captain'"'"'s own words with bin/fm-captain-hold.sh answer <task> --decision-file <path>, or re-open the status decision when that resolution was not the captain'"'"'s word.\n' || return 1
-}
-
-print_status_sections() {
-  local snapshot=${1:-} fully_presented=${2:-} acknowledged prepared
-  if [ -z "$snapshot" ]; then snapshot=$(status_presentation_snapshot "$STATE") || return 1; fi
-  [ -n "$snapshot" ] || return 0
-  acknowledged=$(status_acknowledge_presented_snapshot "$STATE" "$snapshot" "$fully_presented") || return 1
-  prepared=$(mktemp "$STATE/.status-presentation.prepared.XXXXXX") || return 1
-  if ! {
-    print_unread_status_section "$snapshot" \
-      && print_status_outcome_backstop_section "$snapshot" \
-      && print_open_decisions_section "$snapshot" \
-      && print_record_divergence_section
-  } > "$prepared"; then
-    rm -f -- "$prepared"
-    return 1
-  fi
-  # Prepare every section before presentation, but do not commit its receipt
-  # until the prepared bytes reach stdout. If the consumer closes or fails,
-  # leave the receipt behind so the next drain can recover the presentation.
-  if ! command cat "$prepared"; then
-    rm -f -- "$prepared"
-    return 1
-  fi
-  if ! status_commit_presentation_snapshot "$STATE" "$acknowledged"; then
-    rm -f -- "$prepared"
-    return 1
-  fi
-  rm -f -- "$prepared"
-}
-
-print_status_presentation() {  # [<deduped-raw-rows>]
-  local rows=${1:-} lock="$STATE/.status-presentation-lock" snapshot annotation_manifest fully_presented='' rc=0
-  local lock_rc holder_pid
-  if fm_lock_acquire_wait_bounded "$lock" "$PRESENTATION_LOCK_TIMEOUT"; then
-    :
-  else
-    lock_rc=$?
-    if [ "$lock_rc" -eq 124 ]; then
-      holder_pid=${FM_LOCK_HELD_PID:-unknown}
-      printf 'STATUS PRESENTATION SKIPPED: lock remains held by live pid %s after %ss; retry on the next drain.\n' \
-        "$holder_pid" "$PRESENTATION_LOCK_TIMEOUT"
-    else
-      printf 'wake drain: status presentation lock could not be acquired safely\n' >&2
-    fi
-    return 1
-  fi
-  snapshot=$(status_presentation_snapshot "$STATE") || {
-    printf 'STATUS PRESENTATION INCOMPLETE: status snapshot could not be read.\n'
-    rc=1
-  }
-  if [ "$rc" -eq 0 ] && [ -n "$rows" ]; then
-    fm_wake_print_annotations "$rows" "$snapshot" || rc=1
-    if [ "$rc" -eq 0 ]; then
-      annotation_manifest=$(fm_wake_annotation_manifest "$rows") || rc=1
-      fully_presented=$(printf '%s\n' "$annotation_manifest" | awk -F '\t' '$2 == "direct" { sub(/\.status$/, "", $1); print $1 }') || rc=1
-    fi
-  fi
-  if [ "$rc" -eq 0 ] && [ -n "$snapshot" ]; then print_status_sections "$snapshot" "$fully_presented" || rc=1; fi
-  fm_lock_release "$lock"
-  return "$rc"
 }
 
 # shellcheck disable=SC2317,SC2329 # Invoked by trap handlers below.
@@ -688,25 +344,9 @@ fi
 
 if [ ! -s "$FM_WAKE_QUEUE" ]; then
   : > "$FM_WAKE_QUEUE"
-  fm_recovery_marker_snapshot "$RECOVERY_MARKER" || true
-  RECOVERY_MARKER_TOKEN=$FM_RECOVERY_MARKER_TOKEN
-  case "$RECOVERY_MARKER_TOKEN" in
-    pending:downtime:*|announced:downtime:*)
-      fm_recovery_marker_begin_handling "$RECOVERY_MARKER" || {
-        echo "wake drain: decision recovery could not begin handling safely" >&2
-        exit 1
-      }
-      RECOVERY_MARKER_TOKEN=$FM_RECOVERY_MARKER_TOKEN
-      RECOVERY_ACK_REQUIRED=true
-      ;;
-    pending:handling:*|announced:handling:*) RECOVERY_ACK_REQUIRED=true ;;
-  esac
   fm_lock_release "$FM_WAKE_QUEUE_LOCK"
   DRAIN_LOCK_HELD=false
-  (print_status_presentation) || true
-  if [ "$RECOVERY_ACK_REQUIRED" = true ]; then
-    printf 'WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 0 --recovery-generation %s\n' "${RECOVERY_MARKER_TOKEN##*:}" >&2
-  fi
+  (print_open_decisions_section) || true
   assert_watcher_liveness
   exit 0
 fi
@@ -781,6 +421,9 @@ DRAIN_LOCK_HELD=false
 printf 'WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through %s --recovery-generation %s\n' \
   "$ACK_THROUGH" "${RECOVERY_MARKER_TOKEN##*:}" >&2
 
-(print_status_presentation "$RAW_ROWS") || true
+# Raw output and queue deletion are authoritative. Everything below is
+# best-effort and cannot restore, duplicate, hide, or fail the consumed rows.
+(fm_wake_print_annotations "$RAW_ROWS") || true
+(print_open_decisions_section) || true
 assert_watcher_liveness
 exit 0

@@ -305,7 +305,11 @@ SH
   fm_write_meta "$case_dir/state/task-x1.meta" \
     "window=firstmate:fm-task-x1" "endpoint_task_id=task-x1" \
     "worktree=$case_dir/wt" "project=$case_dir/project" \
-    "kind=ship" "mode=no-mistakes" "spawn_gen=spawn-gate-refuse-task-x1"
+    "worktree_owner_token=fmw.AAAAAAAAAAAA" "kind=ship" "mode=no-mistakes"
+  printf 'version=1\ntask_id=task-x1\ntoken=fmw.AAAAAAAAAAAA\n' > \
+    "$case_dir/wt/.fm-worktree-owner"
+  printf '%s\n' .fm-worktree-owner >> \
+    "$(git -C "$case_dir/wt" rev-parse --git-path info/exclude)"
   touch "$case_dir/state/.last-watcher-beat"
   printf '%s\n' "$case_dir"
 }

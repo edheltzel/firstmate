@@ -1,8 +1,7 @@
 # Zellij runtime backend
 
 Zellij is an experimental explicit-only session backend.
-It provides the terminal session while Treehouse continues to provide task worktrees.
-[`configuration.md`](configuration.md#runtime-backend-configbackend--fm_backend) owns shared selection and metadata semantics.
+It provides the terminal session while [`configuration.md`](configuration.md#runtime-backend-configbackend--fm_backend) owns shared backend and worktree-provider selection plus metadata semantics.
 
 ## Setup
 
@@ -96,7 +95,7 @@ Real test cleanup uses only an isolated non-`firstmate` session and the guard in
 - Zellij is experimental and explicit-only.
 - All homes share one session and tab bar; scoped titles prevent cross-home identity collisions but do not create per-home visual containers.
 - There is no native busy or push-event signal, so supervision uses capture/hash polling for screen changes and each harness adapter's semantic lifecycle for worker state.
-  Grok alone retains its isolated rendered-tail fallback.
+  Grok and OMP retain their isolated rendered-tail fallbacks.
 - There is no verified agent-process liveness signal, so a dead Zellij secondmate is reported inconclusive rather than auto-respawned.
 - New-tab focus restoration has a narrow visible race.
 - CLI exit status is not meaningful; a target can still disappear after structural readiness checks.

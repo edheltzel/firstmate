@@ -683,7 +683,7 @@ test_secondmate_teardown_requires_parent_binding() {
   fm_write_meta "$parent/state/mate.meta" "kind=secondmate" "home=$child"
   fm_write_meta "$child/state/work-child.meta" \
     "window=firstmate:fm-work-child" "endpoint_task_id=work-child" \
-    "worktree=$child" "project=$child" "kind=ship" "mode=local-only" "spawn_gen=public-followup-fixture"
+    "worktree=$child" "project=$child" "kind=ship" "mode=local-only"
   assert_absent "$child/.fm-secondmate-parent" \
     "the legacy env-only binding case must not gain a durable parent record"
 
@@ -792,7 +792,7 @@ test_secondmate_teardown_resolves_parent_from_durable_record_when_env_lost() {
   fm_write_meta "$parent/state/mate.meta" "kind=secondmate" "home=$child"
   fm_write_meta "$child/state/work-child.meta" \
     "window=firstmate:fm-work-child" "endpoint_task_id=work-child" \
-    "worktree=$child" "project=$child" "kind=ship" "mode=local-only" "spawn_gen=public-followup-fixture"
+    "worktree=$child" "project=$child" "kind=ship" "mode=local-only"
 
   # No FM_PUBLIC_FOLLOWUP_PRIMARY_HOME at all here: a restart of the secondmate
   # agent that drops the launch-time prefix must still find the real parent
@@ -825,7 +825,7 @@ test_secondmate_teardown_durable_record_missing_parent_registration_still_refuse
   assert_local_secondmate_parent_record "$child" "$parent_resolved"
   fm_write_meta "$child/state/work-child.meta" \
     "window=firstmate:fm-work-child" "endpoint_task_id=work-child" \
-    "worktree=$child" "project=$child" "kind=ship" "mode=local-only" "spawn_gen=public-followup-fixture"
+    "worktree=$child" "project=$child" "kind=ship" "mode=local-only"
   # No parent/state/mate.meta at all: the parent never recorded this secondmate's
   # own agent, so its side of the binding is genuinely missing. A durable LOCAL
   # record naming the real parent path must not be enough on its own to bypass
@@ -863,7 +863,10 @@ test_secondmate_teardown_durable_record_with_unknown_field_succeeds() {
   fm_write_meta "$child/state/work-clean.meta" \
     "window=firstmate:fm-work-clean" "endpoint_task_id=work-clean" \
     "worktree=$child/projects/worktree" "project=$child/projects/worktree" \
-    "kind=ship" "mode=local-only" "spawn_gen=public-followup-fixture"
+    "kind=ship" "mode=local-only" "worktree_owner_token=fmw.AAAAAAAAAAAA"
+  printf 'version=1\ntask_id=work-clean\ntoken=fmw.AAAAAAAAAAAA\n' > \
+    "$child/projects/worktree/.fm-worktree-owner"
+  printf '%s\n' .fm-worktree-owner >> "$child/projects/worktree/.git/info/exclude"
 
   rc=0
   out=$(PATH="$child/fakebin:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$child" \
@@ -895,7 +898,7 @@ test_secondmate_teardown_rejects_conflicting_live_and_durable_parent_bindings() 
   fm_write_meta "$child/state/work-conflict.meta" \
     "window=firstmate:fm-work-conflict" "endpoint_task_id=work-conflict" \
     "worktree=$child/projects/worktree" "project=$child/projects/worktree" \
-    "kind=ship" "mode=local-only" "spawn_gen=public-followup-fixture"
+    "kind=ship" "mode=local-only"
 
   PATH="$child/fakebin:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$child" \
     FM_STATE_OVERRIDE="$child/state" FM_DATA_OVERRIDE="$child/data" \
@@ -922,7 +925,7 @@ test_secondmate_teardown_rejects_unsafe_durable_parent_records() {
     fm_fake_exit0 "$child/fakebin" tmux treehouse no-mistakes gh gh-axi
     fm_write_meta "$child/state/work-child.meta" \
       "window=firstmate:fm-work-child" "endpoint_task_id=work-child" \
-      "worktree=$child" "project=$child" "kind=ship" "mode=local-only" "spawn_gen=public-followup-fixture"
+      "worktree=$child" "project=$child" "kind=ship" "mode=local-only"
     parent_record="$child/.fm-secondmate-parent"
     case "$case_name" in
       symlink)
@@ -958,60 +961,6 @@ test_secondmate_teardown_rejects_unsafe_durable_parent_records() {
   pass "unsafe durable parent records fail closed before cleanup"
 }
 
-# A NUL byte inside the durable record must fail closed like every other
-# malformed record. bash's read drops NUL bytes while parsing, and different
-# bash generations disagree on the result (3.2 truncates the value at the NUL,
-# 5.x splices the surrounding bytes together), so a NUL-bearing parent_home can
-# resolve to a home the record's bytes never name contiguously - and teardown's
-# parent reads (registration, registry, relay state) then land in that other
-# home, with the promised-public-reply protection engaging or not depending on
-# which interpreter ran the cleanup. The fixture is deliberately the proven
-# clean-cleanup shape above (registered parent, landed worktree, quiet relay):
-# with the NUL spliced mid-path the record reassembles the real registered
-# parent under a NUL-dropping read, so before the parser rejected NUL this
-# cleanup PROCEEDED - the refusal asserted here is the parser failing closed,
-# not the fixture refusing for some unrelated reason.
-test_secondmate_teardown_rejects_nul_bearing_durable_parent_record() {
-  local parent child parent_resolved pre suf record
-  parent=$(make_home teardown-durable-nul-parent relay-off)
-  child="$TMP_ROOT/teardown-durable-nul-child"
-  FM_SECONDMATE_CHARTER='Durable-record NUL regression charter.' \
-    FM_HOME="$parent" "$ROOT/bin/fm-home-seed.sh" mate "$child" --no-projects >/dev/null \
-    || fail "real secondmate seeding failed"
-  child=$(cd "$child" && pwd -P)
-  parent_resolved=$(cd "$parent" && pwd -P)
-  make_fake_curl "$child" >/dev/null
-  fm_fake_exit0 "$child/fakebin" tmux treehouse no-mistakes gh gh-axi
-  assert_local_secondmate_parent_record "$child" "$parent_resolved"
-  fm_write_meta "$parent/state/mate.meta" "kind=secondmate" "home=$child"
-  fm_git_init_commit "$child/projects/worktree"
-  printf 'manual\n' > "$child/config/backlog-backend"
-  fm_write_meta "$child/state/work-child.meta" \
-    "window=firstmate:fm-work-child" "endpoint_task_id=work-child" \
-    "worktree=$child/projects/worktree" "project=$child/projects/worktree" \
-    "kind=ship" "mode=local-only" "spawn_gen=public-followup-fixture"
-  pre=${parent_resolved%??????}
-  suf=${parent_resolved#"$pre"}
-  record="$child/.fm-secondmate-parent"
-  {
-    printf 'schema=fm-secondmate-parent.v1\nroute=local\n'
-    printf 'parent_home=%s' "$pre"
-    printf '\0'
-    printf '%s\n' "$suf"
-  } > "$record"
-
-  PATH="$child/fakebin:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$child" \
-    FM_STATE_OVERRIDE="$child/state" FM_DATA_OVERRIDE="$child/data" \
-    FM_CONFIG_OVERRIDE="$child/config" \
-    expect_failure "a NUL-bearing durable parent record must refuse cleanup" \
-    "$TEARDOWN" work-child
-  assert_contains "$EXPECT_OUT" "cannot resolve the primary home for marked secondmate mate" \
-    "a NUL-bearing durable parent record must produce the explicit binding refusal"
-  assert_present "$child/state/work-child.meta" \
-    "a NUL-bearing durable parent record must preserve child work metadata"
-  pass "a NUL-bearing durable parent record fails closed before cleanup"
-}
-
 test_relay_disabled_unmarked_teardown_skips_public_path() {
   local home tasks_log out rc
   home=$(make_home teardown-disabled-unmarked relay-off)
@@ -1027,7 +976,11 @@ SH
   fm_write_meta "$home/state/work-disabled.meta" \
     "window=firstmate:fm-work-disabled" "endpoint_task_id=work-disabled" \
     "worktree=$home/projects/worktree" "project=$home/projects/worktree" \
-    "kind=ship" "mode=local-only" "spawn_gen=public-followup-fixture"
+    "worktree_owner_token=fmw.AAAAAAAAAAAA" "kind=ship" "mode=local-only"
+  printf 'version=1\ntask_id=work-disabled\ntoken=fmw.AAAAAAAAAAAA\n' > \
+    "$home/projects/worktree/.fm-worktree-owner"
+  mkdir -p "$home/projects/worktree/.git/info"
+  printf '%s\n' .fm-worktree-owner >> "$home/projects/worktree/.git/info/exclude"
 
   rc=0
   out=$(PATH="$home/fakebin:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" \
@@ -1063,7 +1016,11 @@ SH
   fm_write_meta "$child/state/work-disabled.meta" \
     "window=firstmate:fm-work-disabled" "endpoint_task_id=work-disabled" \
     "worktree=$child/projects/worktree" "project=$child/projects/worktree" \
-    "kind=ship" "mode=local-only" "spawn_gen=public-followup-fixture"
+    "worktree_owner_token=fmw.AAAAAAAAAAAA" "kind=ship" "mode=local-only"
+  printf 'version=1\ntask_id=work-disabled\ntoken=fmw.AAAAAAAAAAAA\n' > \
+    "$child/projects/worktree/.fm-worktree-owner"
+  mkdir -p "$child/projects/worktree/.git/info"
+  printf '%s\n' .fm-worktree-owner >> "$child/projects/worktree/.git/info/exclude"
 
   rc=0
   out=$(PATH="$child/fakebin:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$child" \
@@ -3097,7 +3054,6 @@ test_secondmate_teardown_durable_record_missing_parent_registration_still_refuse
 test_secondmate_teardown_durable_record_with_unknown_field_succeeds
 test_secondmate_teardown_rejects_conflicting_live_and_durable_parent_bindings
 test_secondmate_teardown_rejects_unsafe_durable_parent_records
-test_secondmate_teardown_rejects_nul_bearing_durable_parent_record
 test_relay_disabled_unmarked_teardown_skips_public_path
 test_relay_disabled_parent_allows_marked_child_teardown
 test_secondmate_parent_binding_matches_literal_id

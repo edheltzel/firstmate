@@ -699,14 +699,10 @@ else
   printf '(silent - all good)\n'
 fi
 
-# --- 3. wake-drain ---------------------------------------------------------
-# The inactive-outcome startup scan runs in the deferred worker launched above,
-# where its potentially slow current-state reads cannot block this digest. It
-# publishes findings through the same durable queue drained here; the watcher's
-# separate 900-second cadence remains unchanged.
-# Presented records are this turn's first work queue and remain durable until
-# post-handling acknowledgement. The drain's separate OPEN DECISIONS section
-# remains actionable even when that queue is empty (AGENTS.md sections 3 and 8).
+# --- 3. wake-drain -------------------------------------------------------
+# Drained records are this turn's first work queue, and the drain's separate
+# OPEN DECISIONS section remains actionable even when that queue is empty
+# (AGENTS.md sections 3 and 8).
 # The drain also runs fm-guard.sh internally on the locked path, so the
 # tangle/watcher-liveness alarms land right here too, ahead of the bulk digest
 # below. The read-only path never touches the queue because it lacks mutation
@@ -750,7 +746,7 @@ AFK_PRESENT=0
 X_MODE_PRESENT=0
 [ -f "$CONFIG/x-mode.env" ] && X_MODE_PRESENT=1
 
-if [ "$PRIMARY_HARNESS" = pi ] || [ "$PRIMARY_HARNESS" = pi-signed ]; then
+if [ "$PRIMARY_HARNESS" = pi ] || [ "$PRIMARY_HARNESS" = pi-signed ] || [ "$PRIMARY_HARNESS" = omp ]; then
   PI_EXT="$FM_ROOT/.pi/extensions/fm-primary-pi-watch.ts"
   PI_TURNEND_EXT="$FM_ROOT/.pi/extensions/fm-primary-turnend-guard.ts"
   PI_WATCH_MARKER="$STATE/.pi-watch-extension-loaded"
@@ -758,11 +754,15 @@ if [ "$PRIMARY_HARNESS" = pi ] || [ "$PRIMARY_HARNESS" = pi-signed ]; then
   PI_LOCK="$STATE/.lock"
   PI_RESTART_COMMAND=$PRIMARY_HARNESS
   [ "$PRIMARY_HARNESS" != pi ] || PI_RESTART_COMMAND='plain pi'
-  PI_WATCH_VERSION=$(fm_pi_extension_version "$PI_EXT" || printf '')
-  PI_TURNEND_VERSION=$(fm_pi_extension_version "$PI_TURNEND_EXT" || printf '')
-  if ! fm_pi_extension_loaded "$PI_WATCH_MARKER" "$PI_WATCH_VERSION" "$PI_LOCK" \
-    || ! fm_pi_extension_loaded "$PI_TURNEND_MARKER" "$PI_TURNEND_VERSION" "$PI_LOCK"; then
-    printf 'PI_WATCH_EXTENSION: not loaded - approve Pi project trust once per clone, then restart %s so %s and %s auto-load for turn-end guard and background wake coverage; use -e %s -e %s only if project hooks are not trusted\n' "$PI_RESTART_COMMAND" "$PI_TURNEND_EXT" "$PI_EXT" "$PI_TURNEND_EXT" "$PI_EXT"
+  PI_WATCH_VERSION=$(hash_file "$PI_EXT" || printf '')
+  PI_TURNEND_VERSION=$(hash_file "$PI_TURNEND_EXT" || printf '')
+  if ! pi_extension_loaded "$PI_WATCH_MARKER" "$PI_WATCH_VERSION" "$PI_LOCK" \
+    || ! pi_extension_loaded "$PI_TURNEND_MARKER" "$PI_TURNEND_VERSION" "$PI_LOCK"; then
+    if [ "$PRIMARY_HARNESS" = omp ]; then
+      printf 'OMP_WATCH_EXTENSION: not loaded - restart omp with -e %s -e %s for turn-end guard and background wake coverage\n' "$PI_TURNEND_EXT" "$PI_EXT"
+    else
+      printf 'PI_WATCH_EXTENSION: not loaded - approve Pi project trust once per clone, then restart %s so %s and %s auto-load for turn-end guard and background wake coverage; use -e %s -e %s only if project hooks are not trusted\n' "$PI_RESTART_COMMAND" "$PI_TURNEND_EXT" "$PI_EXT" "$PI_TURNEND_EXT" "$PI_EXT"
+    fi
   fi
 fi
 "$SCRIPT_DIR/fm-supervision-instructions.sh" \

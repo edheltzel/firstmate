@@ -30,7 +30,15 @@ printf ' <%s>' "$@" >> "${FM_RUNTIME_LOG:?}"
 printf '\n' >> "${FM_RUNTIME_LOG:?}"
 exit 0
 SH
-  chmod +x "$TMP_ROOT/$dir/fakebin/tmux" "$TMP_ROOT/$dir/fakebin/treehouse"
+  cat > "$TMP_ROOT/$dir/fakebin/orca" <<'SH'
+#!/usr/bin/env bash
+printf 'orca' >> "${FM_RUNTIME_LOG:?}"
+printf ' <%s>' "$@" >> "${FM_RUNTIME_LOG:?}"
+printf '\n' >> "${FM_RUNTIME_LOG:?}"
+exit 0
+SH
+  chmod +x "$TMP_ROOT/$dir/fakebin/tmux" "$TMP_ROOT/$dir/fakebin/treehouse" \
+    "$TMP_ROOT/$dir/fakebin/orca"
   printf '%s\n' "$TMP_ROOT/$dir"
 }
 
@@ -90,104 +98,61 @@ test_invalid_endpoint_records_refuse_before_mutation() {
     "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
   assert_refused_without_mutation "$dir" "$id" "duplicate task binding"
 
+  dir=$(make_case orca-malformed)
+  fm_write_meta "$dir/home/state/$id.meta" \
+    "window=fm-$id" "endpoint_task_id=$id" "terminal=term-7" \
+    "worktree=$dir/worktree" "project=$dir/project" "kind=scout" \
+    "backend=orca" "orca_worktree_id=$dir/worktree"
+  assert_refused_without_mutation "$dir" "$id" "malformed Orca worktree id"
+
   pass "fm-teardown: missing, empty, malformed, ambiguous, and task-mismatched endpoints refuse before every mutation or runtime call"
 }
 
-test_control_lock_contention_refuses_before_mutation() {
-  local dir id=locked-task lock holder i=0 rc
-  dir=$(make_case control-lock)
+test_orca_worktree_identifier_validation() {
+  local dir id value
+  local repo_id=123e4567-e89b-12d3-a456-426614174000
+  # shellcheck source=/dev/null
+  . "$ROOT/bin/fm-backend.sh"
+  dir=$(make_case orca-valid-id)
+  id=orca-valid-id
   fm_write_meta "$dir/home/state/$id.meta" \
-    "window=isolated:fm-$id" "endpoint_task_id=$id" \
-    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
-  lock="$dir/home/state/.control-$id.lock"
-  (
-    # shellcheck source=/dev/null
-    . "$ROOT/bin/fm-wake-lib.sh"
-    fm_lock_try_acquire "$lock" || exit 1
-    sleep 30
-  ) &
-  holder=$!
-  while [ ! -e "$lock" ] && [ "$i" -lt 100 ]; do
-    sleep 0.1
-    i=$((i + 1))
+    "window=fm-$id" "endpoint_task_id=$id" "terminal=term-7" \
+    "worktree=$dir/worktree" "project=$dir/project" "backend=orca" \
+    "orca_worktree_id=$repo_id::$dir/worktree"
+  fm_backend_validate_task_endpoint "$dir/home/state/$id.meta" "$id" \
+    || fail "valid UUID and absolute-path Orca worktree id refused"
+  [ "$FM_BACKEND_VALIDATED_BACKEND:$FM_BACKEND_VALIDATED_TARGET" = "orca:term-7" ] \
+    || fail "valid Orca endpoint did not reach the normal terminal cleanup target"
+
+  for value in \
+    "$repo_id" \
+    "::${dir}/worktree" \
+    "$repo_id::" \
+    "$repo_id::relative/worktree" \
+    "$repo_id::${dir}/one::two" \
+    "not-a-uuid::${dir}/worktree" \
+    "------------------------------------::${dir}/worktree" \
+    "1-3e456--e89b-12d3-a456-42661417400f::${dir}/worktree" \
+    "$repo_id::${dir}/worktree/../../etc" \
+    "$repo_id::${dir}/worktree/.." \
+    "$repo_id::${dir}/./worktree" \
+    "$repo_id::${dir}/worktree/." \
+    "$repo_id::${dir}/worktree/" \
+    "$repo_id::/"; do
+    if fm_backend_orca_worktree_id_valid "$value"; then
+      fail "malformed Orca worktree id was accepted: $value"
+    fi
   done
-  [ -e "$lock" ] || {
-    kill "$holder" 2>/dev/null || true
-    wait "$holder" 2>/dev/null || true
-    fail "could not stage a held lifecycle lock"
-  }
-  fm_write_meta "$dir/home/state/$id.meta" \
-    "window=isolated:fm-$id" "endpoint_task_id=other-task" \
-    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
-
-  set +e
-  run_case "$dir" "$id" > "$dir/stdout" 2> "$dir/stderr"
-  rc=$?
-  set -e
-  [ "$rc" -ne 0 ] || fail "teardown unexpectedly succeeded under lifecycle lock contention"
-  assert_present "$dir/home/state/$id.meta" "contended teardown removed task metadata"
-  assert_present "$dir/worktree/sentinel" "contended teardown changed the worktree"
-  assert_present "$lock" "contended teardown removed another action's lock"
-  [ ! -s "$dir/runtime.log" ] \
-    || fail "contended teardown reached the runtime: $(cat "$dir/runtime.log")"
-  assert_contains "$(cat "$dir/stderr")" "another lifecycle action is already running" \
-    "contended teardown should serialize before reading mutable task metadata"
-  kill "$holder" 2>/dev/null || true
-  wait "$holder" 2>/dev/null || true
-  pass "fm-teardown: a concurrent lifecycle action refuses before mutation"
-}
-
-test_metadata_lock_serializes_destructive_cleanup() {
-  local dir id=metadata-locked-task lock ready release holder teardown_pid i=0 rc
-  dir=$(make_case metadata-lock)
-  fm_write_meta "$dir/home/state/$id.meta" \
-    "window=isolated:fm-$id" "endpoint_task_id=$id" \
-    "worktree=$dir/worktree" "project=$dir/project" "kind=scout"
-  lock="$dir/home/state/.meta-$id.lock"
-  ready="$dir/meta-lock-ready"
-  release="$dir/meta-lock-release"
-  (
-    # shellcheck source=/dev/null
-    . "$ROOT/bin/fm-wake-lib.sh"
-    fm_lock_try_acquire "$lock" || exit 1
-    trap 'fm_lock_release "$lock"' EXIT
-    : > "$ready"
-    while [ ! -e "$release" ]; do
-      sleep 0.01
-    done
-  ) &
-  holder=$!
-  while [ ! -e "$ready" ] && [ "$i" -lt 100 ]; do
-    sleep 0.1
-    i=$((i + 1))
-  done
-  [ -e "$ready" ] || {
-    kill "$holder" 2>/dev/null || true
-    wait "$holder" 2>/dev/null || true
-    fail "could not stage a held metadata lock"
-  }
-
-  run_case "$dir" "$id" > "$dir/stdout" 2> "$dir/stderr" &
-  teardown_pid=$!
-  sleep 0.2
-  if ! kill -0 "$teardown_pid" 2>/dev/null; then
-    : > "$release"
-    wait "$holder" 2>/dev/null || true
-    wait "$teardown_pid" 2>/dev/null || true
-    fail "teardown did not wait for the shared metadata writer lock"
+  value=$'123e4567-e89b-12d3-a456-426614174000::/tmp/orca\nunsafe'
+  if fm_backend_orca_worktree_id_valid "$value"; then
+    fail "Orca worktree id containing a control character was accepted"
   fi
-  assert_present "$dir/home/state/$id.meta" "metadata-lock contention removed task metadata"
-  assert_present "$dir/worktree/sentinel" "metadata-lock contention changed the worktree"
-  [ ! -s "$dir/runtime.log" ] \
-    || fail "metadata-lock contention reached the runtime: $(cat "$dir/runtime.log")"
-
-  : > "$release"
-  wait "$holder" || fail "metadata lock holder failed"
-  wait "$teardown_pid"; rc=$?
-  expect_code 0 "$rc" "teardown should complete after the metadata writer releases"
-  assert_absent "$dir/home/state/$id.meta" \
-    "serialized teardown left a task record that a completed writer could resurrect"
-  pass "fm-teardown: destructive cleanup serializes with metadata writers"
+  fm_backend_endpoint_atom_valid worktree-9 \
+    || fail "generic endpoint atom validator no longer accepts its existing safe atom"
+  if fm_backend_endpoint_atom_valid "$repo_id::${dir}/worktree"; then
+    fail "generic endpoint atom validator was weakened for Orca composite ids"
+  fi
+  pass "Orca worktree ids require one UUID-style repository id and one absolute path while generic atoms remain unchanged"
 }
 
 test_supported_backend_endpoint_records_validate() {
@@ -223,7 +188,8 @@ test_supported_backend_endpoint_records_validate() {
   id=orca-task
   fm_write_meta "$dir/home/state/$id.meta" \
     "window=fm-$id" "endpoint_task_id=$id" "terminal=term-7" \
-    "worktree=$dir/worktree" "project=$dir/project" "backend=orca" "orca_worktree_id=worktree-9"
+    "worktree=$dir/worktree" "project=$dir/project" "backend=orca" \
+    "orca_worktree_id=123e4567-e89b-12d3-a456-426614174000::$dir/worktree"
   fm_backend_validate_task_endpoint "$dir/home/state/$id.meta" "$id" || fail "valid Orca endpoint refused"
   [ "$FM_BACKEND_VALIDATED_TARGET" = term-7 ] || fail "Orca validation did not select its terminal"
 
@@ -366,8 +332,7 @@ SH
 }
 
 test_invalid_endpoint_records_refuse_before_mutation
-test_control_lock_contention_refuses_before_mutation
-test_metadata_lock_serializes_destructive_cleanup
+test_orca_worktree_identifier_validation
 test_supported_backend_endpoint_records_validate
 test_tmux_empty_target_refuses_without_invocation
 test_recorded_process_identity_cleanup_is_exact

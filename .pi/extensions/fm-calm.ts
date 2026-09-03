@@ -195,22 +195,6 @@ export default function (pi: ExtensionAPI) {
 
   registerFirstmateSyntheticPresentation(pi);
 
-  // Every on-screen tool row Calm currently presents, keyed by the row-local state Pi
-  // hands its render slots, so Calm can repaint exactly those rows without touching
-  // Pi's transcript. Pi can re-render a row at any time - the built-in edit row
-  // invalidates itself once its diff is ready - so a row can be redrawn during the
-  // window where /export forces stock rendering and keep that stock content
-  // afterwards. Rows Pi's exporter renders are excluded: those use throwaway state
-  // and never appear on screen. Cleared per session lifetime, which rebuilds the rows.
-  const calmToolRowRepaints = new Map<object, () => void>();
-  const rememberCalmToolRow = (state: object, invalidate: unknown): void => {
-    if (exportRendering || typeof invalidate !== "function") return;
-    calmToolRowRepaints.set(state, invalidate as () => void);
-  };
-  const repaintCalmToolRows = (): void => {
-    for (const invalidate of calmToolRowRepaints.values()) invalidate();
-  };
-
   function wrapBuiltIn<TParams extends TSchema, TDetails, TState>(
     factory: DefinitionFactory<TParams, TDetails, TState>,
   ): ToolDefinition<TParams, TDetails, TState> {
@@ -410,7 +394,6 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", (_event, ctx) => {
     reportBuiltInLosses();
-    calmToolRowRepaints.clear();
     exportRendering = false;
     setCalmPresentation(loadCalmPreference());
     setCalmStockExportRendering(false);

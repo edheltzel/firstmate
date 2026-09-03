@@ -61,6 +61,11 @@ TARGET="$SESSION:$WINDOW"
 
 tmux new-session -d -s "$SESSION" -x 200 -y 50 \
   || fail "real tmux: new-session failed"
+# The host's interactive shell may be fish or another non-POSIX shell, while
+# this smoke fixture deliberately sends portable sh syntax through the pane.
+# Pin only the isolated test server's future windows to the system Bash.
+tmux set-option -t "$SESSION" default-shell /bin/bash \
+  || fail "real tmux: could not pin the isolated smoke server to Bash"
 fm_backend_tmux_create_task "$SESSION" "$WINDOW" "$HOME" \
   || fail "fm_backend_tmux_create_task failed to create the task window"
 tmux list-windows -t "$SESSION" -F '#{window_name}' | grep -qx "$WINDOW" \

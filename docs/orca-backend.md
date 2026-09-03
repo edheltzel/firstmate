@@ -3,10 +3,11 @@
 Orca is an experimental macOS backend in which the Orca app owns both the task worktree and terminal endpoint.
 The crewmate harness remains the agent process launched inside that endpoint.
 Firstmate agents load [`firstmate-orca`](../.agents/skills/firstmate-orca/SKILL.md) before operating or recovering this backend.
+[`configuration.md`](configuration.md#runtime-backend-configbackend--fm_backend) owns shared backend and worktree-provider selection plus metadata semantics.
 
 ## Setup
 
-Pick Orca when you already use the Orca macOS app and want Orca-managed worktrees and terminals instead of Treehouse plus a session multiplexer.
+Pick Orca when you already use the Orca macOS app and want it to manage both worktrees and terminals.
 Orca is macOS-only, explicit-only, and does not support secondmate spawns.
 
 Prerequisites:
@@ -29,14 +30,14 @@ Enter and Ctrl-C are supported; Escape is not.
 ## Task shape and metadata
 
 Each task has one Orca-managed git worktree and one Orca terminal.
-`fm-spawn.sh` does not call Treehouse for Orca tasks.
+`fm-spawn.sh` does not invoke Firstmate's selected worktree provider for Orca tasks.
 The normal isolation and unlanded-work refusal rules still apply.
 
 ```text
 backend=orca
 window=fm-<id>
 terminal=<orca terminal handle>
-orca_worktree_id=<orca worktree id>
+orca_worktree_id=<orca repository uuid>::<absolute Orca worktree path>
 worktree=<absolute Orca worktree path>
 ```
 
@@ -54,9 +55,10 @@ On the typed plane, `fm-send.sh` verifies composer clearance through the fleet-w
 The composer read is one bounded tail of the live terminal and never pages backward into scrollback, so a stale startup banner cannot compete with the bottom-anchored composer.
 A bare shell row is `unknown`, not an empty agent composer, and plain-text captures degrade a glyph row carrying trailing text to `unknown` rather than a false `pending`.
 The watcher has no native Orca busy signal, so each harness adapter's semantic lifecycle supplies worker state.
-Grok alone retains its isolated rendered-tail fallback.
+Grok and OMP retain their isolated rendered-tail fallbacks.
 
 Cleanup keeps all shared Firstmate safety checks.
+Before any of them, cleanup requires the recorded `orca_worktree_id=` to be exactly one UUID-style repository id, the literal `::`, and one absolute worktree path with no relative, ambiguous, trailing-separator, or control-character component; a non-conforming id is a hard refusal that preserves the task and dispatches nothing to Orca.
 A scout still requires its report and completed decision inventory.
 A ship still refuses dirty or unlanded work.
 Before release, cleanup resolves the recorded Orca worktree id and verifies its path matches the recorded worktree path.
@@ -79,6 +81,7 @@ It never raw-deletes an Orca worktree.
 tests/fm-backend-orca.test.sh
 tests/fm-backend.test.sh
 tests/fm-bootstrap.test.sh
+tests/fm-teardown-endpoint-safety.test.sh
 ```
 
 [`verification/runtime-backends.md`](verification/runtime-backends.md#orca) records the real readiness and response-shape smoke.

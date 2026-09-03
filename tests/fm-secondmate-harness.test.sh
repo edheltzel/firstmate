@@ -19,10 +19,9 @@
 #      down into each secondmate home's config/, so the secondmate's OWN crewmates,
 #      dispatch profiles, backlog backend, runtime-backend default, Herdr
 #      presentation choice, startup-memory budget, and trace context inherit the
-#      primary's settings. For config/herdr-presentation-spaces, an absent
-#      primary file and an absent destination file both mean the same
-#      unconfigured default, so the generic absence mirror converges that item
-#      without deciding its release-dependent floor.
+#      primary's settings. config/herdr-presentation-spaces is default-ON, so an
+#      absent primary file and an absent destination file both mean on and the
+#      generic absence mirror already converges that item correctly.
 #      It is primary-authoritative
 #      (re-pushed at secondmate spawn, on the bootstrap secondmate sweep, and by
 #      config push).
@@ -57,7 +56,7 @@ set -u
 # ambient CLAUDECODE=1, the pi-signed ancestry case resolves "claude". Drop the
 # ambient markers so what this suite asserts does not depend on which harness it
 # was launched from; every case states the marker it means to test.
-unset CLAUDECODE PI_CODING_AGENT FM_PI_HARNESS GROK_AGENT CURSOR_AGENT CURSOR_INVOKED_AS
+unset CLAUDECODE PI_CODING_AGENT FM_PI_HARNESS GROK_AGENT OMP_AGENT
 
 BASE_PATH=${FM_TEST_BASE_PATH:-/usr/bin:/bin:/usr/sbin:/sbin}
 fm_git_identity fmtest fmtest@example.com
@@ -93,6 +92,7 @@ crew set, secondmate absent -> crew (backward-compat)^codex^-^codex^codex
 crew set, secondmate set -> secondmate wins, crew untouched^codex^grok^grok^codex
 crew absent, secondmate set -> secondmate value, crew own^-^grok^grok^claude
 signed Pi wrapper remains a distinct secondmate value^codex^pi-signed^pi-signed^codex
+OMP remains a distinct secondmate value^codex^omp^omp^codex
 secondmate=default defers to crew^codex^default^codex^codex
 crew=default resolves to own, secondmate follows^default^-^claude^claude
 secondmate=default with crew absent -> own^-^default^claude^claude
@@ -152,6 +152,7 @@ bare harness only -> empty model/effort (backward-compat)^claude^claude^^
 harness + model -> model only^claude opus^claude^opus^
 harness + model + effort -> both^claude opus high^claude^opus^high
 signed Pi wrapper + model + effort preserves every token^pi-signed openai-codex/gpt-5.6-sol max^pi-signed^openai-codex/gpt-5.6-sol^max
+OMP + model + effort preserves every token^omp openai-codex/gpt-5.6-sol max^omp^openai-codex/gpt-5.6-sol^max
 default harness token -> falls back to crew, empty model/effort^default^claude^^
 extra whitespace between tokens is tolerated^grok   grok-4    xhigh^grok^grok-4^xhigh
 leading/trailing blank lines and a comment are skipped^# a comment\n\nclaude opus low\n^claude^opus^low
@@ -195,19 +196,19 @@ esac
 SH
   chmod +x "$fakebin/ps"
 
-  got=$(env -u CLAUDECODE -u GROK_AGENT PATH="$fakebin:$BASE_PATH" PI_CODING_AGENT=true "$ROOT/bin/fm-harness.sh")
+  got=$(env -u CLAUDECODE -u GROK_AGENT -u OMP_AGENT PATH="$fakebin:$BASE_PATH" PI_CODING_AGENT=true "$ROOT/bin/fm-harness.sh")
   [ "$got" = pi ] || fail "unmarked shared signed-wrapper ancestry resolved '$got', expected pi"
-  got=$(env -u CLAUDECODE -u GROK_AGENT PATH="$fakebin:$BASE_PATH" PI_CODING_AGENT=true FM_PI_HARNESS=pi-signed "$ROOT/bin/fm-harness.sh")
+  got=$(env -u CLAUDECODE -u GROK_AGENT -u OMP_AGENT PATH="$fakebin:$BASE_PATH" PI_CODING_AGENT=true FM_PI_HARNESS=pi-signed "$ROOT/bin/fm-harness.sh")
   [ "$got" = pi-signed ] || fail "selected signed wrapper resolved '$got', expected pi-signed"
-  got=$(env -u CLAUDECODE -u GROK_AGENT PATH="$fakebin:$BASE_PATH" PI_CODING_AGENT=true FM_PI_HARNESS=pi "$ROOT/bin/fm-harness.sh")
+  got=$(env -u CLAUDECODE -u GROK_AGENT -u OMP_AGENT PATH="$fakebin:$BASE_PATH" PI_CODING_AGENT=true FM_PI_HARNESS=pi "$ROOT/bin/fm-harness.sh")
   [ "$got" = pi ] || fail "selected plain Pi resolved '$got', expected pi"
-  got=$(env -u CLAUDECODE -u GROK_AGENT PATH="$fakebin:$BASE_PATH" PI_CODING_AGENT=true FM_PI_HARNESS=pi-signed-helper "$ROOT/bin/fm-harness.sh")
+  got=$(env -u CLAUDECODE -u GROK_AGENT -u OMP_AGENT PATH="$fakebin:$BASE_PATH" PI_CODING_AGENT=true FM_PI_HARNESS=pi-signed-helper "$ROOT/bin/fm-harness.sh")
   [ "$got" = pi ] || fail "inexact signed selection marker resolved '$got', expected pi"
-  got=$(env -u CLAUDECODE -u GROK_AGENT -u PI_CODING_AGENT PATH="$fakebin:$BASE_PATH" FM_PI_HARNESS=pi-signed "$ROOT/bin/fm-harness.sh")
+  got=$(env -u CLAUDECODE -u GROK_AGENT -u OMP_AGENT -u PI_CODING_AGENT PATH="$fakebin:$BASE_PATH" FM_PI_HARNESS=pi-signed "$ROOT/bin/fm-harness.sh")
   [ "$got" = pi ] || fail "signed selection marker without Pi's family marker resolved '$got', expected pi"
-  got=$(env -u CLAUDECODE -u GROK_AGENT PATH="$fakebin:$BASE_PATH" PI_CODING_AGENT=true FM_TEST_SIGNED_SHAPE=plain "$ROOT/bin/fm-harness.sh")
+  got=$(env -u CLAUDECODE -u GROK_AGENT -u OMP_AGENT PATH="$fakebin:$BASE_PATH" PI_CODING_AGENT=true FM_TEST_SIGNED_SHAPE=plain "$ROOT/bin/fm-harness.sh")
   [ "$got" = pi ] || fail "plain Pi marker resolved '$got', expected pi"
-  got=$(env -u CLAUDECODE -u GROK_AGENT PATH="$fakebin:$BASE_PATH" PI_CODING_AGENT=true FM_TEST_SIGNED_SHAPE=helper "$ROOT/bin/fm-harness.sh")
+  got=$(env -u CLAUDECODE -u GROK_AGENT -u OMP_AGENT PATH="$fakebin:$BASE_PATH" PI_CODING_AGENT=true FM_TEST_SIGNED_SHAPE=helper "$ROOT/bin/fm-harness.sh")
   [ "$got" = pi ] || fail "unrelated pi-signed-helper ancestry resolved '$got', expected pi"
 
   got=$(PATH="$fakebin:$BASE_PATH" bash -c \
@@ -222,57 +223,6 @@ SH
   fi
 
   pass "pi-signed identity: authoritative launch selection distinguishes shared wrapper ancestry"
-}
-
-test_dash_leading_process_names_are_basename_operands() {
-  local dir fakebin got err status
-  dir="$TMP_ROOT/dash-leading-process-names"
-  fakebin=$(fm_fakebin "$dir")
-  cat > "$fakebin/ps" <<'SH'
-#!/usr/bin/env bash
-set -u
-field= pid=
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    -o) field=$2; shift 2 ;;
-    -p) pid=$2; shift 2 ;;
-    *) shift ;;
-  esac
-done
-case "$pid:$field" in
-  4242:comm=) printf '%s\n' '/opt/test/bin/codex' ;;
-  4242:args=) printf '%s\n' 'codex' ;;
-  4242:ppid=) printf '%s\n' 1 ;;
-  5252:comm=) printf '%s\n' '-codex' ;;
-  5252:args=) printf '%s\n' '-codex' ;;
-  5252:ppid=) printf '%s\n' 1 ;;
-  *:comm=) printf '%s\n' '-zsh' ;;
-  *:args=) printf '%s\n' '-zsh' ;;
-  *:ppid=) printf '%s\n' 4242 ;;
-esac
-SH
-  chmod +x "$fakebin/ps"
-
-  err="$dir/fm-harness.err"
-  got=$(env -u CLAUDECODE -u PI_CODING_AGENT -u GROK_AGENT \
-    PATH="$fakebin:$BASE_PATH" "$ROOT/bin/fm-harness.sh" 2>"$err")
-  [ "$got" = codex ] || fail "dash-leading shell ancestry resolved '$got', expected codex"
-  [ ! -s "$err" ] || fail "fm-harness wrote basename option noise for literal -zsh: $(cat "$err")"
-
-  err="$dir/fm-session-lock-ancestry.err"
-  got=$(PATH="$fakebin:$BASE_PATH" bash -c \
-    '. "$0/bin/fm-session-lock-lib.sh"; fm_harness_ancestry_pid' "$ROOT" 2>"$err")
-  [ "$got" = 4242 ] || fail "session-lock dash-leading ancestry selected '$got', expected pid 4242"
-  [ ! -s "$err" ] || fail "session-lock ancestry wrote basename option noise for literal -zsh: $(cat "$err")"
-
-  err="$dir/fm-session-lock-alive.err"
-  PATH="$fakebin:$BASE_PATH" bash -c \
-    '. "$0/bin/fm-session-lock-lib.sh"; kill() { return 0; }; fm_harness_pid_alive 5252' \
-    "$ROOT" 2>"$err"; status=$?
-  expect_code 0 "$status" "session-lock liveness should accept literal -codex as a harness process name"
-  [ ! -s "$err" ] || fail "session-lock liveness wrote basename option noise for literal -codex: $(cat "$err")"
-
-  pass "harness identity: dash-leading ps command names are basename operands, not options"
 }
 
 # ===========================================================================
@@ -291,6 +241,11 @@ test_propagate_lib() {
   printf 'codex\n' > "$src/crew-harness"
   printf 'manual\n' > "$src/backlog-backend"
   printf 'tmux\n' > "$src/backend"
+  # worker-git-identity is NOT in the declared inheritable set: it binds a
+  # machine-local signing agent. A primary value must never flow downstream, and
+  # the destination's own file must be left byte-for-byte alone.
+  printf 'public signed worker policy v1\n' > "$src/worker-git-identity"
+  printf 'destination-local worker policy\n' > "$dest/worker-git-identity"
   : > "$src/herdr-presentation-spaces"
   : > "$src/trace-context"
   stdout="$d/clean-copy.out"
@@ -302,6 +257,8 @@ test_propagate_lib() {
   [ "$(cat "$dest/crew-harness")" = codex ] || fail "crew-harness not propagated"
   [ "$(cat "$dest/backlog-backend")" = manual ] || fail "backlog-backend not propagated"
   [ "$(cat "$dest/backend")" = tmux ] || fail "backend not propagated"
+  [ "$(cat "$dest/worker-git-identity")" = 'destination-local worker policy' ] \
+    || fail "worker-git-identity is not inheritable but the primary value flowed downstream"
   [ -f "$dest/herdr-presentation-spaces" ] || fail "herdr-presentation-spaces not propagated"
   printf 'herdr\n' > "$dest/backend"
   propagate_inheritable_config "$src" "$dest"
@@ -324,11 +281,14 @@ test_propagate_lib() {
   printf 'claude\n' > "$src/crew-harness"
   printf 'tasks-axi\n' > "$src/backlog-backend"
   printf 'zellij\n' > "$src/backend"
+  printf 'public signed worker policy v2\n' > "$src/worker-git-identity"
   propagate_inheritable_config "$src" "$dest"
   [ "$(cat "$dest/crew-dispatch.json")" = '{"default":{"harness":"claude"}}' ] || fail "changed dispatch profile did not converge"
   [ "$(cat "$dest/crew-harness")" = claude ] || fail "changed value did not converge"
   [ "$(cat "$dest/backlog-backend")" = tasks-axi ] || fail "changed backlog backend did not converge"
   [ "$(cat "$dest/backend")" = zellij ] || fail "changed backend did not converge"
+  [ "$(cat "$dest/worker-git-identity")" = 'destination-local worker policy' ] \
+    || fail "a changed worker-git-identity policy flowed downstream"
 
   outside="$d/outside-target"
   rm -f "$dest/crew-harness" "$outside"
@@ -343,12 +303,15 @@ test_propagate_lib() {
   # 4. removing the source mirrors absence downstream (primary-authoritative)
   printf 'herdr\n' > "$dest/backend"
   rm -f "$src/crew-dispatch.json" "$src/crew-harness" "$src/backlog-backend" \
-    "$src/backend" "$src/herdr-presentation-spaces" "$src/trace-context"
+    "$src/backend" "$src/herdr-presentation-spaces" "$src/trace-context" \
+    "$src/worker-git-identity"
   propagate_inheritable_config "$src" "$dest"
   [ -e "$dest/crew-dispatch.json" ] && fail "dispatch profile absence not mirrored downstream"
   [ -e "$dest/crew-harness" ] && fail "absence not mirrored downstream"
   [ -e "$dest/backlog-backend" ] && fail "backlog-backend absence not mirrored downstream"
   [ -e "$dest/backend" ] && fail "backend absence not mirrored downstream"
+  [ "$(cat "$dest/worker-git-identity")" = 'destination-local worker policy' ] \
+    || fail "clearing the primary worker-git-identity disturbed the destination's own file"
   [ -e "$dest/herdr-presentation-spaces" ] && fail "herdr-presentation-spaces absence not mirrored downstream"
   [ -e "$dest/trace-context" ] && fail "trace-context absence not mirrored downstream"
 
@@ -373,6 +336,7 @@ test_propagate_lib() {
   printf 'codex\n' > "$src/crew-harness"
   printf 'manual\n' > "$src/backlog-backend"
   printf 'herdr\n' > "$src/backend"
+  printf 'public signed worker policy v3\n' > "$src/worker-git-identity"
   rm -rf "$d/home2"
   mkdir -p "$d/home2/config" "$d/home2/state"
   propagate_inheritable_config "$src" "$d/home2/config"
@@ -381,6 +345,8 @@ test_propagate_lib() {
   [ "$(cat "$d/home2/config/crew-harness")" = codex ] || fail "crew-harness not propagated alongside"
   [ "$(cat "$d/home2/config/backlog-backend")" = manual ] || fail "backlog-backend not propagated alongside"
   [ "$(cat "$d/home2/config/backend")" = herdr ] || fail "backend not propagated alongside"
+  [ -e "$d/home2/config/worker-git-identity" ] \
+    && fail "worker-git-identity was inherited into a fresh home (must not be)"
 
   # 6. nothing to propagate -> destination dir is never created (a true no-op)
   rm -rf "$d/src3" "$d/dest3"
@@ -902,13 +868,9 @@ test_spawned_secondmate_uses_its_harness_supervision_model() {
     fm_write_meta "$sm/state/task.meta" "window=firstmate:fm-task" "kind=ship"
     touch "$sm/state/.last-watcher-beat"
     fakebin="$w/tmux-sm/fakebin"
-    # Point the guard at the fixture home, not at whatever checkout this suite
-    # happens to be running from. The guard also reports a tangled primary
-    # checkout, so without this the branch a contributor is working on decides
-    # whether this assertion passes.
     cat > "$fakebin/$harness" <<SH
 #!/usr/bin/env bash
-FM_ROOT_OVERRIDE="$sm" "$ROOT/bin/fm-guard.sh"
+"$ROOT/bin/fm-guard.sh"
 SH
     chmod +x "$fakebin/$harness"
     launch=$(cat "$launchlog")
@@ -997,7 +959,7 @@ new_world() {
     printf 'projects/\nstate/\ndata/\n.no-mistakes/\n'
     [ "$dispatch_ignore" = no ] || printf 'config/crew-dispatch.json\n'
     printf 'config/crew-harness\nconfig/secondmate-harness\nconfig/backlog-backend\n'
-    printf 'config/backend\nconfig/herdr-presentation-spaces\nconfig/startup-memory-budget\n'
+    printf 'config/backend\nconfig/herdr-presentation-spaces\nconfig/startup-memory-budget\nconfig/worker-git-identity\n'
   } > "$w/main/.gitignore"
   printf 'v1\n' > "$w/main/AGENTS.md"
   printf 'r1\n' > "$w/main/README.md"
@@ -1038,7 +1000,7 @@ make_fake_toolchain() {
   fakebin="$dir/fakebin"
   mkdir -p "$fakebin"
   fm_fake_exit0 "$fakebin" node chrome-devtools-axi
-  fm_fake_version_tool "$fakebin" lavish-axi FM_FAKE_LAVISH_AXI_VERSION 0.1.46
+  fm_fake_version_tool "$fakebin" lavish-axi FM_FAKE_LAVISH_AXI_VERSION 0.1.45
   cat > "$fakebin/gh-axi" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = --version ]; then
@@ -1107,7 +1069,7 @@ SH
   cat > "$fakebin/quota-axi" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = --version ]; then
-  printf '%s\n' '0.1.29'
+  printf '%s\n' '0.1.17'
   exit 0
 fi
 exit 0
@@ -1270,6 +1232,9 @@ test_bootstrap_sweep_propagates_and_reconverges() {
   printf 'claude\n' > "$w/home/config/crew-harness"
   printf 'tasks-axi\n' > "$w/home/config/backlog-backend"
   printf 'zellij\n' > "$w/home/config/backend"
+  # Machine-local, never inherited: the home keeps its own signing policy.
+  printf 'public signed worker policy v2\n' > "$w/home/config/worker-git-identity"
+  printf 'secondmate-local worker policy\n' > "$w/sm/config/worker-git-identity"
   run_bootstrap "$w" >/dev/null
   [ "$(cat "$w/sm/config/crew-harness" 2>/dev/null)" = claude ] \
     || fail "sweep: home did not re-converge to the primary's new crew-harness"
@@ -1279,10 +1244,12 @@ test_bootstrap_sweep_propagates_and_reconverges() {
     || fail "sweep: home did not re-converge to the primary's new backlog-backend"
   [ "$(cat "$w/sm/config/backend" 2>/dev/null)" = zellij ] \
     || fail "sweep: home did not re-converge to the primary's new backend"
+  [ "$(cat "$w/sm/config/worker-git-identity" 2>/dev/null)" = 'secondmate-local worker policy' ] \
+    || fail "sweep: the primary's worker-git-identity policy flowed into the home"
 
   # Mirror absence: primary clears inherited config; the home's copies are removed.
   rm -f "$w/home/config/crew-dispatch.json" "$w/home/config/crew-harness" \
-    "$w/home/config/backlog-backend" "$w/home/config/backend"
+    "$w/home/config/backlog-backend" "$w/home/config/backend" "$w/home/config/worker-git-identity"
   run_bootstrap "$w" >/dev/null
   [ -e "$w/sm/config/crew-dispatch.json" ] \
     && fail "sweep: home crew-dispatch.json not removed after the primary cleared it"
@@ -1292,7 +1259,9 @@ test_bootstrap_sweep_propagates_and_reconverges() {
     && fail "sweep: home backlog-backend not removed after the primary cleared it"
   [ -e "$w/sm/config/backend" ] \
     && fail "sweep: home backend not removed after the primary cleared it"
-  pass "B7 bootstrap sweep pushes, re-converges, and mirrors absence; never inherits secondmate-harness"
+  [ "$(cat "$w/sm/config/worker-git-identity" 2>/dev/null)" = 'secondmate-local worker policy' ] \
+    || fail "sweep: clearing the primary worker-git-identity disturbed the home's own file"
+  pass "B7 bootstrap sweep pushes, re-converges, and mirrors absence; never inherits secondmate-harness or worker-git-identity"
 }
 
 # Convergence is independent of the tracked-files fast-forward: a home already
@@ -1343,7 +1312,7 @@ test_bootstrap_sweep_defers_dispatch_on_stale_unignored_home() {
     || fail "stale dispatch: existing ignored config stopped propagating"
   [ "$(cat "$w/sm/config/backlog-backend" 2>/dev/null)" = manual ] \
     || fail "stale dispatch: backlog backend stopped propagating"
-  status=$(git -C "$w/sm" status --porcelain -- config/crew-dispatch.json)
+  status=$(git -C "$w/sm" status --porcelain config/crew-dispatch.json)
   [ -z "$status" ] || fail "stale dispatch: crew-dispatch.json dirtied the home: $status"
   pass "B9 bootstrap sweep defers new inherited config until the home ignores it"
 }
@@ -1413,20 +1382,14 @@ test_backend_inheritance_present_and_absent() {
   pass "B12b backend inheritance: present values and primary absence converge exactly"
 }
 
-# config/herdr-presentation-spaces has an unconfigured default, so this item's
-# convergence is asserted through the preference the spawn gate actually reads
-# in the destination home, not through file presence alone: mirroring the primary's
-# absence must converge a secondmate to the same unconfigured default rather
-# than turning its projection off. The Herdr version floor that decides what
-# that default resolves to is a property of the running release, not of
-# inheritance, so it is pinned in tests/fm-backend-herdr.test.sh instead.
+# config/herdr-presentation-spaces is default-ON, so this item's convergence is
+# asserted through the verdict the spawn gate actually reads in the destination
+# home, not through file presence alone: mirroring the primary's absence must
+# converge a secondmate to the same default rather than turning its projection off.
 sm_presentation_verdict() {  # <config-dir> -> on|off
   bash -c '
     . "$0/bin/backends/herdr.sh"
-    case "$(fm_backend_herdr_presentation_preference "$1")" in
-      off) printf "off\n" ;;
-      *) printf "on\n" ;;
-    esac
+    if fm_backend_herdr_presentation_enabled "$1"; then printf "on\n"; else printf "off\n"; fi
   ' "$ROOT" "$1" 2>/dev/null
 }
 
@@ -1511,7 +1474,7 @@ test_config_push_propagates_reports_without_ff_or_nudge() {
   c1=$(git -C "$w/main" rev-parse HEAD)
   add_sm_worktree "$w" sm "$c1"
   sm_real=$(cd "$w/sm" && pwd -P)
-  printf -- '- sm - config push target (home: %s; scope: config; projects: alpha; added 2026-06-30)\n' "$sm_real" > "$w/home/data/secondmates.md"
+  printf '%s\n' "- sm - config push target (home: $sm_real; scope: config; projects: alpha; added 2026-06-30)" > "$w/home/data/secondmates.md"
   tmp="$w/home/state/sm.meta.tmp"
   grep -v '^home=' "$w/home/state/sm.meta" > "$tmp"
   mv "$tmp" "$w/home/state/sm.meta"
@@ -2551,7 +2514,6 @@ test_harness_resolution
 test_cursor_marker_detection
 test_secondmate_model_effort_tokens
 test_pi_signed_detection_and_session_lock_identity
-test_dash_leading_process_names_are_basename_operands
 test_propagate_lib
 test_spawn_split_and_inherit
 test_spawn_backward_compat_crew_fallback

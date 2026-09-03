@@ -17,13 +17,13 @@
 . "$(dirname -- "${BASH_SOURCE[0]}")/fm-cursor-lib.sh"
 
 # Known harness command names; extend when a new adapter is verified.
-FM_HARNESS_RE='claude|codex|opencode|grok|kimi|^pi$|^pi-signed$'
+FM_HARNESS_RE='claude|codex|opencode|grok|kimi|^omp$|^pi$|^pi-signed$'
 
 # The same harnesses as exact executable names. Keep in sync with
 # FM_HARNESS_RE. Used only for the stricter path evidence below, where the
 # loose regex would also match ordinary firstmate paths such as
 # bin/fm-claude-stop-autoarm.sh.
-FM_HARNESS_NAMES=(claude codex opencode grok kimi pi-signed pi)
+FM_HARNESS_NAMES=(claude codex opencode grok kimi omp pi-signed pi)
 
 # Print the exact harness name carried by executable path $1 - its own basename
 # or any directory component - or return 1.
@@ -61,7 +61,7 @@ FM_HARNESS_IS_CLAUDE=0
 fm_harness_process_matches() {  # <comm> <args>
   local comm=$1 args=$2 base argv0 name
   FM_HARNESS_IS_CLAUDE=0
-  base=$(basename -- "$comm")
+  base=$(basename "$comm")
   if printf '%s' "$base" | grep -qE "$FM_HARNESS_RE"; then
     case "$base" in *claude*) FM_HARNESS_IS_CLAUDE=1 ;; esac
     return 0
@@ -71,7 +71,12 @@ fm_harness_process_matches() {  # <comm> <args>
     case "$name" in claude) FM_HARNESS_IS_CLAUDE=1 ;; esac
     return 0
   fi
-  # Bare interpreter (e.g. node): match the harness name in its script path.
+  # OMP runs under Bun. Match only the anchored executable/script prefix so
+  # unrelated Bun prompt text that mentions omp cannot claim lock ancestry.
+  case "$(basename "$comm"):$args" in
+    bun*:bun\ bun\ */omp|bun*:bun\ bun\ */omp\ *|bun*:bun\ */omp|bun*:bun\ */omp\ *) return 0 ;;
+  esac
+  # Other bare interpreters retain the upstream script-path detection.
   case "$comm" in
     *node*|*python*)
       if printf '%s' "$args" | grep -qE "$FM_HARNESS_RE"; then

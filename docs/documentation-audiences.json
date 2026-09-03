@@ -109,6 +109,10 @@
   ],
   "surfaces": [
     {
+      "path": ".agents/archive/omp-staged-integration.md",
+      "audience": "maintainer-architecture"
+    },
+    {
       "path": ".agents/skills/afk/SKILL.md",
       "audience": "agent-runtime"
     },
@@ -161,51 +165,7 @@
       "audience": "agent-runtime"
     },
     {
-      "path": ".agents/skills/harness-adapters/references/common/control-and-recovery.md",
-      "audience": "agent-runtime"
-    },
-    {
-      "path": ".agents/skills/harness-adapters/references/common/dispatch.md",
-      "audience": "agent-runtime"
-    },
-    {
-      "path": ".agents/skills/harness-adapters/references/common/model-and-effort.md",
-      "audience": "agent-runtime"
-    },
-    {
-      "path": ".agents/skills/harness-adapters/references/common/primary-hooks.md",
-      "audience": "agent-runtime"
-    },
-    {
-      "path": ".agents/skills/harness-adapters/references/harness/claude.md",
-      "audience": "agent-runtime"
-    },
-    {
-      "path": ".agents/skills/harness-adapters/references/harness/codex.md",
-      "audience": "agent-runtime"
-    },
-    {
-      "path": ".agents/skills/harness-adapters/references/harness/cursor.md",
-      "audience": "agent-runtime"
-    },
-    {
-      "path": ".agents/skills/harness-adapters/references/harness/grok.md",
-      "audience": "agent-runtime"
-    },
-    {
-      "path": ".agents/skills/harness-adapters/references/harness/kimi.md",
-      "audience": "agent-runtime"
-    },
-    {
-      "path": ".agents/skills/harness-adapters/references/harness/muse.md",
-      "audience": "agent-runtime"
-    },
-    {
-      "path": ".agents/skills/harness-adapters/references/harness/opencode.md",
-      "audience": "agent-runtime"
-    },
-    {
-      "path": ".agents/skills/harness-adapters/references/harness/pi.md",
+      "path": ".agents/skills/i-have-adhd/SKILL.md",
       "audience": "agent-runtime"
     },
     {
@@ -222,6 +182,14 @@
     },
     {
       "path": ".agents/skills/secondmate-provisioning/SKILL.md",
+      "audience": "agent-runtime"
+    },
+    {
+      "path": ".agents/skills/sr/SKILL.md",
+      "audience": "agent-runtime"
+    },
+    {
+      "path": ".agents/skills/status-report/SKILL.md",
       "audience": "agent-runtime"
     },
     {
@@ -274,6 +242,10 @@
     },
     {
       "path": "docs/arm-pretool-check.md",
+      "audience": "maintainer-architecture"
+    },
+    {
+      "path": "docs/atlas-pr-identity.md",
       "audience": "maintainer-architecture"
     },
     {
@@ -353,8 +325,72 @@
       "audience": "operator-current"
     },
     {
-      "path": "docs/pi-supervision-branch.md",
+      "path": "docs/plans/2026-07-26-001-feat-themis-fleet-orchestrator-plan.md",
       "audience": "maintainer-architecture"
+    },
+    {
+      "path": "docs/plans/2026-08-06-easier-upstream-updates.md",
+      "audience": "maintainer-architecture"
+    },
+    {
+      "path": "docs/plans/support/donor-map/00-supervision-and-wake.md",
+      "audience": "maintainer-architecture"
+    },
+    {
+      "path": "docs/plans/support/donor-map/01-herdr-adapter.md",
+      "audience": "maintainer-architecture"
+    },
+    {
+      "path": "docs/plans/support/donor-map/02-herdr-verification.md",
+      "audience": "maintainer-architecture"
+    },
+    {
+      "path": "docs/plans/support/donor-map/03-session-start.md",
+      "audience": "maintainer-architecture"
+    },
+    {
+      "path": "docs/plans/support/donor-map/04-dispatch-briefs-recovery.md",
+      "audience": "maintainer-architecture"
+    },
+    {
+      "path": "docs/plans/support/donor-map/05-no-mistakes.md",
+      "audience": "maintainer-architecture"
+    },
+    {
+      "path": "docs/plans/support/donor-map/06-treehouse-isolation.md",
+      "audience": "maintainer-architecture"
+    },
+    {
+      "path": "docs/plans/support/donor-map/07-lifecycle-and-backlog.md",
+      "audience": "maintainer-architecture"
+    },
+    {
+      "path": "docs/plans/support/donor-map/09-escalation-state-config.md",
+      "audience": "maintainer-architecture"
+    },
+    {
+      "path": "docs/plans/support/donor-map/10-skills-inventory.md",
+      "audience": "maintainer-architecture"
+    },
+    {
+      "path": "docs/plans/support/donor-map/CONSOLIDATION.md",
+      "audience": "maintainer-architecture"
+    },
+    {
+      "path": "docs/plans/support/donor-map/REVIEW-PI.md",
+      "audience": "maintainer-verification"
+    },
+    {
+      "path": "docs/plans/support/donor-map/SCOUT-BRIEF.md",
+      "audience": "maintainer-architecture"
+    },
+    {
+      "path": "docs/plans/support/donor-map/VALIDATION-ROUND2.md",
+      "audience": "maintainer-verification"
+    },
+    {
+      "path": "docs/plans/support/donor-map/VALIDATION.md",
+      "audience": "maintainer-verification"
     },
     {
       "path": "docs/remote-secondmates.md",
@@ -386,6 +422,10 @@
     },
     {
       "path": "docs/supervision-protocols/grok.md",
+      "audience": "agent-runtime"
+    },
+    {
+      "path": "docs/supervision-protocols/omp.md",
       "audience": "agent-runtime"
     },
     {
@@ -463,6 +503,10 @@
     {
       "path": "skills/stow/SKILL.md",
       "audience": "public-product"
+    },
+    {
+      "path": "tests/fixtures/gh-axi-contract-version.txt",
+      "audience": "maintainer-verification"
     }
   ]
 }

@@ -1,0 +1,14 @@
+[1]:
+  - sha: "2222222222222222222222222222222222222222"
+    commit:
+      author:
+        name: Atlas
+      committer:
+        name: Atlas
+      message: "fixture commit"
+    author:
+      login: Atlas-Key
+    committer:
+      login: Atlas-Key
+    parents[1]{sha}:
+      "1111111111111111111111111111111111111111"

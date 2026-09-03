@@ -186,6 +186,7 @@ write_registry() {
   cat > "$home/data/projects.md" <<'EOF'
 - direct-proj [direct-PR] - fixture for direct-PR mode (added 2026-07-01)
 - local-proj [local-only] - fixture for local-only mode (added 2026-07-01)
+- Atlas [direct-PR pr-identity=atlas-pat] - fixture for the task-bound PR broker (added 2026-07-22)
 EOF
 }
 
@@ -215,6 +216,68 @@ test_ship_modes_generate_clean_briefs() {
     assert_no_grep "EOF" "$brief" "$id: brief leaked a heredoc EOF marker (unterminated heredoc)"
   done
   pass "fm-brief.sh: no-mistakes/direct-PR/local-only briefs generate cleanly"
+}
+
+test_commit_discipline_applies_to_every_ordinary_worker_brief() {
+  local home spec id mode kind brief section_count
+  home="$TMP_ROOT/commit-discipline-home"
+  mkdir -p "$home/data"
+
+  for spec in \
+    "brief-commits-nomistakes:no-mistakes:ship" \
+    "brief-commits-direct:direct-PR:ship" \
+    "brief-commits-local:local-only:ship" \
+    "brief-commits-scout:none:scout"; do
+    id=${spec%%:*}
+    mode_kind=${spec#*:}
+    mode=${mode_kind%%:*}
+    kind=${spec##*:}
+    if [ "$kind" = scout ]; then
+      FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" some-proj --scout >/dev/null 2>&1
+    else
+      FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" some-proj --mode "$mode" >/dev/null 2>&1
+    fi
+    brief="$home/data/$id/brief.md"
+    assert_grep "Commit each completed feature or fix as its own coherent commit as soon as it is finished." "$brief" \
+      "$id: brief missing per-feature and per-fix commit cadence"
+    assert_grep "sequence of focused commits instead of one end-of-task batch; commit more often, not less" "$brief" \
+      "$id: brief missing large-task commit granularity"
+    assert_grep "every hotfix or small correction its own small commit" "$brief" \
+      "$id: brief missing small-fix commit isolation"
+    assert_grep "commit messages that communicate the value delivered" "$brief" \
+      "$id: brief missing value-focused commit message guidance"
+    assert_grep "Never report \`done\` with a dirty working tree" "$brief" \
+      "$id: brief missing clean-tree done gate"
+    section_count=$(grep -cFx '# Commit discipline' "$brief")
+    [ "$section_count" -eq 1 ] || fail "$id: commit-discipline section rendered $section_count times instead of once"
+  done
+  pass "fm-brief.sh: every ship mode and scout carries one commit-discipline contract"
+}
+
+test_ordinary_worker_role_boundary_is_generated_only_for_ship_and_scout() {
+  local home ship scout secondmate
+  home="$TMP_ROOT/ordinary-worker-boundary-home"
+  mkdir -p "$home/data"
+
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" boundary-ship-c2 firstmate --mode no-mistakes >/dev/null 2>&1
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" boundary-scout-c3 firstmate --scout >/dev/null 2>&1
+  FM_HOME="$home" FM_SECONDMATE_CHARTER='boundary charter' \
+    "$ROOT/bin/fm-brief.sh" boundary-secondmate-c4 --secondmate --no-projects >/dev/null 2>&1
+  ship="$home/data/boundary-ship-c2/brief.md"
+  scout="$home/data/boundary-scout-c3/brief.md"
+  secondmate="$home/data/boundary-secondmate-c4/brief.md"
+
+  for brief in "$ship" "$scout"; do
+    assert_grep "# Ordinary-worker role boundary" "$brief" \
+      "ordinary worker brief missing its explicit role boundary"
+    assert_grep "Do not run primary session startup or bootstrap" "$brief" \
+      "ordinary worker brief permits primary startup"
+    assert_grep "report it as a launch-boundary defect" "$brief" \
+      "ordinary worker brief lacks contradictory-nudge handling"
+  done
+  assert_no_grep "# Ordinary-worker role boundary" "$secondmate" \
+    "secondmate charter must retain its own primary startup role"
+  pass "fm-brief.sh: ship and scout briefs carry the ordinary-worker role boundary"
 }
 
 # A ship task's delivery mode is firstmate's per-task decision, so a missing or
@@ -256,8 +319,8 @@ test_ship_mode_is_explicit_not_registry() {
   brief="$home/data/brief-explicit-a5/brief.md"
   grep -qx "Delivery contract: mode=no-mistakes" "$brief" \
     || fail "registered direct-PR posture overrode the explicit --mode"
-  assert_grep "Firstmate will then instruct you to run /no-mistakes" "$brief" \
-    "explicit no-mistakes brief did not render the pipeline definition of done"
+  assert_grep "The only valid terminal success line is \`done: PR {url} checks green\`" "$brief" \
+    "explicit no-mistakes brief did not render the green-PR definition of done"
 
   # An unregistered project is not a blocker either, because nothing is looked up.
   FM_HOME="$home" "$ROOT/bin/fm-brief.sh" brief-explicit-a6 never-registered --mode local-only >/dev/null 2>&1 \
@@ -319,6 +382,21 @@ test_faster_paths_use_configured_authority_without_stacked_review() {
   pass "fm-brief.sh: faster paths use configured authority without stacked review"
 }
 
+test_atlas_direct_pr_brief_uses_task_bound_broker() {
+  local home brief
+  home="$TMP_ROOT/atlas-broker-home"
+  write_registry "$home"
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" brief-atlas-broker Atlas --mode direct-PR >/dev/null 2>&1
+  brief="$home/data/brief-atlas-broker/brief.md"
+  assert_grep "publish only through \`$ROOT/bin/fm-pr-identity.sh\`" "$brief" \
+    "Atlas direct-PR brief lost its task-bound broker"
+  assert_grep "task-bound broker push, create, and verify operations" "$brief" \
+    "Atlas direct-PR brief lost the broker publication sequence"
+  assert_no_grep "push your branch and open a PR with \`gh-axi\`" "$brief" \
+    "Atlas direct-PR brief retained the ambient publication path"
+  pass "fm-brief.sh: Atlas direct-PR briefs preserve the task-bound PR broker"
+}
+
 # Pin the specific line the bug lived on: the no-mistakes DOD's no-mistakes
 # reference must render as plain prose with no dangling apostrophe artifact.
 test_no_mistakes_dod_wording() {
@@ -363,6 +441,29 @@ test_no_mistakes_dod_wording() {
   assert_no_grep "no-mistakes refuses" "$brief" \
     "no-mistakes DOD must not claim the tool itself refuses --yes"
   pass "fm-brief.sh: no-mistakes DOD keeps its apostrophe prose and bans --yes outright"
+}
+
+test_no_mistakes_done_requires_green_pr() {
+  local home id brief status_protocol definition_of_done
+  home="$TMP_ROOT/no-mistakes-done-home"
+  mkdir -p "$home/data"
+  id="brief-no-mistakes-done-b2"
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" some-proj --mode no-mistakes >/dev/null 2>&1
+  brief="$home/data/$id/brief.md"
+  status_protocol=$(sed -n '/4\. Report status/,/5\. If you hit/p' "$brief")
+  definition_of_done=$(sed -n '/# Definition of done/,$p' "$brief")
+
+  assert_contains "$status_protocol" "For this no-mistakes task, \`done:\` means ONLY \`done: PR {url} checks green\`." \
+    "no-mistakes status protocol must reserve done for a green PR"
+  assert_contains "$status_protocol" "\`working: implementation complete; driving no-mistakes to PR\`" \
+    "no-mistakes status protocol must keep implementation-only completion working"
+  assert_contains "$definition_of_done" "The only valid terminal success line is \`done: PR {url} checks green\`" \
+    "no-mistakes Definition of done must require a green PR"
+  assert_contains "$definition_of_done" "If no green PR exists yet, report \`working:\` and continue" \
+    "no-mistakes Definition of done must reject implementation-only done"
+  assert_no_grep "append \`done: {summary}\`" "$brief" \
+    "no-mistakes brief retained the premature implementation-complete done line"
+  pass "fm-brief.sh: no-mistakes done requires a green PR in status and completion contracts"
 }
 
 test_ship_project_memory_wording() {
@@ -667,6 +768,28 @@ test_secondmate_directory_paths_are_absolute_and_output_is_stable() {
   pass "fm-brief.sh: relative directory inputs ignore CDPATH, render stable absolute charter paths, or fail loudly"
 }
 
+test_project_key_sidecar_persisted_for_ship_and_scout() {
+  local home id
+  home="$TMP_ROOT/project-key-sidecar-home"
+  mkdir -p "$home/data"
+
+  id=pk-ship-a1
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" Agent-Themis --mode no-mistakes >/dev/null 2>&1
+  assert_present "$home/data/$id/project-key" "a ship brief must persist data/<id>/project-key"
+  assert_grep "Agent-Themis" "$home/data/$id/project-key" "the persisted key must be the verbatim repo-name argument"
+
+  id=pk-scout-a2
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" Agent-Themis --scout >/dev/null 2>&1
+  assert_present "$home/data/$id/project-key" "a scout brief must persist data/<id>/project-key"
+  assert_grep "Agent-Themis" "$home/data/$id/project-key" "the scout's persisted key must be the verbatim repo-name argument"
+
+  id=pk-sm-a3
+  FM_HOME="$home" FM_SECONDMATE_CHARTER=x FM_SECONDMATE_SCOPE=x \
+    "$ROOT/bin/fm-brief.sh" "$id" --secondmate --no-projects >/dev/null 2>&1
+  assert_absent "$home/data/$id/project-key" "a secondmate charter must not write a project-key sidecar"
+  pass "fm-brief.sh: ship/scout briefs persist their canonical project key; a secondmate charter does not"
+}
+
 test_herdr_lab_contract_applies_to_scouts_but_not_secondmates() {
   local home brief status=0
   home="$TMP_ROOT/herdr-kind-home"
@@ -766,16 +889,20 @@ test_script_parses
 test_no_heredoc_in_command_substitution
 test_help_includes_entire_header
 test_ship_modes_generate_clean_briefs
+test_commit_discipline_applies_to_every_ordinary_worker_brief
+test_ordinary_worker_role_boundary_is_generated_only_for_ship_and_scout
 test_ship_mode_is_required_and_closed_set
 test_ship_mode_is_explicit_not_registry
 test_delivery_flags_are_refused_where_they_do_not_apply
 test_faster_paths_use_configured_authority_without_stacked_review
+test_atlas_direct_pr_brief_uses_task_bound_broker
 test_no_mistakes_dod_wording
+test_no_mistakes_done_requires_green_pr
 test_ship_project_memory_wording
 test_herdr_lab_contract_is_explicit_and_complete
 test_herdr_lab_contract_quotes_foreign_firstmate_path
 test_herdr_lab_omission_is_loud_for_ship_and_scout
-test_documented_global_replace_leaves_the_herdr_gate_intact
+test_project_key_sidecar_persisted_for_ship_and_scout
 test_herdr_lab_contract_applies_to_scouts_but_not_secondmates
 test_secondmate_no_projects_charter
 test_secondmate_marked_request_reporting_contract

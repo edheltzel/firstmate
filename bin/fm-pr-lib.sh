@@ -213,6 +213,243 @@ fm_pr_head_valid() {
   [[ "$head" =~ ^[0-9a-f]{40}$|^[0-9a-f]{64}$ ]]
 }
 
+# The installed gh-axi contract emits one scalar per line in TOON. Parse the
+# first colon only so timestamps and other future scalar values keep their full
+# value, then remove the optional TOON string quotes.
+fm_pr_toon_scalar() {
+  local raw=$1 key=$2
+  printf '%s\n' "$raw" | awk -v wanted="$key" '
+    function trim(value) {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      return value
+    }
+    {
+      line=$0
+      sub(/^[[:space:]]*/, "", line)
+      colon=index(line, ":")
+      if (colon == 0 || substr(line, 1, colon - 1) != wanted) next
+      value=trim(substr(line, colon + 1))
+      if (value ~ /^".*"$/) {
+        sub(/^"/, "", value)
+        sub(/"$/, "", value)
+      }
+      print value
+      exit
+    }
+  '
+}
+
+fm_pr_toon_section_scalar() {
+  local raw=$1 section=$2 key=$3
+  printf '%s\n' "$raw" | awk -v wanted_section="$section" -v wanted="$key" '
+    function trim(value) {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      return value
+    }
+    {
+      line=$0
+      indent=line
+      sub(/[^[:space:]].*$/, "", indent)
+      sub(/^[[:space:]]*/, "", line)
+      colon=index(line, ":")
+      if (colon == 0) next
+      name=trim(substr(line, 1, colon - 1))
+      value=trim(substr(line, colon + 1))
+      if (length(indent) == 0 && name == wanted_section) {
+        inside=1
+        next
+      }
+      if (length(indent) == 0 && name != wanted_section) inside=0
+      if (inside && name == wanted) {
+        if (value ~ /^".*"$/) {
+          sub(/^"/, "", value)
+          sub(/"$/, "", value)
+        }
+        print value
+        exit
+      }
+    }
+  '
+}
+
+# Return the declared item count for a supported TOON array. A malformed or
+# non-array response is refused rather than being treated as an empty page.
+fm_pr_toon_array_count() {
+  local raw=$1
+  printf '%s\n' "$raw" | awk '
+    function count_from_header(line, value) {
+      value=line
+      sub(/^\[/, "", value)
+      sub(/\].*$/, "", value)
+      return value + 0
+    }
+    /^\[[0-9]+\]:[[:space:]]*$/ {
+      print count_from_header($0)
+      found=1
+      exit
+    }
+    /^\[[0-9]+\]\{[^}]+\}:[[:space:]]*$/ {
+      print count_from_header($0)
+      found=1
+      exit
+    }
+    END { if (!found) exit 1 }
+  '
+}
+
+# Parse the complete item-list and tabular commit forms emitted by the pinned
+# gh-axi TOON encoder. Every declared row must have a valid SHA and both
+# Atlas-Key author and committer attribution; incomplete or extra rows fail.
+fm_pr_toon_commit_rows() {
+  awk '
+    function trim(value) {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      return value
+    }
+    function unquote(value) {
+      value=trim(value)
+      if (value ~ /^".*"$/) {
+        sub(/^"/, "", value)
+        sub(/"$/, "", value)
+      }
+      return value
+    }
+    function invalid(reason) {
+      print "toon-commit-parser: " reason > "/dev/stderr"
+      bad=1
+    }
+    function flush_item() {
+      if (!in_item) return
+      if (sha == "") invalid("commit row has no sha")
+      else if (author == "" || committer == "") invalid("commit row has incomplete attribution")
+      else {
+        print sha "\t" author "\t" committer
+        emitted++
+      }
+      in_item=0
+      sha=author=committer=section=""
+    }
+    function array_count(line, value) {
+      value=line
+      sub(/^\[/, "", value)
+      sub(/\].*$/, "", value)
+      return value + 0
+    }
+    function tabular_value(line, field_index, value) {
+      value=line
+      sub(/^[[:space:]]*/, "", value)
+      sub(/^-[[:space:]]*/, "", value)
+      field_count=split(value, fields, ",")
+      if (field_index > 0 && field_index <= field_count) return unquote(fields[field_index])
+      return ""
+    }
+    function flush_tabular(line, value) {
+      if (line == "") return
+      sha=tabular_value(line, sha_index)
+      author=tabular_value(line, author_index)
+      committer=tabular_value(line, committer_index)
+      if (sha == "" || author == "" || committer == "") invalid("tabular commit row has incomplete attribution")
+      else {
+        print sha "\t" author "\t" committer
+        emitted++
+      }
+      tabular_rows++
+    }
+    BEGIN { mode=""; expected=-1; in_item=0; section=""; tabular_line="" }
+    /^\[[0-9]+\]:[[:space:]]*$/ {
+      flush_item()
+      if (mode == "tabular") flush_tabular(tabular_line)
+      tabular_line=""
+      mode="item"
+      expected=array_count($0)
+      next
+    }
+    /^\[[0-9]+\]\{[^}]+\}:[[:space:]]*$/ {
+      flush_item()
+      if (mode == "tabular") flush_tabular(tabular_line)
+      tabular_line=""
+      header=$0
+      columns=header
+      sub(/^\[[0-9]+\]\{/, "", columns)
+      sub(/\}:[[:space:]]*$/, "", columns)
+      split(columns, names, ",")
+      sha_index=author_index=committer_index=0
+      for (i=1; i<=length(names); i++) {
+        name=trim(names[i])
+        if (name == "sha") sha_index=i
+        else if (name == "author") author_index=i
+        else if (name == "committer") committer_index=i
+      }
+      if (sha_index == 0 || author_index == 0 || committer_index == 0) invalid("tabular commit columns are incomplete")
+      mode="tabular"
+      expected=array_count($0)
+      next
+    }
+    mode == "item" && /^[[:space:]]+-[[:space:]]/ {
+      flush_item()
+      in_item=1
+      line=$0
+      if (line !~ /^[[:space:]]+- sha:[[:space:]]*/) invalid("item row does not begin with sha")
+      else {
+        sub(/^[[:space:]]+- sha:[[:space:]]*/, "", line)
+        sha=unquote(line)
+      }
+      next
+    }
+    mode == "item" && /^[^[:space:]]/ {
+      invalid("unexpected top-level content in commit list")
+      next
+    }
+    mode == "item" && in_item && /^[[:space:]]+author:/ {
+      line=$0
+      sub(/^[[:space:]]+author:[[:space:]]*/, "", line)
+      line=unquote(line)
+      if (line == "") section="author"
+      else author=line
+      next
+    }
+    mode == "item" && in_item && /^[[:space:]]+committer:/ {
+      line=$0
+      sub(/^[[:space:]]+committer:[[:space:]]*/, "", line)
+      line=unquote(line)
+      if (line == "") section="committer"
+      else committer=line
+      next
+    }
+    mode == "item" && in_item && section == "author" && /^[[:space:]]+login:/ {
+      line=$0
+      sub(/^[[:space:]]+login:[[:space:]]*/, "", line)
+      author=unquote(line)
+      section=""
+      next
+    }
+    mode == "item" && in_item && section == "committer" && /^[[:space:]]+login:/ {
+      line=$0
+      sub(/^[[:space:]]+login:[[:space:]]*/, "", line)
+      committer=unquote(line)
+      section=""
+      next
+    }
+    mode == "item" && in_item && /^[[:space:]]+[A-Za-z0-9_]+:/ { section=""; next }
+    mode == "tabular" && /^[[:space:]]/ { flush_tabular($0); next }
+    mode == "tabular" && /^[^[:space:]]/ { invalid("unexpected top-level content in tabular commit list"); next }
+    END {
+      flush_item()
+      if (mode == "tabular") flush_tabular(tabular_line)
+      if (mode == "") invalid("commit response is not an array")
+      if (expected >= 0 && emitted != expected) invalid("commit row count does not match the array declaration")
+      if (bad) exit 1
+    }
+  '
+}
+
+fm_pr_binding_profile() {
+  local file=$1
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  [ "$(fm_pr_file_link_count "$file")" = 1 ] || return 1
+  awk -F= '$1 == "profile" { count++; value=$2 } END { if (count == 1 && value != "") print value; else exit 1 }' "$file"
+}
+
 fm_pr_file_mode() {
   if [ "$(uname)" = Darwin ]; then
     stat -f %Lp "$1" 2>/dev/null

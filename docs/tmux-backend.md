@@ -67,6 +67,10 @@ Run the real-harness guard after any harness upgrade and before trusting refresh
 
 ### Composer, busy state, and delivery
 
+OMP 17.2.2 reports `bun` as the pane command.
+Firstmate classifies it as alive only when the pane shell's foreground process-group arguments match the verified leading OMP launcher shape `bun bun /.../omp ...` or `bun /.../omp ...`.
+Unrelated or unreadable Bun processes remain ambiguous and never authorize recovery.
+
 Agent liveness and composer safety are separate checks.
 The tmux reader is a thin adapter over the fleet-wide classifier in `bin/fm-composer-lib.sh`: it contributes one styled full-pane capture, the `#{cursor_y}` cursor row, and foreground-process identity probes, and the shape containing the cursor - a complete bordered box (titled bottom borders tolerated), a bare agent-glyph row with its wrapped input, opencode's left bar, or Pi's identity-corroborated separator pair - normally decides the verdict.
 Real text in an identified shape is pending, while only positively proven emptiness reads empty.
@@ -77,7 +81,7 @@ A bare shell prompt is `unknown`, so away-mode escalation is never injected into
 
 Busy state is not read from rendered text on this backend.
 A task's busy, idle, unknown, or dead verdict comes from the semantic busy-state contract owned by `bin/fm-busy-lib.sh`; [architecture](architecture.md#busy-state-is-semantic-per-adapter) owns its boundaries.
-The one remaining rendered-tail reader is Grok's isolated fallback inside that contract, which can only classify a Grok task.
+The remaining rendered-tail readers are Grok's and OMP's isolated fallbacks inside that contract, each able to classify only a task of its own harness.
 The submit acknowledgement and away-mode supervisor-pane busy guard below still consult rendered output, but only to decide whether input can be delivered, never to decide recorded task state.
 The supervisor guard selects only the detected primary harness's signature rather than a global union of vendor patterns.
 

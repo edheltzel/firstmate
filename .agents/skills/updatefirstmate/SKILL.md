@@ -1,9 +1,9 @@
 ---
 name: updatefirstmate
 description: >-
-  Self-update a running firstmate and its secondmates to the latest from origin.
+  Self-update a running Themis firstmate from Kun, then its secondmates.
   Use when the captain invokes /updatefirstmate (e.g. "/updatefirstmate", "update firstmate", "pull the latest firstmate").
-  Fast-forwards this firstmate repo's default branch and every local or remote secondmate through its guarded update path (never forced, never disruptive), then re-reads AGENTS.md and nudges each updated secondmate to do the same, so the whole tree runs the latest bin/ and instructions.
+  Brings Kun into the running Themis checkout without destroying unique Themis commits, fast-forwards every local or remote secondmate through its guarded path, then re-reads AGENTS.md and nudges each updated secondmate so the tree runs the latest bin/ and instructions.
 user-invocable: true
 metadata:
   internal: true
@@ -12,13 +12,19 @@ metadata:
 # updatefirstmate
 
 Self-update firstmate in place.
-Firstmate is its own repo, behind the same no-mistakes gate as any project, so new tracked material (`AGENTS.md`, `bin/`, `.agents/skills/`, and public `skills/`) reaches `main` and then sits there until each running firstmate pulls it.
+Firstmate is its own repo, behind the same no-mistakes gate as any project, so new tracked material (`AGENTS.md`, `bin/`, `.agents/skills/`, and public `skills/`) reaches Kun and then sits there until each running firstmate pulls it.
+On this fork the running home lives on Themis, and GitHub default `master` is the Kun mirror.
 Only `AGENTS.md`, `bin/`, and `.agents/skills/` are a running firstmate instruction surface; public `skills/` is installer-facing and is not loaded by firstmate.
-This skill performs that pull for the running main firstmate and every secondmate, without disturbing any in-flight work.
+This skill performs that pull for the running Themis firstmate and every secondmate, without disturbing any in-flight work.
 
-The update is **fast-forward only** - the same sanctioned self-write as the fleet sync firstmate already runs.
-For a remote route, it updates the configured Firstmate code root on that host from its own origin, then guardedly fast-forwards the persistent home to that code-root commit.
-It never forces, never creates a merge commit, never stashes, and advances a target only on a clean fast-forward; anything dirty, diverged, offline, or on the wrong branch is skipped and reported.
+`bin/fm-update.sh` owns the Git mechanics.
+From a clean Themis checkout it fetches `upstream` (never invents that remote), fast-forwards local `master` to Kun, optionally pushes `origin/master` when that is a clean fast-forward of the GitHub mirror, and merges `master` into Themis so unique Themis commits remain.
+It fast-forwards Themis only when Themis is already an ancestor of `master`.
+If HEAD is not Themis, it skips that merge and reports `on <branch>, expected Themis`.
+It never checks out `master` as HEAD of the running home, never forces, never stashes, and never discards unlanded work.
+A merge conflict prints the conflicted paths and remains in progress for resolution or abort.
+If another merge failure leaves a merge in progress, the updater reports the original error and preserves that state for resolution or abort.
+Secondmate homes stay on the existing origin fast-forward path.
 A tracked-files fast-forward leaves the gitignored operational dirs (data/, state/, config/, projects/, .no-mistakes/) untouched, so a secondmate's in-flight work is never disrupted.
 This touches only the firstmate repo and its own worktrees, never anything under `projects/`.
 
@@ -28,8 +34,8 @@ This touches only the firstmate repo and its own worktrees, never anything under
    ```sh
    bin/fm-update.sh
    ```
-   It fast-forwards this firstmate repo's default branch from origin, then updates every registered local or remote secondmate home through its placement-specific guarded path.
-   It prints one status line per target (`updated <old>..<new>` / `already current` / `skipped: <reason>`), followed by two action lines that tell you exactly what to do next:
+   It updates the running Themis checkout from Kun as described above, then updates every registered local or remote secondmate home through its placement-specific guarded path.
+   It prints one status line per target (`updated <old>..<new>` / `pushed <old>..<new>` / `already current` / `skipped: <reason>`), followed by two action lines that tell you exactly what to do next:
    - `reread-firstmate: yes|no`
    - `nudge-secondmates: fm-<id>...|none`
 
@@ -51,14 +57,18 @@ This touches only the firstmate repo and its own worktrees, never anything under
    Summarize what landed under `AGENTS.md` section 9 without firstmate's internal vocabulary: which parts of the fleet are now on the latest, and which were left as-is and why.
    For example: "Captain, firstmate and both second mates are now on the latest."
    Surface any skipped target whose reason needs the captain's attention - for instance a home with its own un-landed changes (diverged) or local edits (dirty), which were left untouched on purpose.
+   If the updater printed a merge conflict, say that Kun did not land, name the conflicted files, and say that the merge remains in progress for resolution or abort.
+   If another failed merge remains in progress, relay the reported error and say that the merge needs resolution or abort.
 
 ## Safety
 
-- **Fast-forward only.**
-  A target that has diverged, is dirty, is offline, or is on a non-default branch is skipped and reported, never forced or stashed.
-  Nothing with unlanded work is ever discarded - this is prime directive #3.
+- **Never force, stash, or discard unlanded work.**
+  A dirty or off-Themis running checkout is skipped and reported.
+  If upstream is missing or unreachable, the updater skips the Kun merge and reports the failure.
+  A dirty or diverged `master` is also skipped and reported.
+  Local `master` moves only by fast-forward to Kun.
+  Themis keeps unique commits by merging `master` rather than resetting onto Kun.
 - **Only the firstmate repo and its worktrees** are touched, never `projects/`.
-  It is the same sanctioned self-write as the fleet sync.
 - **Secondmates are never disrupted.**
   A local or remote secondmate gets a tracked-files fast-forward only when its own checkout is safe to advance, plus a gentle re-read nudge when it changed.
   It is never torn down, interrupted, or forced.

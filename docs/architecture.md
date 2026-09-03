@@ -55,18 +55,9 @@ Each `fm-wake-drain.sh` presentation runs the same liveness guard as the supervi
 Routine watcher polling, supervision no-ops, elapsed waiting time, and absorbed benign wakes stay silent.
 A declared external wait or verified captain-held transfer trades that silence for one bounded recheck per pause window, naming which human the wait is on, so neither a forgotten pause nor a forgotten hold can remain invisible indefinitely.
 Crew status files are append-only wake-event logs, not current-state fields.
-Because of that, a per-wake read of only the latest line can bury an earlier still-open `needs-decision`/`blocked` under later unrelated appends; `fm-wake-drain.sh` prints a separate, fleet-wide OPEN DECISIONS section on every presentation (including the empty-queue path session-start relies on), built through `fm-classify-lib.sh`'s cursor-backed incremental scan using the authoritative `status_open_decisions` fold semantics so the buried decision keeps surfacing until it is explicitly resolved while each presentation folds only new status-log appends.
-The drain coordinates that fold and its annotations through a locked fleet-wide snapshot whose `.status-presentation-cursor` manifest records each status file's identity plus independent annotation and outcome-backstop byte offsets.
-[`pi-supervision-branch.md`](pi-supervision-branch.md#lost-wake-outcome-backstop) owns the bounded lost-wake backstop that uses the latter offset.
-A queued signal annotation prints every status line still unread at that cursor, while the fleet-wide UNREAD STATUS section prints `note:` lines and reserved-key pending-reply resolutions once even on an empty-queue drain because those verbs never enter the OPEN DECISIONS fold.
-A third bounded section, RECORD DIVERGENCE, prints on the same drains for the opposite failure: the status fold went quiet on a key that the durable captain-held task still shows as open, so the status side reads as complete while the two records contradict each other; `bin/fm-captain-hold.sh diverged` decides what counts and closes nothing, and `docs/captain-hold-lifecycle.md` owns the mechanism.
-A failed read, output, or concurrent-replacement check prevents the snapshot cursor from advancing across uncertain bytes, and teardown retires a task's manifest row before that task ID can be reused.
-The explicit resolution is written by the actor that answers, not the busy worker: `fm-send`'s `--resolve-key` appends the closing `resolved` line to this home's own copy of the ledger at answer time, which covers crewmates, local secondmates, and remote secondmates identically because a remote mate's escalations reach that local copy through the parent-replies ingest and only the answer message itself crosses the transport.
-This home's answerer close, pending-reply escalation close, and captain-held transfer use the provenance-guarded append owned by `bin/fm-wake-lib.sh`, so they advance the watcher marker only across their own bytes when all earlier bytes were already announced; pending or interleaved foreign bytes fail toward an ordinary wake.
-A turn-ended-only queue row omits its historical status annotation when that status file exactly matches the same seen marker.
-Any direct or remaining historical annotation prints every status line unread at the presentation cursor instead of replaying only the latest line.
-`bin/fm-crew-state.sh <id>` is the cheap current-state read for an actionable heartbeat review: it attributes an active or terminal no-mistakes run under the shared run-attribution contract, then keeps that run-step authoritative even if the pane has closed.
-[`bin/fm-nm-run-lib.sh`](../bin/fm-nm-run-lib.sh)'s header owns the exact branch, head, pipeline-custody, and newest-first attribution rules.
+Because of that, a per-wake read of only the latest line can bury an earlier still-open `needs-decision`/`blocked` under later unrelated appends; `fm-wake-drain.sh` prints a separate, fleet-wide OPEN DECISIONS section on every drain (including the empty-queue path session-start relies on), built from `fm-classify-lib.sh`'s `status_open_decisions` fold so the buried decision keeps surfacing until it is explicitly resolved.
+`bin/fm-crew-state.sh <id>` is the cheap current-state read for an actionable heartbeat review: it attributes a no-mistakes run, active or terminal, only when it matches the crew's branch and current code identity, then keeps that run-step authoritative even if the pane has closed.
+The script header owns the exact run-head ancestry rules.
 During no-mistakes' `ci` monitor phase, it also reads the ci step log tail because `axi status` reports both "still waiting on checks" and "checks green, waiting on merge" as `ci,running`.
 The most recent recognized ci log marker wins, so checks-green monitoring reports done while a later re-arm, failed-check, or issue marker returns the crew to working.
 Only when no matching run exists does it consult semantic busy state; exact busy reports working, exact idle permits fallback to a status-log event whose verb maps to a recognized run-state, and unknown or a dead pane stays unknown instead of trusting a stale log.
@@ -98,21 +89,20 @@ Live GitHub enrichment exists only behind the bearings `--include-prs` opt-in.
 Optional Relay integrates with the watcher only after explicit opt-in; [configuration.md](configuration.md#relay-env) owns its generated-artifact and dispatch mechanics.
 
 At session start, `bin/fm-session-start.sh` emits exactly one primary-harness supervision block rendered by `bin/fm-supervision-instructions.sh` from `docs/supervision-protocols/`.
-That block owns the live wait shape for the running primary harness: Claude's Stop `asyncRewake` hook owns tokenless re-arm cycles, Cursor's stop hook parks on the watcher, Grok uses background-notify cycles, Codex uses bounded foreground checkpoints, Pi and pi-signed use the same two tracked primary extensions, and OpenCode uses its TUI plugin.
+That block owns the live wait shape for the running primary harness: Claude's Stop `asyncRewake` hook owns tokenless re-arm cycles, Grok uses background-notify cycles, Codex uses bounded foreground checkpoints, Pi and pi-signed auto-discover the same two tracked primary extensions, OMP loads those Pi-compatible extensions explicitly, and OpenCode uses its TUI plugin.
 `bin/fm-watch-arm.sh` remains the verified arm wrapper for protocols that call it; it forks the watcher as a tracked child, verifies it is genuinely alive with a fresh liveness beacon, and prints an honest `started`, `attached`, or nonzero `FAILED` status.
 [`watcher-continuity.md`](watcher-continuity.md#arm-layer-cycle-contract) owns the arm layer's successor, terminal-delivery, re-arm recovery, and typed clean-close failure contract.
 The arm layer records one bounded lifecycle row per observed cycle in `state/.watch-cycle-exits.log`; `state/.watch-triage.log` remains exclusively the absorbed-wake debug log.
-Pi and OpenCode verify session-lock ownership and launch one singleton successor from their child-close handlers before delivering an actionable wake prompt, with bounded exponential retry for failed restoration.
+Pi, OMP, and OpenCode verify session-lock ownership and launch one singleton successor from their child-close handlers before delivering an actionable wake prompt, with bounded exponential retry for failed restoration.
 Claude's `bin/fm-claude-stop-autoarm.sh` hook fires on every Stop and, when the home is eligible and still needs supervision, claims one home-scoped cycle, foregrounds the arm wrapper, and translates actionable closes into exit-2 rewakes.
 It suppresses failed-looking closes when the same identity-matched watcher is healthy, retries genuine failures within a bound, and coordinates exhausted failure episodes with the Claude turn-end guard as documented in [`turnend-guard.md`](turnend-guard.md).
 [`watcher-continuity.md`](watcher-continuity.md) owns Claude's residual active-turn coverage and watcher-status command-gating boundary.
-Cursor's `bin/fm-turnend-guard-cursor.sh` hook is the same between-turns shape in one synchronous step: it parks the awaited `stop` hook on the arm wrapper and translates an actionable close into one `followup_message`, with a generation baton that makes an older park still running after the next `stop` claim stand down instead of leaking a stale duplicate wake.
-The existing turn-end guard remains the final backstop for every harness-engine protocol, with pi-signed sharing Pi's protocol, the `--claude` mode cooperating with the auto-arm claim, and Cursor's `--cursor` mode rendering a block as one bounded follow-up because its `stop` step cannot be blocked.
+The existing turn-end guard remains the final backstop for all six harness-engine protocols, with pi-signed sharing Pi's protocol, OMP using the explicit Pi-compatible extension path, and the `--claude` mode cooperating with the auto-arm claim.
 Its `--restart` mode signals only the watcher recorded in the current home's `state/.watch.lock`, so restarting one home cannot kill sibling secondmate watchers.
-A pull-based guard (`bin/fm-guard.sh`) warns through supervision tool output if the primary checkout is tangled, if work, process-event sources, or Relay polling has an unhealthy model-aware supervision verdict, or if queued wakes are waiting to be drained.
-The drain script calls that guard after presenting the queue; records remain durable, and may keep the queued-wakes warning visible, until the exact generation-bound acknowledgement printed by the drain succeeds after handling.
+A pull-based guard (`bin/fm-guard.sh`) warns through supervision tool output if the primary checkout is tangled, if work, process-event sources, or X-mode relay polling has an unhealthy model-aware supervision verdict, or if queued wakes are waiting to be drained.
+The drain script calls that guard after emptying the queue, which avoids repeating the queued-wakes warning for records it just consumed while still warning on unhealthy supervision.
 It leads with a prominent bordered tangle banner, while `bin/fm-guard.sh` owns the watcher-down banner and reminder policy so repeated guarded commands stay noisy without reprinting the full banner in the same episode.
-On every verified primary harness, tracked hook integration gives the primary session a push-based backstop: when work, a process-event source, or Relay polling needs supervision and no identity-matched watcher lock with a fresh beacon is live, blocking-capable Stop hooks block and nonblocking turn-end integrations force one bounded follow-up.
+On every verified primary harness, tracked hook integration gives the primary session a push-based backstop: when work, a process-event source, or X-mode relay polling needs supervision and no identity-matched watcher lock with a fresh beacon is live, direct Stop hooks block and passive turn-end hooks force one bounded follow-up.
 The guard covers the main primary and genuinely marked secondmate homes, exempts child crewmate/scout worktrees, is loop-safe per harness, and is documented in [turnend-guard.md](turnend-guard.md).
 
 A presence-gated sub-supervisor (`bin/fm-supervise-daemon.sh`) extends this for walk-away supervision: the `/afk` skill starts it through the tracked foreground helper `bin/fm-afk-start.sh`, after which the watcher reverts to daemon-managed one-shot mode and the daemon self-handles routine wakes in bash.
@@ -151,9 +141,9 @@ Text for a worker to read and commands that drive a worker's process are separat
 `bin/fm-busy-lib.sh` is the single owner of what "this worker is busy" means, and `bin/fm-busy-event.sh` is the only writer of the per-task records it reads.
 Every classification returns a verdict of busy, idle, unknown, or dead together with the source that produced it, so a consumer or a diagnostic can never confuse semantic state with a fallback.
 
-Each converted adapter reports its own turn lifecycle through a machine-readable contract the vendor already exposes, rather than through rendered footer text: Pi and pi-signed through the Firstmate-owned extension's `agent_start` and `agent_settled` confirmed by `ctx.isIdle()`, OpenCode through its plugin's semantic `session.status`, Claude through owned `UserPromptSubmit`, `Stop`, `StopFailure`, and `SessionEnd` hooks, Muse through its session log, and Cursor through its conversation transcript.
+Each converted adapter reports its own turn lifecycle through a machine-readable contract the vendor already exposes, rather than through rendered footer text: Pi and pi-signed through the Firstmate-owned Pi extension's `agent_start` and `agent_settled` confirmed by `ctx.isIdle()`, OpenCode through its plugin's semantic `session.status`, and Claude through owned `UserPromptSubmit`, `Stop`, `StopFailure`, and `SessionEnd` hooks.
 Kimi behind Pi inherits Pi's lifecycle.
-Codex and standalone Kimi classify unknown behind explicit probes until a semantic source is live-verified for them, and Grok keeps one clearly isolated rendered-tail fallback that can only ever classify a Grok task.
+Codex and standalone Kimi classify unknown behind explicit probes until a semantic source is live-verified for them, and Grok and OMP each keep one clearly isolated rendered-tail fallback that can only ever classify a task of its own harness: Grok because its structured lifecycle is not yet live-verified, and OMP because its verified extension contract is turn-end notification only.
 
 Missing, malformed, stale, untrusted, or unverified semantic state is unknown, never idle, and unknown is never promoted to busy either.
 Ordinary task-state consumers act only on an exact busy verdict, so an unreadable worker surfaces for a closer look instead of being absorbed as still-working or written off as finished.
@@ -179,33 +169,38 @@ tmux, zellij, orca, and cmux expose no native busy primitive at all, so a task o
 That poll loop is still the default event source for backends with no native push events, so this stays an extraction of the abstraction rather than a watcher rewrite.
 For capable Herdr sessions, the same watcher replaces its terminal sleep with a bounded native event wait that immediately surfaces `blocked`; [Push events and polling fallback](herdr-backend.md#push-events-and-polling-fallback) owns the current mechanism and capability gates, while [runtime backend verification](verification/runtime-backends.md#native-blocked-event) owns the active evidence.
 The deeper session-start agent-process liveness probe is separate from that busy-state poll: tmux and Herdr have verified classifiers for secondmate recovery, Zellij remains unverified, and Orca and cmux do not support secondmate spawns.
-Herdr is experimental and can be selected explicitly or by runtime auto-detection: Treehouse remains its worktree provider, [`herdr-backend.md`](herdr-backend.md) owns current setup and safety limits, and [`verification/runtime-backends.md`](verification/runtime-backends.md#herdr) owns active empirical evidence.
-Herdr uses one tab per task; [Watching and task containers](herdr-backend.md#watching-and-task-containers) owns launcher-bound workspace placement, the label-only fallback, and recovery scope.
-Its default-on presentation projection may place one clean new task in a disposable workspace without changing endpoint authority or lifecycle ownership; [Presentation spaces](herdr-backend.md#presentation-spaces) owns that conditional design, the Herdr version floor its unconfigured default is gated behind, and its narrow home-local restored-shell cleanup at locked session start.
-Zellij is experimental and selected only explicitly: Treehouse remains its worktree provider, [`zellij-backend.md`](zellij-backend.md) owns current setup and limits, and [`verification/runtime-backends.md`](verification/runtime-backends.md#zellij) owns active empirical evidence.
+Herdr is experimental and can be selected explicitly or by runtime auto-detection: worktree isolation follows [`configuration.md`](configuration.md#runtime-backend-configbackend--fm_backend), [`herdr-backend.md`](herdr-backend.md) owns current setup and safety limits, and [`verification/runtime-backends.md`](verification/runtime-backends.md#herdr) owns active empirical evidence.
+Herdr's flat path uses one tab per task in `FM-fleet-<n>` or `SM-fleet-<n>` workspaces; the primary workspace defaults to `TheBridge`, preserves the captain's `@TheHelm` tab, and places secondmate agents in `Portside`.
+The project key controls Fleet identity and advisory or PR lookup without selecting delivery mode, while exact launcher identity can select only a live same-label workspace and duplicate or mismatched targets refuse.
+[Watching and task containers](herdr-backend.md#watching-and-task-containers) owns focus-safe pane removal, version-2 bindings, semantic `agent_state`, `SSH_AUTH_SOCK` forwarding, display metadata, and the geometry rationale.
+Its default-on presentation projection may place one clean new task in a disposable workspace without changing endpoint authority or lifecycle ownership; [Presentation spaces](herdr-backend.md#presentation-spaces) owns that conditional design and its narrow home-local restored-shell cleanup at locked session start.
+Zellij is experimental and selected only explicitly: worktree isolation follows [`configuration.md`](configuration.md#runtime-backend-configbackend--fm_backend), [`zellij-backend.md`](zellij-backend.md) owns current setup and limits, and [`verification/runtime-backends.md`](verification/runtime-backends.md#zellij) owns active empirical evidence.
 Zellij's container shape is simpler than herdr's: one shared `firstmate` session, one tab per task, with no per-home workspace split; visible tab titles are scoped by the active home label plus a short hash of the resolved `FM_ROOT` path.
 Orca is experimental and selected only explicitly: Orca owns both worktree and terminal lifecycle, records `orca_worktree_id=` and `terminal=`, and removes worktrees through `orca worktree rm` only after the usual firstmate teardown checks pass.
 [`orca-backend.md`](orca-backend.md) owns current behavior and limitations, while [`verification/runtime-backends.md`](verification/runtime-backends.md#orca) owns active smoke evidence.
-cmux is experimental, GUI-first, macOS-only, and can be selected explicitly or by runtime auto-detection from its primary `CMUX_WORKSPACE_ID` marker plus documented fallback signals: Treehouse remains its worktree provider, [`cmux-backend.md`](cmux-backend.md) owns current setup and limits, and [`verification/runtime-backends.md`](verification/runtime-backends.md#cmux) owns active source and live evidence.
+cmux is experimental, GUI-first, macOS-only, and can be selected explicitly or by runtime auto-detection from its primary `CMUX_WORKSPACE_ID` marker plus documented fallback signals: worktree isolation follows [`configuration.md`](configuration.md#runtime-backend-configbackend--fm_backend), [`cmux-backend.md`](cmux-backend.md) owns current setup and limits, and [`verification/runtime-backends.md`](verification/runtime-backends.md#cmux) owns active source and live evidence.
 cmux's container shape is one workspace per task with one surface, no per-home container split; workspace titles are scoped by the active home label plus a short hash of the resolved `FM_ROOT` path, and `--secondmate` spawns are refused, mirroring Orca.
 Codex App support is recorded in `docs/codex-app-backend.md`; it is not selectable as a runtime backend.
 
 ## Worktrees, not branches in your checkout
 
-Crewmates never intentionally touch your project clone; [treehouse](https://github.com/kunchenguid/treehouse) pools clean worktrees for tmux, herdr, zellij, and cmux tasks, while Orca creates its own worktrees for `backend=orca`.
+Crewmates never intentionally touch your project clone; Firstmate allocates clean disposable worktrees for tmux, herdr, zellij, and cmux tasks according to the provider selection owned by [`configuration.md`](configuration.md#runtime-backend-configbackend--fm_backend), while Orca creates its own worktrees for `backend=orca`.
 For ship and scout work, `fm-spawn.sh` refuses to launch unless the resolved task path is a real git worktree root that is distinct from the project primary checkout.
 `fm-spawn.sh` also owns the base-freshness boundary for every fresh ship and scout: no worker starts until its clean task worktree matches the fetched tip of origin's resolved default branch, and any unsafe or unverifiable base stops the spawn.
 Its header owns the exact refusal mechanics, while `tests/fm-spawn-pool-base-freshen.test.sh` owns the portable regression coverage.
 
 The firstmate repo has one extra exposure because it can dispatch crewmates to work on itself.
 Its operating checkout (`FM_ROOT`) and the disposable crewmate worktrees are all linked git worktrees of the same repository, so the valid discriminator is branch state, not whether the checkout is linked.
-The primary checkout is healthy on its default branch, and linked worktrees or secondmate homes are healthy at detached HEAD.
-Only a named non-default branch checked out in `FM_ROOT` is a worktree tangle.
+The primary checkout is healthy on the branch that its current operation expects, while linked worktrees or secondmate homes are healthy at detached HEAD.
+Most operations expect the repository default branch, while the Themis self-update expects `Themis`.
+Only a named branch that differs from the expected branch in `FM_ROOT` is a worktree tangle.
 
-`fm-tangle-lib.sh` resolves the default branch from `origin/HEAD`, then local `main` or `master`, and classifies that named non-default primary branch as the tangle.
+`fm-tangle-lib.sh` resolves the default branch from `origin/HEAD`, then local `main` or `master`, and accepts an explicit expected branch from callers with a deliberate long-running branch.
+It classifies a named primary branch that differs from that expected branch as the tangle.
 `fm-guard.sh` prints the repair command on the next mutable fleet action, while `bin/fm-session-start.sh` reports the same condition through bootstrap as a `TANGLE:` line at session start.
 If another live session holds the fleet lock, both surfaces keep the alarm but switch to read-only wording with no repair command.
 Ship briefs also tell the crewmate to verify `pwd -P` and `git rev-parse --show-toplevel` before creating `fm/<id>`, then stop with a blocked status if it landed in the primary checkout.
+Teardown verifies that every Firstmate-allocated ship or scout worktree still belongs to the exact task before provider-specific removal or return, so a recycled or mismatched worktree refuses even when discard was authorized.
 
 ## No-mistakes gate authority boundary
 
@@ -229,7 +224,7 @@ The session-start bootstrap step keeps valid dispatch configuration silent unles
 When the file exists, `fm-spawn.sh` refuses crewmate and scout launches without an explicit harness, so `config/crew-harness` is only automatic when no dispatch profile file is active.
 Secondmate launches are exempt because they resolve the secondmate harness and any optional secondmate model or effort tokens instead.
 Unsupported effort values are still recorded in task meta when passed to `fm-spawn.sh`, but the launch template omits any effort flag that the selected harness does not accept.
-That keeps spawn launch compatible across claude, codex, opencode, pi, pi-signed, grok, kimi, cursor, and muse while preserving the requested profile for later audit.
+That keeps spawn launch compatible across claude, codex, grok, pi, opencode, kimi, and omp while preserving the requested profile for later audit.
 
 ## Optional secondmates
 
@@ -280,8 +275,10 @@ The `data/secondmates.md` line contract is owned by the [`secondmate-provisionin
 Each task's mode and `yolo` merge posture are firstmate's decision at intake.
 The mode is passed explicitly to `bin/fm-brief.sh`, and both values are passed explicitly to `bin/fm-spawn.sh` and `bin/fm-promote.sh`; each command refuses to guess the values it consumes.
 A ship brief records its mode as a fixed machine-readable line and the spawn refuses to launch on a different one, so the worker's instructions and the recorded task delivery cannot diverge.
-`bin/fm-dod-lib.sh` is the one owner of that mode's definition of done, rendered both into a generated ship brief and into the ship instructions a promoted scout receives, so a promoted worker cannot be handed a weaker contract than a briefed one.
-`data/projects.md` records each project's standing posture and optional `+yolo` merge flag as the captain's default and as context for that decision, including the conditional `no-mistakes-prod-only` policy; a ship spawn that drops below the registered rigor prints a deviation notice and continues.
+The canonical project key is a separate identity axis for Fleet grouping, task-bound PR publication, and standing-posture advisory lookup, and it never chooses the explicit task mode.
+When Atlas publication is configured, `bin/fm-pr-identity.sh` binds that key, repository, branch, worker identity, and task before any PR helper can publish or monitor the result.
+Optional signed worker Git identity uses only validated public policy and task-local allowed-signers metadata; the host signing agent retains the private key under the boundary owned by [configuration.md](configuration.md#worker-git-identity).
+`data/projects.md` records each project's standing posture and optional `+yolo` flag as the captain's default and as context for that decision, including the conditional `no-mistakes-prod-only` policy; a ship spawn that drops below the registered rigor prints a deviation notice and continues.
 `bin/fm-project-mode.sh` remains the one registry parser for the mechanical consumers that have no task in hand: fleet sync's `local-only` skip and home seeding's refusal and no-mistakes initialization.
 When a selected delivery path calls for a diff, `bin/fm-review-diff.sh` refreshes the authoritative base and, when task meta records `pr=`, always fetches and compares against `refs/pull/<n>/head` by default (recorded `pr_head=` is only an offline fallback) before falling back to the local branch with a warning.
 Where a no-mistakes pipeline stores evidence in the repo, it publishes that PR-viewable validation evidence to an orphan evidence branch that shares no history with code branches, so it never enters the crew branch or the default branch.
@@ -377,11 +374,11 @@ The refresh also prunes local branches whose remote is gone and that no worktree
 
 ## Self-updates stay safe
 
-`/updatefirstmate` fast-forwards the running firstmate repo and registered secondmate homes from `origin`, then re-reads updated instructions and nudges updated secondmates without touching project clones.
+`/updatefirstmate` brings Kun into the running Themis checkout without destroying unique Themis commits, then fast-forwards registered secondmate homes from `origin`, re-reads updated instructions, and nudges updated secondmates without touching project clones.
 For a remote route, the configured code root updates from its own origin on that host before the persistent home fast-forwards to the code-root commit.
-The update is fast-forward only: dirty, diverged, offline, and off-default targets are reported and left untouched.
-Local homes share the guarded fast-forward helper, while remote updates delegate the same safety decision to the configured host through the generic transport.
-The mechanics are owned by the `/updatefirstmate` skill and firstmate's operating manual in [`AGENTS.md`](../AGENTS.md) (self-update).
+Local secondmate homes share the guarded fast-forward helper, while the Themis merge lives in `bin/fm-update.sh`.
+`bin/fm-update.sh` and its header own the Git mechanics and status outcomes.
+The `/updatefirstmate` skill owns the re-read, nudge, and reporting procedure, while [`AGENTS.md`](../AGENTS.md) owns its load trigger.
 
 ## Restart-proof
 

@@ -1,0 +1,9 @@
+base:
+  ref: main
+head:
+  ref: fm/task-a
+  sha: "2222222222222222222222222222222222222222"
+merged: true
+merged_at: "2026-07-22T12:00:00Z"
+state: closed
+user: Atlas-Key

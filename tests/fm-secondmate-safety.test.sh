@@ -1779,7 +1779,7 @@ EOF
   rc=$?
   set -e
 
-  [ "$rc" -eq 4 ] || fail "nested process-event restoration failure was collapsed at a recursive teardown boundary"
+  [ "$rc" -eq 5 ] || fail "nested process-event restoration failure was collapsed at a recursive teardown boundary"
   grep -F 'active waits may remain retired; recover registrations from ' "$err" >/dev/null || fail "nested restoration failure did not report its recovery backup"
   backup=$(find "$TMP_ROOT" -maxdepth 1 -type d -name '.fm-procevent-restore.*' \
     -exec test -e '{}/leaf-source.source' \; -print -quit)
@@ -1846,7 +1846,7 @@ EOF
   rc=$?
   set -e
 
-  [ "$rc" -eq 4 ] || fail "failed process-event restoration did not return its distinct recoverable status"
+  [ "$rc" -eq 5 ] || fail "failed process-event restoration did not return its distinct recoverable status"
   grep -F 'active waits may remain retired; recover registrations from ' "$err" >/dev/null || fail "failed process-event restoration did not report its recovery backup"
   backup=$(find "$TMP_ROOT" -maxdepth 1 -type d -name '.fm-procevent-restore.*' \
     -exec test -e '{}/source.source' \; -print -quit)
@@ -1917,7 +1917,9 @@ harness=echo
 kind=ship
 mode=no-mistakes
 yolo=off
+worktree_owner_token=fmw.AAAAAAAAAAAA
 EOF
+  printf 'version=1\ntask_id=child\ntoken=fmw.AAAAAAAAAAAA\n' > "$childwt/.fm-worktree-owner"
   fakebin=$(make_fake_tmux "$TMP_ROOT/force-teardown-fake")
   log="$TMP_ROOT/force-teardown-fake/tmux.log"
   if PATH="$fakebin:$PATH" FM_HOME="$home" FM_FAKE_TMUX_LOG="$log" FM_FAKE_TMUX_CAPTURE="$TMP_ROOT/force-teardown-fake/pane.txt" \
@@ -1966,7 +1968,9 @@ harness=echo
 kind=ship
 mode=no-mistakes
 yolo=off
+worktree_owner_token=fmw.AAAAAAAAAAAA
 EOF
+  printf 'version=1\ntask_id=child\ntoken=fmw.AAAAAAAAAAAA\n' > "$childwt/.fm-worktree-owner"
   fakebin=$(make_fake_tmux "$TMP_ROOT/force-lock-child-fake")
   log="$TMP_ROOT/force-lock-child-fake/tmux.log"
   cat > "$fakebin/treehouse" <<'SH'

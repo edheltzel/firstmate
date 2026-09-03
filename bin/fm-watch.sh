@@ -93,7 +93,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
-CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
+export FM_PR_POLL_ROOT="$FM_ROOT" FM_PR_POLL_HOME="$FM_HOME" FM_PR_POLL_STATE="$STATE"
 mkdir -p "$STATE"
 
 # The native event fast-path and only its true dependencies have one narrow
@@ -838,65 +838,72 @@ handle_paused_stale() {  # <window> <task> <hash>
   triage_log "absorbed stale ($detail, age ${age}s): $win"
 }
 
-# Apply the busy-pane completed-turn bound to a window whose bound has already
-# crossed, honoring the worker's OWN declared external wait. Prints/queues
-# nothing itself; it only chooses which absorber owns the crossed bound.
-# 0 when the declared-pause cadence took the pane, 1 when the wedge timer did.
-#
-# A busy pane past BUSY_TURN_MAX_SECS is normally a wedge suspect because a hung
-# foreground call can hide behind a busy signature. A `paused:` declaration or
-# verified captain-held transfer instead identifies that live foreground call as
-# the expected external wait. The caller has already confirmed liveness through
-# the busy verdict, so this exception does not suppress undeclared wedges or
-# alter the separate non-busy classification. handle_paused_stale keeps the
-# exception bounded by re-surfacing it once per PAUSE_RESURFACE_SECS. Away mode
-# remains daemon-owned and receives the undecorated wake identity for its own
-# classification, which is why the declaration is read before the afk branch
-# rather than after it.
-busy_turn_bound_check() {  # <window> <task> <hash> <since-file> <escalation-file>
-  local win=$1 task=$2 h=$3 since_file=$4 escalation_file=$5 key statusf declared
-  statusf="$STATE/$task.status"
-  if status_is_paused_or_captain_held "$(last_status_line "$statusf")"; then
-    if afk_present; then
-      # Away mode is daemon-owned, so this bound hands off the PLAIN wake identity
-      # and lets the daemon classify the declaration itself - the undecorated
-      # identity the rest of this function's contract promises. Running the wedge
-      # timer here instead would decorate the wake as a possible wedge, and that
-      # decoration overrides the daemon's own pause verdict for the pane: the
-      # ladder then climbs on every re-arm, escalating a crew that declared the
-      # wait itself once per FM_STALE_ESCALATE_SECS for as long as the wait lasts.
-      # The one-shot is keyed on the DECLARATION (the status log's signature),
-      # never on the pane hash: a busy pane's harness footer ticks on every
-      # capture, so a hash-keyed one-shot would re-fire on every poll and the
-      # daemon, which relaunches the watcher after each handled wake, would be
-      # woken in a loop for the whole declared wait. The suppressor therefore
-      # advances to the declaration rather than the hash, and the daemon is woken
-      # once per distinct declaration. The wedge timer, escalation count and
-      # write-deferral chain are cleared exactly as handle_paused_stale clears
-      # them, so an undeclared busy phase that had already started the timer does
-      # not resume its count the moment the declaration is lifted. Normal-mode
-      # pause tracking stays unwritten here, exactly as the idle away-mode handoff
-      # leaves it, because the daemon owns that bookkeeping.
-      key=$(window_key "$win")
-      rm -f "$since_file" "$escalation_file"
-      clear_write_tracking "$key"
-      declared="declared:$(fm_wake_signal_sig "$statusf" || true)"
-      if [ "$(cat "$STATE/.stale-$key" 2>/dev/null || true)" != "$declared" ]; then
-        fm_wake_append stale "$win" "stale: $win" || exit 1
-        printf '%s' "$declared" > "$STATE/.stale-$key"
-        wake "stale: $win"
-      fi
-      return 0
-    fi
-    handle_paused_stale "$win" "$task" "$h"
-    return 0
-  fi
-  wedge_timer_check "$win" "$since_file" "busy (no completed turn)" "$escalation_file" "$task"
-  return 1
+# 0 if <window>'s worker has CONFIDENTLY exited (the backend agent probe reports
+# dead). An ambiguous or live reading returns 1. Only reached for non-secondmate
+# windows (the stale loop handles secondmates separately before this point).
+terminal_agent_dead() {  # <window>
+  local win=$1 alive
+  alive=$(fm_backend_agent_alive "$(window_backend "$win")" "$win" 2>/dev/null) || alive=unknown
+  [ "$alive" = dead ]
 }
 
-clear_pause_state() {  # <window-key>
-  local key=$1
+# Bounded re-surface for an idle stale pane whose last status is terminal. The
+# caller admits either a confidently exited worker (all terminal verbs) or a live
+# idle worker after done; live failure, blocker, and decision statuses still surface
+# normally. A retained pane awaiting merge or cleanup must not re-notify on every
+# hash change. Unlike handle_paused_stale this surfaces ONCE on first bounded sight
+# (the .term-resurfaced-<key> throttle marker is absent), then throttles to one
+# recheck per PAUSE_RESURFACE_SECS. Churn-immune: the throttle is a persistent
+# marker, never the pane hash, so a redrawing idle pane cannot reset the cadence.
+# NEVER re-reads crew state. The .term-<key> marker stores the admitted class so a
+# perfectly stable hash keeps the right recheck reason on the same long cadence.
+handle_terminal_stale() {  # <window> <task> <hash> [exited|live-idle-done]
+  local win=$1 task=$2 h=$3 class=${4:-} key termf statusf mtime age rf rf_age reason log_class
+  key=$(printf '%s' "$win" | tr ':/.' '___')
+  printf '%s' "$h" > "$STATE/.stale-$key"
+  termf="$STATE/.term-$key"
+  if [ -n "$class" ]; then
+    printf '%s' "$class" > "$termf"
+  else
+    class=$(cat "$termf" 2>/dev/null || true)
+  fi
+  case "$class" in
+    live-idle-done) log_class='worker live but idle after done' ;;
+    *)              log_class='worker exited' ;;
+  esac
+  rm -f "$STATE/.stale-since-$key" "$STATE/.wedge-escalations-$key"
+  statusf="$STATE/$task.status"
+  mtime=$(stat_mtime "$statusf")
+  case "$mtime" in ''|*[!0-9]*) mtime=$(date +%s) ;; esac
+  age=$(( $(date +%s) - mtime ))
+  rf="$STATE/.term-resurfaced-$key"
+  rf_age=$(age_of "$rf")   # 999999 when no prior re-surface -> first bounded sight surfaces once
+  if [ "$rf_age" -ge "$PAUSE_RESURFACE_SECS" ]; then
+    reason="stale: $win (terminal ${age}s, $log_class - completed or awaiting cleanup, rechecked on a long cadence not a wedge; confirm or tear down)"
+    fm_wake_append stale "$win" "$reason" || exit 1
+    date +%s > "$rf"
+    # Mark the captain-relevant status surfaced, exactly as the plain terminal
+    # surface does, so the heartbeat backstop does not independently re-fire the
+    # same status right after this bounded recheck.
+    mark_surfaced "$statusf"
+    wake "$reason"
+  fi
+  triage_log "absorbed stale (terminal, $log_class, age ${age}s): $win"
+}
+
+clear_terminal_bounding() {  # <window>
+  local win=$1 key
+  key=${win//:/_}
+  key=${key//\//_}
+  key=${key//./_}
+  rm -f "$STATE/.term-$key" "$STATE/.term-resurfaced-$key"
+}
+
+clear_pause_state() {  # <window>
+  local win=$1 key
+  key=${win//:/_}
+  key=${key//\//_}
+  key=${key//./_}
   rm -f "$STATE/.paused-$key" "$STATE/.paused-rechecked-$key" "$STATE/.paused-resurfaced-$key"
 }
 
@@ -1598,8 +1605,10 @@ while :; do
           host=$FM_PR_POLL_SNAPSHOT_HOST
           path=$FM_PR_POLL_SNAPSHOT_PATH
           number=$FM_PR_POLL_SNAPSHOT_NUMBER
+          export FM_PR_POLL_TASK_ID="$id"
           run_check_capture "$SCRIPT_DIR/fm-pr-poll.sh" --validated \
             "$provider" "$url" "$host" "$path" "$number" || exit 1
+          unset FM_PR_POLL_TASK_ID
           out=$FM_CHECK_RESULT
         elif fm_custom_check_snapshot_prepare "$STATE" "$id"; then
           custom_snapshot=$FM_CUSTOM_CHECK_SNAPSHOT
@@ -1772,14 +1781,14 @@ EOF
     if ! status_is_paused_or_captain_held "$last" && [ -e "$STATE/.paused-$key" ]; then
       clear_pause_tracking "$key"
     fi
-    # An idle secondmate endpoint is healthy by design, so a mate is admitted to
-    # the pane-stale path ONLY to serve a declared wait's bounded re-surface -
-    # the same declarations pause_state_class reconciles below, which is why this
-    # gate reads the shared predicate rather than the pause verb alone. Narrowing
-    # it to `paused` would leave a mate's captain hold rotting invisibly: the
-    # clear above already spares its pause tracking, but nothing would ever
-    # re-surface it.
-    if [ "$kind" = secondmate ] && ! status_is_paused_or_captain_held "$last"; then
+    # Terminal bounding is gated on the status still being terminal, NOT on the
+    # paused/captain-held predicate: a done: task is neither paused nor captain-held,
+    # so gating on that would clear the throttle every cycle and reintroduce the
+    # churn. Once the status leaves terminal (a resume/promotion), drop the markers.
+    if [ -e "$STATE/.term-$key" ] && ! stale_is_terminal "$w" "$STATE"; then
+      clear_terminal_bounding "$w"
+    fi
+    if [ "$kind" = secondmate ] && ! status_is_paused "$last"; then
       continue
     fi
     tail40=$(fm_backend_capture "$(window_backend "$w")" "$w" 40 "$(window_label "$w")" 2>/dev/null) || continue
@@ -1832,10 +1841,23 @@ EOF
           # over the log) a chance to override before trusting the log.
           if [ "$(cat "$sf" 2>/dev/null || true)" != "$h" ]; then
             if crew_is_provably_working "$(window_to_task "$w" "$STATE")"; then
+              clear_terminal_bounding "$w"
               printf '%s' "$h" > "$sf"
               date +%s > "$ssf"
               clear_write_tracking "$key"
               triage_log "absorbed stale (provably working, overriding a stale captain-relevant status): $w"
+            elif terminal_agent_dead "$w"; then
+              # A confidently exited worker needs no further action. Preserve the
+              # existing bounded cadence for every terminal status.
+              handle_terminal_stale "$w" "$task" "$h" exited
+            elif [ "$(status_line_verb "$last")" = "done" ]; then
+              # The worker TUI is still alive or ambiguous to the liveness probe,
+              # but the authoritative pane signal above says it is idle and its
+              # current status says the task is done. This is a retained-pane case
+              # for verified harnesses such as pi whose process name is ambiguous.
+              # Bound redraw churn without extending suppression to a busy worker
+              # or to a live failure, blocker, or decision.
+              handle_terminal_stale "$w" "$task" "$h" live-idle-done
             else
               fm_wake_append stale "$w" "stale: $w" || exit 1
               printf '%s' "$h" > "$sf"
@@ -1850,6 +1872,10 @@ EOF
               mark_surfaced "$stale_status" "$stale_end" "$stale_ident"
               wake "stale: $w"
             fi
+          elif [ -e "$STATE/.term-$key" ]; then
+            # Same hash, already admitted to terminal bounding: keep the periodic
+            # reconciliation without re-reading crew state every poll.
+            handle_terminal_stale "$w" "$task" "$h"
           elif [ -e "$ssf" ]; then
             # This exact hash was already overridden as provably-working (a
             # wedge timer is running for it) - keep treating it that way

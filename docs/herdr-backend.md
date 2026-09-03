@@ -1,10 +1,8 @@
 # Herdr runtime backend
 
 Herdr is an experimental agent-native terminal backend with native per-pane agent state and push events.
-Firstmate requires Herdr protocol 14 or newer; broad backend verification covers versions 0.7.1, 0.7.3, 0.7.4, 0.7.5, and 0.8.0, while protocol-16 features remain gated by availability.
-Default-on presentation spaces have a higher floor of Herdr 0.8.0 for the reason given under [Presentation spaces](#presentation-spaces).
-Herdr provides the terminal session while Treehouse continues to provide task worktrees.
-[`configuration.md`](configuration.md#runtime-backend-configbackend--fm_backend) owns shared backend selection and metadata semantics.
+Firstmate requires Herdr protocol 14 or newer; broad backend verification covers versions 0.7.1, 0.7.3, 0.7.4, and 0.7.5, while the presentation-projection suite is additionally verified on 0.8.0 protocol 19 and protocol-16 features remain gated by availability.
+Herdr provides the terminal session while [`configuration.md`](configuration.md#runtime-backend-configbackend--fm_backend) owns shared backend and worktree-provider selection plus metadata semantics.
 
 ## Setup
 
@@ -35,57 +33,49 @@ Real harness credential tests remain opt-in rather than part of default CI.
 
 ## Watching and task containers
 
-The ordinary topology puts one task tab per endpoint in the exact workspace of the Firstmate or secondmate that launches it.
-When the launcher has no Herdr workspace to inherit, the adapter maintains one durable home-labeled workspace instead.
-The primary home label is `firstmate`.
-A secondmate home label is `2ndmate-<secondmate-id>`, derived from its validated `.fm-secondmate-home` marker.
-A secondmate launched by the primary receives a narrowly scoped home override during container creation.
+The ordinary flat topology maintains one durable FM-fleet or SM-fleet workspace per project in a home and one task tab per endpoint.
+An ordinary ship or scout resolves `FM-fleet-<n>` when the primary Firstmate creates its parent workspace, or `SM-fleet-<n>` when a second mate creates it.
+The suffix is a stable per-home/project assignment from one serialized registry per prefix in the shared Herdr session, so separate homes and concurrent spawns cannot mint the same label.
+If that transient registry is absent after a restart or reboot, allocation holds the same session lock and advances past the highest restored numeric workspace suffix before publishing a new assignment.
+An unreadable session snapshot, registry, or allocation lock stops the spawn before workspace creation instead of falling back to a legacy home label.
+This is never `<Project>-Fleet`.
+The primary Firstmate workspace defaults to `TheBridge`, where the existing captain tab remains `@TheHelm` and a persistent secondmate agent uses tab `Portside`.
+Spawn placement never renames or closes the existing captain tab.
+[`configuration.md`](configuration.md#runtime-backend-configbackend--fm_backend) owns the local gitignored `config/herdr-layout` fields and their current effect.
+The canonical project key drives both delivery-mode and display Fleet lookup, while the project basename remains the display default unless `data/projects.md` supplies a `fleet=<Display>` alias.
+Generic workspace numbering never replaces that project-facing identity in display metadata.
 
-Attach to the selected named Herdr session and switch to the relevant home workspace to watch its task tabs.
+Attach to the selected named Herdr session and switch to the relevant Fleet or primary workspace to watch its task tabs.
 Routine supervision uses `bin/fm-peek.sh <id>` and `FM_HOME=<home> bin/fm-send.sh <id> '<text>'` without attaching.
 
 Workspace and tab creation use `--no-focus`.
 The first workspace in a completely empty Herdr session must become focused because no prior target exists, but later task creation does not intentionally steal focus.
 
-Herdr does not enforce workspace or tab label uniqueness, so a label can never decide where a worker goes.
+Herdr does not enforce workspace or tab label uniqueness, so a label alone can never resolve an ambiguous placement.
 Herdr 0.7.5 exports `HERDR_ENV`, `HERDR_PANE_ID`, `HERDR_SESSION`, `HERDR_SOCKET_PATH`, `HERDR_TAB_ID`, and `HERDR_WORKSPACE_ID` into every process it manages a pane for, and a Firstmate or secondmate agent's own commands inherit them.
 Older injection shapes are unverified, so a claimed launcher pane without the injected socket identity cannot be trusted.
-With presentation spaces disabled, a crewmate or scout is created in the exact workspace that identity currently resolves to, read live from Herdr rather than from the injected snapshot, so the worker always appears beside the agent that launched it.
-Duplicate labels elsewhere in the session are irrelevant, and the globally focused workspace is never the target.
-A `--secondmate` launch is the deliberate exception: it stands up that secondmate home's own workspace instead of joining the launcher's.
+The adapter resolves a claimed launcher from live pane, tab, workspace, named-session, and socket identity rather than trusting injected workspace snapshots or global focus.
+A stale, contradictory, cross-session, or unreadable claimed identity stops the spawn before any worker endpoint exists.
 
-A claimed parent identity that cannot be resolved exactly stops the spawn before any worker endpoint exists, rather than falling back to a label search.
-That covers a missing or unusable socket identity, a closed or unreadable launcher pane, a pane and tab that disagree about their workspace, a workspace missing from the session, and a pane belonging to another named session or Herdr server.
-
-Firstmate running outside Herdr entirely has no launcher workspace to inherit, so its workers use this home's own labeled workspace, created on first use.
-That path needs the home label to identify exactly one workspace: two workspaces sharing it are an unresolvable placement and refuse rather than adopting either.
-Avoid naming a personal workspace `firstmate` or `2ndmate-<id>` for that reason, and because the adapter cannot distinguish that label collision from its own container.
-An older secondmate workspace using `firstmate-<id>` is not migrated automatically; rename it manually before expecting new tasks or recovery to use it.
-Recovery and list-live still scan the first workspace matching the home label, because they address panes they already recorded rather than choosing where new work goes.
+Project grouping remains authoritative after launcher validation.
+When the exact launcher already belongs to the resolved Fleet or primary workspace, that exact workspace disambiguates duplicate labels.
+When the launcher belongs to another project Fleet, it is validated but does not override the target.
+A secondmate launch targets the configured primary workspace, so an exact Firstmate launcher already there is reused and a Fleet launcher is not.
+If no matching exact launcher selects the target, the target label must identify at most one workspace; duplicate Fleet or primary labels refuse rather than choosing by list order.
+Recovery and list-live may retain first-match label lookup because they inspect already-recorded panes rather than selecting a destination for a new worker.
 
 Existing task operations use recorded endpoint ids and do not move a live task when labels change.
-The per-home workspace is reused while it has task tabs.
+The resolved Fleet or primary workspace is reused while it has task tabs.
 Closing its last tab can remove the workspace, and the next spawn recreates it.
 
 ## Presentation spaces
 
-Each new crewmate or scout is placed in a disposable one-task workspace by default, on Herdr 0.8.0 and newer.
-A home opts out by writing `off` into local gitignored `config/herdr-presentation-spaces`, and forces the projection on by writing `on`.
-An absent file leaves the choice to the version floor below, an empty file and the value `on` are both a deliberate opt-in, values are compared with whitespace stripped and case ignored, and an unrecognized value warns and follows the unconfigured default rather than failing a spawn over a purely visual setting.
-The empty file is the historical presence-based opt-in form, so every home that had already enabled the projection stays enabled with no migration step, and no previously enabled home can be turned off by the default or by the floor.
-A home that never created the file gains the projection at its next Herdr spawn on a supported release; that flip is deliberate, and it reaches only the Herdr backend because no other runtime backend has a projection path.
-
-Projecting each task into its own workspace makes every task cleanup a workspace-emptying removal, which is the only removal shape Herdr's pre-0.8.0 focus defect touches, and the focus-safe removal plan below can only avoid it while the closing pane's shell can be proved lone, childless, and idle.
-A persistent child of that shell - a `gitstatusd`, a `zsh-async` worker, or `direnv` - fails that proof permanently and forces the plain explicit close, which on those releases moves the active workspace for roughly a seventh of a second before the restore backstop pulls it back, once per task cleanup.
-An unconfigured home is therefore projected only on a release at or above the 0.8.0 floor, where every workspace-removal primitive preserves focus and that proof stops being load-bearing.
-Below the floor an unconfigured home uses the ordinary flat per-home layout instead and warns once per home per detected release, naming the running release and the upgrade that restores the projection.
-That one-warning-per-release record is a `state/.herdr-presentation-floor-<release>` marker; deleting it only makes the same warning appear again, and an upgrade or downgrade re-announces itself because the release is part of the key.
-The floor reads both the installed client's protocol and version and the selected named session's server signals while that server is running, requires both applicable releases to pass, and uses only the client when status positively reports no running server because that client will start it.
-The unconfigured default is rechecked after the server is started or adopted and before any presentation journal or workspace is created, while an unreadable server state or release is treated as unsupported rather than guessed at.
-An explicit `on` is honored below the floor, so a home that deliberately opted in is never silently downgraded; it accepts that documented focus move, and the exact prior-tab restore stays its backstop.
-The floor has a single owner, the spawn-time gate, so cleanup for a projection that already exists always runs and never strands a workspace, whatever release the home is on now.
-Upgrading Herdr to 0.8.0 or newer is the fix; writing `off` is the immediate mitigation for a home that cannot upgrade yet.
-The setting is inherited into secondmate homes through the normal configuration-convergence owner, and the default needs no special convergence: the primary's absent file and the secondmate's absent file both mean the same unconfigured default, so leaving it converges a secondmate to that same default rather than turning it off, and only an explicit primary `off` propagates the opt-out.
+Each new crewmate or scout is placed in a disposable one-task workspace by default.
+A home opts out by writing `off` into local gitignored `config/herdr-presentation-spaces`.
+An absent file, an empty file, and the value `on` all keep the projection enabled, values are compared with whitespace stripped and case ignored, and an unrecognized value warns and keeps the projection enabled rather than failing a spawn over a purely visual setting.
+The empty file is the historical presence-based opt-in form, so every home that had already enabled the projection stays enabled with no migration step, and no previously enabled home can be turned off by the default.
+A home that never created the file gains the projection at its next Herdr spawn; that flip is deliberate, and it reaches only the Herdr backend because no other runtime backend has a projection path.
+The setting is inherited into secondmate homes through the normal configuration-convergence owner, and the default needs no special convergence: the primary's absent file and the secondmate's absent file both mean on, so leaving the default converges a secondmate to the same default rather than turning it off, and only an explicit primary `off` propagates the opt-out.
 A secondmate agent itself always stays in its ordinary parent workspace; only children launched by that home are eligible.
 An unconverged opt-out keeps the default projection in that home until convergence.
 
@@ -94,9 +84,11 @@ Only a fresh task with neither metadata nor an existing presentation journal is 
 Firstmate atomically publishes a three-field version 1 journal containing a random 128-bit base64url token before asking Herdr to create anything.
 After the new workspace converges to one exact task endpoint beneath one exact parent workspace id, the journal advances to a version 2 binding that records the physical home, named session, endpoint, parent, and immutable expected labels.
 Another parent with the same presentation label does not prevent publication or participate in restart reclaim.
-The token is visible in the workspace title because Herdr exposes no verified hidden persistent field, but neither token, title, nor journal authorizes send, capture, task ownership, Treehouse return, or general recovery.
+The token is visible in the workspace title because Herdr exposes no verified hidden persistent field, but neither token, title, nor journal authorizes send, capture, task ownership, worktree cleanup, or general recovery.
 
-The owning parent is the launcher's own exact workspace, resolved from the same identity the flat path uses, and falls back to a unique home-label lookup only for a Firstmate outside Herdr.
+The owning parent is the exact resolved FM-fleet or SM-fleet workspace.
+A persistent secondmate agent is never presentation-eligible.
+A validated launcher identity supplies that exact parent when it already belongs to the target; otherwise the target label must resolve uniquely.
 Projected children are never collapsed back into that parent; it is the placement and ordering reference the projection is bound under.
 The normal `fm-<id>` task tab is created in the exact new workspace returned by Herdr.
 Only the exact seeded default tab returned by the same workspace-create response can be pruned.
@@ -105,7 +97,7 @@ An ambiguous response grants no mutation or cleanup authority.
 
 Protocol 16 exposes `workspace.move` over the named session socket but no CLI subcommand.
 `bin/backends/herdr-workspace-move.py` sends only that whitelisted method and verifies the complete returned workspace order.
-Projected children are placed in one contiguous block immediately after their owning home when the session layout, protocol, socket, `python3`, and machine-private per-session lock are all verifiable.
+Projected children are placed in one contiguous block immediately after their owning FM-fleet or SM-fleet parent when the session layout, protocol, socket, `python3`, and machine-private per-session lock are all verifiable.
 Existing legacy child labels may extend an already adjacent block read-only but are never renamed or migrated.
 A foreign, ambiguous, detached, or manually interleaved child makes ordering skip with a warning rather than rewriting the layout.
 
@@ -160,7 +152,7 @@ Operational compromises:
 - A failed journal publication or projected workspace create stops that spawn instead of falling back flat, so a Herdr create failure surfaces as a spawn failure in every Herdr home rather than only in homes that opted in; every earlier degradation on the fresh projected-create path (no session server, contended presentation lock, absent or ambiguous parent) still warns and continues flat.
 - Recovery of an existing presentation journal deliberately refuses the spawn when the shared presentation lock is contended rather than falling back flat, and default-on makes that refusal reachable in any Herdr home.
 - Existing layouts are not force-renamed or rearranged.
-- Missing or ambiguous restart bindings fall back to the ordinary home workspace while the old projection remains untouched.
+- Missing or ambiguous restart bindings fall back to the resolved FM-fleet or SM-fleet workspace while the old projection remains untouched.
 - Crashes, lost responses, failed exact-pane cleanup, or human renames can leave quarantined spaces; session start removes only the exact home-local, uniquely journal-correlated, childless idle-shell shape above.
 - Spaces have no cross-home cleanup path, and a secondmate child can clean up only from its exact home.
 - Every stale-looking space outside that narrow startup proof still requires manual cleanup in Herdr's UI after human inspection.
@@ -181,7 +173,7 @@ Immediately before close, Firstmate rechecks the exact tab, expected seed label,
 A working seed pane is never closed.
 
 This created-versus-adopted gate is a destructive safety boundary.
-A prior label heuristic could adopt a captain-owned workspace named `firstmate` and close its live seed-shaped tab.
+A prior label heuristic could adopt a captain-owned workspace whose label matched the resolved target and close its live seed-shaped tab.
 The current structural gate removes label inference from cleanup authority.
 `tests/fm-backend-herdr-prune-safety-e2e.test.sh` reproduces the collision in an isolated named session and proves the adopted pane remains untouched.
 
@@ -199,6 +191,18 @@ herdr_pane_id=<pane-id>
 A Herdr pane id contains a colon, so the adapter splits `window=` on the first colon only.
 The recorded pane is the operational fast path.
 Workspace and tab ids support verification and cleanup but are not inferred from mutable labels during normal operation.
+
+## Display metadata and SSH agent forwarding
+
+Display metadata is best-effort and never task or agent authority.
+For a newly created task pane, Firstmate reports a deterministic title, `fm_task`, `fm_project`, and `fm_harness` tokens, plus the lowest free positive `<Fleet>-Fleet-N` display name when the pane has no existing display name.
+An existing display name is never overwritten, and metadata reporting never clears or changes native lifecycle state.
+The workspace receives display-only `fleet` and `what` tokens when the installed schema supports them.
+
+Workspace and tab creation forward `SSH_AUTH_SOCK` through Herdr's `--env` surface only when the launching Firstmate process names a live Unix socket.
+This gives the worker access to the captain's already-unlocked agent without copying private keys or passphrases.
+Missing or stale sockets are omitted, preserving the provider's existing environment behavior.
+The reusable Fleet layout, primary workspace layout, and optional presentation layout all use the same creation wrappers.
 
 ## Current transport behavior
 
@@ -255,7 +259,7 @@ A bare shell prompt is never an empty agent composer.
 Away-mode injection proceeds only on an affirmative `empty` result, never on unknown.
 This prevents a dead agent pane from receiving and possibly executing an escalation as shell input.
 
-The current operational envelope starts with U+2063 and `FIRSTMATE_OP: `.
+The current operational envelope starts with U+2063 and `FIRSTMATE_OP:`.
 The separate routed-request carrier uses `[fm-from-firstmate]` plus U+2063.
 U+2063 survives Herdr terminal input as text, unlike the legacy ASCII control separator that could erase the visible routing label.
 `bin/fm-operational-input.sh` owns current operational construction and parsing, and the AFK skill owns legacy away-input compatibility.
@@ -270,7 +274,7 @@ This prevents closing the workspace's last tab before a replacement exists.
 
 The generic Herdr agent-liveness probe reuses the same classifier.
 A structurally gone pane becomes `missing`, a restored agent-less shell becomes `dead`, a registered agent becomes `alive`, and an unexpected read becomes `unreadable`.
-Unlike tmux process-name inspection, native registration can classify Pi without guessing from a generic interpreter name.
+Unlike tmux process-name inspection, native registration can classify Pi and OMP without guessing from a generic interpreter name or Bun process.
 
 The session-start sweep uses this probe.
 Mid-session secondmate agent-process liveness is not implemented because idle secondmates are deliberately exempt from stale-pane escalation and need a separate periodic identity signal.
@@ -299,6 +303,7 @@ Harnesses with native tracked background execution can run the daemon in their t
 Pi has no such mechanism.
 `bin/fm-afk-launch.sh` therefore creates a dedicated unfocused Herdr workspace, runs the daemon there with an explicit supervisor target and backend, records the exact daemon pane, and closes only that pane on stop.
 It never splits the captain's active tab and never uses shell `&`.
+`--no-focus` controls focus rather than pane geometry, so a dedicated workspace avoids shrinking the captain tab.
 Recovery reconciles only the recorded exact id.
 
 On stop, the daemon receives termination while `state/.afk` still exists so its final flush can run, the recorded terminal is closed, and the AFK flag is removed last.
@@ -321,10 +326,11 @@ Tests use thin compatibility wrappers in `tests/herdr-test-safety.sh` and never 
 
 - Herdr remains experimental.
 - Presentation ordering needs protocol 16 and Python and is best-effort only.
-- Mutable labels can collide; they are never placement or destructive authority.
-- A Firstmate outside Herdr cannot resolve a launcher workspace, so a colliding home label refuses new spawns until the collision is cleared.
-- Ghost and placeholder recognition uses ANSI de-emphasis when available; an unstyled glyph row carrying trailing non-idle text fails safely to `unknown`.
-- Mid-session secondmate agent-process liveness is not implemented.
+- Mutable labels can collide; they are never destructive authority, and unresolved duplicate Fleet or primary labels refuse new spawns.
+- Ghost and placeholder recognition depends on ANSI de-emphasis and fails safely to pending when unavailable.
+- Mid-session secondmate liveness is not implemented.
+- OpenCode 1.18.4 can accept Enter while busy without clearing the composer.
+  The tmux backend has a busy-queue fallback, but Herdr still reports this case as submit pending and needs a separate adapter fix.
 - Only tmux and Herdr can host the away-mode supervisor terminal.
 
 ## Regression entry points

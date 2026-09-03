@@ -127,16 +127,24 @@ resolve_permissive_tmux_kill_ref() {
 
 # --- shared: a pre-refactor bin/ shim --------------------------------------
 #
-# build_old_bin echoes a directory whose bin/ subdir is the complete bin/ tree
-# from BASE_REF.
-# Materializing the whole historical tree keeps every entrypoint and sourced
-# sibling on the same revision, while avoiding a hand-maintained dependency
-# list that can omit a newly sourced helper and make the old process abort
-# before it reaches the behavior under test.
-# FM_ROOT_OVERRIDE pointed at this dir's root makes
-# "$FM_ROOT/bin/fm-project-mode.sh" (etc.) resolve correctly.
-# The teardown conformance case applies its explicitly historical tmux adapter
-# after this complete baseline has been materialized.
+# build_old_bin echoes a directory whose bin/ subdir holds the PRE-REFACTOR
+# fm-send.sh, fm-peek.sh, fm-watch.sh, fm-spawn.sh, fm-teardown.sh, and any
+# changed source-library dependency (all extracted from BASE_REF), plus copies
+# of every OTHER sibling script those five entrypoints source, so those copies are exactly
+# what BASE_REF would have used too. Copies keep BASH_SOURCE-based sibling
+# resolution inside the synthetic tree on both macOS and Linux; symlinks make
+# that resolution shell/platform-dependent. FM_ROOT_OVERRIDE pointed at this dir's
+# root makes "$FM_ROOT/bin/fm-project-mode.sh" (etc.) resolve correctly.
+# fm-backend.sh (and its bin/backends/ adapters) is the dispatcher every one
+# of the five REFACTORED scripts sources; it must be a real, reachable file in
+# the old bin/ too or `. "$SCRIPT_DIR/fm-backend.sh"` aborts under set -eu -
+# hence the dispatcher is a copied sibling, while the tmux adapter is extracted
+# from BASE_REF so conformance tests retain the exact historical behavior even
+# when this branch changes tmux dispatch semantics.
+OLD_BIN_UNCHANGED_SIBLINGS="fm-gate-refuse-lib.sh fm-guard.sh fm-lock-lib.sh fm-session-lock-lib.sh fm-tasks-axi-lib.sh fm-pr-lib.sh fm-tangle-lib.sh fm-worktree-lib.sh fm-tmux-lib.sh fm-composer-lib.sh fm-wake-lib.sh fm-classify-lib.sh fm-supervision-lib.sh fm-ff-lib.sh fm-config-inherit-lib.sh fm-project-mode.sh fm-harness.sh fm-crew-state.sh fm-nm-run-lib.sh fm-decision-hold.sh fm-backend.sh fm-operational-input.sh fm-public-followup-lib.sh fm-secondmate-registry-lib.sh fm-secondmate-parent-lib.sh fm-x-lib.sh"
+# A pull-request merge may add a new main-only dependency that the branch's older baseline does not have yet.
+OLD_BIN_OPTIONAL_SIBLINGS="fm-pending-reply-lib.sh"
+OLD_BIN_REFACTORED="fm-send.sh fm-peek.sh fm-watch.sh fm-spawn.sh fm-teardown.sh fm-marker-lib.sh"
 
 build_old_bin() {  # <name> -> echoes root dir (root/bin/<script> is the entry point)
   local name=$1 root archive
@@ -968,10 +976,11 @@ test_teardown_conformance_old_vs_new() {
 
   fm_write_meta "$state_old/$id.meta" \
     "window=firstmate:fm-$id" "worktree=$wt" "project=$proj" "harness=claude" "kind=scout" "mode=no-mistakes" "yolo=off" \
-    "decisions_reviewed=1" "decision_keys="
+    "decisions_reviewed=1" "decision_keys=" "worktree_owner_token=fmw.AAAAAAAAAAAA"
   fm_write_meta "$state_new/$id.meta" \
     "window=firstmate:fm-$id" "worktree=$wt" "project=$proj" "harness=claude" "kind=scout" "mode=no-mistakes" "yolo=off" \
-    "decisions_reviewed=1" "decision_keys="
+    "decisions_reviewed=1" "decision_keys=" "worktree_owner_token=fmw.AAAAAAAAAAAA"
+  printf 'version=1\ntask_id=%s\ntoken=fmw.AAAAAAAAAAAA\n' "$id" > "$wt/.fm-worktree-owner"
   touch "$state_old/.last-watcher-beat" "$state_new/.last-watcher-beat"
 
   log_old="$TMP_ROOT/teardown-old.log"; log_new="$TMP_ROOT/teardown-new.log"

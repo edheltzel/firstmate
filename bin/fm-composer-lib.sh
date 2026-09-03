@@ -17,25 +17,15 @@
 # shape is taught to fm_composer_classify_screen below, once, and every backend
 # that can capture a screen learns it in the same commit.
 #
-# THE CAPABILITY MODEL: adapters differ in what their capture primitive can
-# see, and those differences enter here as DATA (the <caps> argument), never as
-# adapter code. Capability differences change how CONFIDENTLY a shape can be
-# judged; they never change what the shapes ARE:
-#   styled=1    the capture preserves ANSI styling, so ghost/placeholder text
-#               is detectable and can be stripped (tmux -e, herdr --format
-#               ansi, zellij dump-screen --ansi). With styled=0 (cmux, orca)
-#               ghost text is unreadable, so a bare glyph row or left-bar row
-#               carrying trailing non-idle text degrades to `unknown` rather
-#               than `pending`: the text may be the harness's own idle
-#               suggestion, and a false `pending` blocks every safe caller.
-#   cursor=1    a cursor row is supplied (tmux #{cursor_y} only). The cursor
-#               anchors shape selection: the shape containing the cursor is the
-#               composer. Without it, the bottom-most shape wins.
-#   identity=1  a native agent identity/state probe exists (herdr `agent get`;
-#               the tmux pi foreground-process probe). Identity is what makes
-#               Pi's blank separated composer provable; with identity=0 that
-#               shape stays `unknown`.
-#   rows=<n>    the capture's bounded row count (informational).
+# THE SAFETY RULE this owner enforces: a bare shell prompt glyph is a genuine
+# empty agent composer ONLY when it appears INSIDE a real agent-composer
+# container - a bordered composer box, where the harness draws its own prompt
+# glyph (e.g. claude's older `| > ... |`). OMP has no prompt glyph or ghost
+# placeholder: its live input row is the exact rounded `╰─ ... ─╯` container,
+# which adapters strip and pass here with `<bordered>=1`. On a bare, unstructured
+# row a shell glyph is NEVER "empty"; it classifies as `unknown` (not a safe
+# injection target). The AGENT prompt glyphs `❯` (claude) and `›` (codex) are a
+# genuine empty agent composer either way, bordered or bare.
 #
 # THE STRICT BLANK-ROW RULE (captain decision blank-row-injection-posture,
 # 2026-08-09): a blank or otherwise unidentified input row with no positive

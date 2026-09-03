@@ -5,12 +5,10 @@
 #   fm-remote-home-provision.sh < manifest
 #
 # Manifest schema fm-remote-home-provision.v1 carries a base64 charter, the
-# base64 parent SSH alias, and one base64 project record per line. Each project
-# record's origin is the URL the parent resolved and named, so this host clones
-# from it and re-validates it through bin/fm-project-origin-lib.sh instead of
-# trusting the sender. The remote code root is cloned into an absent home,
-# project origins are cloned on this host, the project registry and charter are
-# published, the durable .fm-secondmate-parent record names this home's route to its parent as
+# base64 parent SSH alias, and one base64 project record per line. The remote
+# code root is cloned into an absent home, project origins are cloned on this
+# host, the project registry and charter are published, the durable
+# .fm-secondmate-parent record names this home's route to its parent as
 # "remote" - read by bin/fm-teardown.sh's cleanup gate so a delegated public
 # reply promise, which the subsystem can only carry on the parent's own
 # filesystem, is never mistaken for one this child could hold - and the

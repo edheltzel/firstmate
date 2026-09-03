@@ -15,6 +15,7 @@ pass() { printf 'ok - %s\n' "$1"; }
 command -v herdr >/dev/null 2>&1 || { echo "skip: herdr not found"; exit 0; }
 command -v jq >/dev/null 2>&1 || { echo "skip: jq not found"; exit 0; }
 command -v treehouse >/dev/null 2>&1 || { echo "skip: treehouse not found"; exit 0; }
+export FM_WORKTREE_PROVIDER=treehouse
 [ -x "$HERDR_LAB_HELPER" ] || { echo "skip: Herdr lab helper not executable at $HERDR_LAB_HELPER"; exit 0; }
 
 REAL_HERDR=$(command -v herdr)
@@ -436,7 +437,7 @@ normalize_meta() {  # <meta>
     -e 's|^herdr_workspace_id=.*$|herdr_workspace_id=<herdr-container-id>|' \
     -e 's|^herdr_tab_id=.*$|herdr_tab_id=<herdr-container-id>|' \
     -e 's|^herdr_pane_id=.*$|herdr_pane_id=<herdr-container-id>|' \
-    -e 's|^spawn_gen=.*$|spawn_gen=<spawn-incarnation>|' \
+    -e 's|^worktree_owner_token=.*$|worktree_owner_token=<per-spawn-token>|' \
     "$1"
 }
 
@@ -504,93 +505,70 @@ printf 'Projection abort fixture B.\n' > "$HOME_DIR/data/abort-b/brief.md"
 printf 'Projection lock contention fixture.\n' > "$HOME_DIR/data/lock-contended/brief.md"
 printf 'Projection default-on fixture.\n' > "$HOME_DIR/data/default-on/brief.md"
 make_project "$PROJECT_DIR"
+PROJECT_FLEET="FM-fleet-1"
+SM_FLEET="SM-fleet-1"
+SM_FLEET_B="SM-fleet-2"
+ARCHON_ALPHA=Archon-alpha
+ARCHON_BRAVO=Archon-bravo
 
-# Keep one ordinary primary task live so the durable firstmate workspace is
+# Keep one ordinary primary task live so the durable project Fleet workspace is
 # first and remains present while disposable workers are projected around it.
 spawn_task anchor "$HOME_DIR" "$PROJECT_DIR" > "$TMP_ROOT/anchor.out" 2> "$TMP_ROOT/anchor.err" \
   || fail "opted-out anchor spawn failed: $(cat "$TMP_ROOT/anchor.err")"
 ANCHOR_META="$HOME_DIR/state/anchor.meta"
 remember_meta_worktree "$ANCHOR_META" >/dev/null
 FIRSTMATE_WSID=$(grep '^herdr_workspace_id=' "$ANCHOR_META" | cut -d= -f2-)
-[ -n "$FIRSTMATE_WSID" ] || fail "anchor metadata did not record the firstmate workspace"
+[ -n "$FIRSTMATE_WSID" ] || fail "anchor metadata did not record the project Fleet workspace"
 
 # The same task id and project run once opted out and once projected, so
-# Treehouse commands and metadata can be compared after normalizing endpoint
-# IDs and the deliberately fresh per-spawn incarnation.
+# Treehouse commands and metadata can be compared directly.
 : > "$TREEHOUSE_CALL_LOG"
-OFF_HERDR_START=$(log_line_count)
 OFF_MOVE_START=$(wc -l < "$MOVE_CALL_LOG" | tr -d '[:space:]')
 spawn_task shape "$HOME_DIR" "$PROJECT_DIR" > "$TMP_ROOT/off.out" 2> "$TMP_ROOT/off.err" \
   || fail "opted-out spawn failed: $(cat "$TMP_ROOT/off.err")"
-OFF_HERDR_END=$(log_line_count)
 OFF_META="$TMP_ROOT/off.meta"
 cp "$HOME_DIR/state/shape.meta" "$OFF_META"
 OFF_WT=$(remember_meta_worktree "$OFF_META")
 cp "$TREEHOUSE_CALL_LOG" "$TMP_ROOT/off-treehouse.log"
 [ "$(wc -l < "$MOVE_CALL_LOG" | tr -d '[:space:]')" = "$OFF_MOVE_START" ] \
   || fail "opted-out spawn invoked the presentation-only workspace mover"
-OFF_HERDR_CALLS=$(sed -n "$((OFF_HERDR_START + 1)),${OFF_HERDR_END}p" "$HERDR_CALL_LOG")
-if printf '%s\n' "$OFF_HERDR_CALLS" | grep -E $'^(api\tschema|session\tlist)' >/dev/null 2>&1; then
-  fail "opted-out spawn added presentation-ordering capability or socket calls"
-fi
-pass "real Herdr lab: an opted-out spawn retains the Stage 1 Herdr command sequence with zero ordering calls"
+# A flat spawn may read the named-session socket while resolving its durable
+# fleet namespace. The presentation-only mutation remains workspace.move,
+# whose absence is asserted above.
+pass "real Herdr lab: an opted-out spawn retains the flat Herdr path with zero presentation mutations"
 teardown_task shape "$HOME_DIR" > "$TMP_ROOT/off-teardown.out" 2> "$TMP_ROOT/off-teardown.err" \
   || fail "opted-out teardown failed: $(cat "$TMP_ROOT/off-teardown.err")"
 
-# A home that configured nothing at all follows the version floor: it is
-# projected on a release at or above it, and takes the ordinary flat layout with
-# one naming warning below it. The only difference from the opted-out spawn
-# above is the removed file, so this case is the floor's live end-user proof on
-# whichever Herdr this lab is running.
+# A home that configured nothing at all must be projected: this is the default,
+# and the only difference from the opted-out spawn above is the removed file.
 rm -f "$HOME_DIR/config/herdr-presentation-spaces"
-FLOOR_STATUS=$(lab status --json) || fail 'could not read the lab release for the presentation floor'
-FLOOR_VERSION=$(printf '%s' "$FLOOR_STATUS" | jq -r 'if .server.running then .server.version else .client.version end')
-FLOOR_PROTOCOL=$(printf '%s' "$FLOOR_STATUS" | jq -r 'if .server.running then .server.protocol else .client.protocol end')
-FLOOR_VERDICT=$(bash -c '
-  . "$0/bin/backends/herdr.sh"
-  status=0
-  fm_backend_herdr_release_floor_verdict "$1" "$2" || status=$?
-  printf "%s\n" "$status"
-' "$ROOT" "$FLOOR_PROTOCOL" "$FLOOR_VERSION")
-[ "$FLOOR_VERDICT" = 0 ] || [ "$FLOOR_VERDICT" = 1 ] \
-  || fail "herdr $FLOOR_VERSION protocol $FLOOR_PROTOCOL could not be classified against the presentation floor"
 spawn_task default-on "$HOME_DIR" "$PROJECT_DIR" > "$TMP_ROOT/default-on.out" 2> "$TMP_ROOT/default-on.err" \
   || fail "default-on spawn failed: $(cat "$TMP_ROOT/default-on.err")"
 DEFAULT_ON_META="$HOME_DIR/state/default-on.meta"
 remember_meta_worktree "$DEFAULT_ON_META" >/dev/null
 DEFAULT_ON_JOURNAL="$HOME_DIR/state/default-on.herdr-presentation"
+[ -f "$DEFAULT_ON_JOURNAL" ] \
+  || fail "an unconfigured home did not publish a presentation journal by default"
+DEFAULT_ON_TOKEN=$(grep '^projection_id=' "$DEFAULT_ON_JOURNAL" | cut -d= -f2-)
 DEFAULT_ON_WSID=$(grep '^herdr_workspace_id=' "$DEFAULT_ON_META" | cut -d= -f2-)
-if [ "$FLOOR_VERDICT" = 0 ]; then
-  [ -f "$DEFAULT_ON_JOURNAL" ] \
-    || fail "an unconfigured home did not publish a presentation journal on supported herdr $FLOOR_VERSION"
-  DEFAULT_ON_TOKEN=$(grep '^projection_id=' "$DEFAULT_ON_JOURNAL" | cut -d= -f2-)
-  [ -n "$DEFAULT_ON_WSID" ] && [ "$DEFAULT_ON_WSID" != "$FIRSTMATE_WSID" ] \
-    || fail "an unconfigured home reused the flat firstmate workspace instead of projecting"
-  DEFAULT_ON_LABEL=$(lab workspace get "$DEFAULT_ON_WSID" | jq -r '.result.workspace.label // empty')
-  [ "$DEFAULT_ON_LABEL" = "└ default-on · p:$DEFAULT_ON_TOKEN" ] \
-    || fail "default-on projection used an unexpected workspace label: $DEFAULT_ON_LABEL"
-  pass "real Herdr lab: a home that configured nothing is projected by default on herdr $FLOOR_VERSION"
-else
-  [ ! -e "$DEFAULT_ON_JOURNAL" ] \
-    || fail "an unconfigured home published a presentation journal on below-floor herdr $FLOOR_VERSION"
-  [ "$DEFAULT_ON_WSID" = "$FIRSTMATE_WSID" ] \
-    || fail "an unconfigured home did not land in the flat firstmate workspace on below-floor herdr $FLOOR_VERSION (got '${DEFAULT_ON_WSID:-<empty>}')"
-  grep -q "$FLOOR_VERSION" "$TMP_ROOT/default-on.err" \
-    || fail "the below-floor fallback did not name herdr $FLOOR_VERSION: $(cat "$TMP_ROOT/default-on.err")"
-  pass "real Herdr lab: a home that configured nothing falls back flat on below-floor herdr $FLOOR_VERSION with one naming warning"
-fi
+[ -n "$DEFAULT_ON_WSID" ] && [ "$DEFAULT_ON_WSID" != "$FIRSTMATE_WSID" ] \
+  || fail "an unconfigured home reused the flat firstmate workspace instead of projecting"
+DEFAULT_ON_LABEL=$(lab workspace get "$DEFAULT_ON_WSID" | jq -r '.result.workspace.label // empty')
+[ "$DEFAULT_ON_LABEL" = "└ default-on · p:$DEFAULT_ON_TOKEN" ] \
+  || fail "default-on projection used an unexpected workspace label: $DEFAULT_ON_LABEL"
+pass "real Herdr lab: a home that configured nothing is projected by default"
 teardown_task default-on "$HOME_DIR" > "$TMP_ROOT/default-on-teardown.out" 2> "$TMP_ROOT/default-on-teardown.err" \
   || fail "default-on teardown failed: $(cat "$TMP_ROOT/default-on-teardown.err")"
-if [ "$FLOOR_VERDICT" = 0 ] && lab workspace get "$DEFAULT_ON_WSID" >/dev/null 2>&1; then
+if lab workspace get "$DEFAULT_ON_WSID" >/dev/null 2>&1; then
   fail "default-on teardown left its disposable workspace behind"
 fi
 # The ordering scenarios below read the whole move log cumulatively against the
 # projected workspaces that are still live, so this retired one starts them clean.
 : > "$MOVE_CALL_LOG"
 
-SECOND_ONE_OUT=$(lab workspace create --cwd "$PROJECT_DIR" --label 2ndmate-alpha --no-focus) \
+SECOND_ONE_OUT=$(lab workspace create --cwd "$PROJECT_DIR" --label "$ARCHON_ALPHA" --no-focus) \
   || fail "could not create the first secondmate presentation fixture"
-SECOND_TWO_OUT=$(lab workspace create --cwd "$PROJECT_DIR" --label 2ndmate-bravo --focus) \
+SECOND_TWO_OUT=$(lab workspace create --cwd "$PROJECT_DIR" --label "$ARCHON_BRAVO" --focus) \
   || fail "could not create the focused secondmate presentation fixture"
 SECOND_ONE_WSID=$(printf '%s' "$SECOND_ONE_OUT" | jq -r '.result.workspace.workspace_id // empty')
 SECOND_TWO_WSID=$(printf '%s' "$SECOND_TWO_OUT" | jq -r '.result.workspace.workspace_id // empty')
@@ -725,14 +703,15 @@ LOCK_CONTENTION_META="$HOME_DIR/state/lock-contended.meta"
 remember_meta_worktree "$LOCK_CONTENTION_META" >/dev/null
 LOCK_CONTENTION_WSID=$(grep '^herdr_workspace_id=' "$LOCK_CONTENTION_META" | cut -d= -f2-)
 [ "$LOCK_CONTENTION_WSID" = "$FIRSTMATE_WSID" ] \
-  || fail "bounded lock contention did not use the ordinary flat firstmate workspace"
+  || fail "bounded lock contention did not use the ordinary flat project Fleet workspace"
 [ ! -e "$HOME_DIR/state/lock-contended.herdr-presentation" ] \
   || fail "bounded lock contention published a projection journal"
 LOCK_CONTENTION_CALLS=$(sed -n "$((LOCK_CONTENTION_START + 1)),\$p" "$HERDR_CALL_LOG")
 # session list is required to resolve the shared session lock path before the
-# bounded acquire attempt; it must not unlock projection create or move.
-if printf '%s\n' "$LOCK_CONTENTION_CALLS" | grep -E $'^(workspace\tcreate|pane\tclose|api\tschema)' >/dev/null 2>&1; then
-  fail "bounded lock contention performed an unlocked projection mutation or ordering capability call"
+# bounded acquire attempt, and API schema reads support flat display metadata.
+# Neither capability read may unlock projection create or move.
+if printf '%s\n' "$LOCK_CONTENTION_CALLS" | grep -E $'^(workspace\tcreate|pane\tclose)' >/dev/null 2>&1; then
+  fail "bounded lock contention performed an unlocked projection mutation"
 fi
 [ "$(wc -l < "$MOVE_CALL_LOG" | tr -d '[:space:]')" = "$LOCK_CONTENTION_MOVE_START" ] \
   || fail "bounded lock contention invoked workspace.move"
@@ -773,12 +752,12 @@ remember_meta_worktree "$ORDER_B_META" >/dev/null
 
 ORDER_LIST=$(lab workspace list) || fail "could not inspect concurrent presentation ordering"
 CREATED_LABELS=$(projection_labels_from_log "$PROJECTION_ORDER_START")
-EXPECTED_LABELS=$(printf 'firstmate\n%s\n%s\n2ndmate-alpha\n2ndmate-bravo' "$PROJECTED_LABEL" "$CREATED_LABELS")
+EXPECTED_LABELS=$(printf '%s\n%s\n%s\n%s\n%s' "$PROJECT_FLEET" "$PROJECTED_LABEL" "$CREATED_LABELS" "$ARCHON_ALPHA" "$ARCHON_BRAVO")
 ACTUAL_LABELS=$(printf '%s' "$ORDER_LIST" | jq -r '.result.workspaces[].label')
-[ "$ACTUAL_LABELS" = "$EXPECTED_LABELS" ] || fail "workspace order was not firstmate, stable primary block, secondmates: $ACTUAL_LABELS"
+[ "$ACTUAL_LABELS" = "$EXPECTED_LABELS" ] || fail "workspace order was not the project Fleet, stable projected block, and Archon parents: $ACTUAL_LABELS"
 PRIMARY_IDS=$(printf '%s' "$ORDER_LIST" | jq -r '
   .result.workspaces[]
-  | select((.label | startswith("└ ")) or (.label | startswith("firstmate/")))
+  | select(.label | startswith("└ "))
   | .workspace_id
 ')
 MOVE_TARGETS=$(cut -f2 "$MOVE_CALL_LOG")
@@ -787,7 +766,7 @@ MOVE_TARGETS=$(cut -f2 "$MOVE_CALL_LOG")
 MOVE_INDEXES=$(cut -f3 "$MOVE_CALL_LOG")
 [ "$MOVE_INDEXES" = $'1\n2\n3' ] \
   || fail "concurrent primary workers did not append stably to the contiguous block: $MOVE_INDEXES"
-SECOND_ORDER_AFTER=$(printf '%s' "$ORDER_LIST" | jq -r '.result.workspaces[] | select(.label | startswith("2ndmate-")) | .workspace_id')
+SECOND_ORDER_AFTER=$(printf '%s' "$ORDER_LIST" | jq -r --arg a "$ARCHON_ALPHA" --arg b "$ARCHON_BRAVO" '.result.workspaces[] | select(.label == $a or .label == $b) | .workspace_id')
 [ "$SECOND_ORDER_AFTER" = "$SECOND_ORDER_BEFORE" ] \
   || fail "primary workspace ordering changed secondmate relative order"
 [ "$(lab workspace get "$SECOND_TWO_WSID" | jq -r '.result.workspace.focused')" = true ] \
@@ -927,11 +906,11 @@ for ROUND in 1 2 3; do
   assert_focus_is "$CAPTAIN_FOCUS" "focus wave $ROUND concurrent spawns"
   assert_raw_presentation_mutations_preserved_since "$WAVE_FOCUS_START" "focus wave $ROUND concurrent spawns"
   WAVE_LABELS=$(projection_labels_from_log "$WAVE_LOG_START")
-  WAVE_EXPECTED=$(printf 'firstmate\n%s\n2ndmate-alpha\n2ndmate-bravo' "$WAVE_LABELS")
-  WAVE_ACTUAL=$(lab workspace list | jq -r '.result.workspaces[] | select(.label == "firstmate" or (.label | startswith("└ ")) or (.label | startswith("2ndmate-"))) | .label')
+  WAVE_EXPECTED=$(printf '%s\n%s\n%s\n%s' "$PROJECT_FLEET" "$WAVE_LABELS" "$ARCHON_ALPHA" "$ARCHON_BRAVO")
+  WAVE_ACTUAL=$(lab workspace list | jq -r --arg fleet "$PROJECT_FLEET" --arg a "$ARCHON_ALPHA" --arg b "$ARCHON_BRAVO" '.result.workspaces[] | select(.label == $fleet or (.label | startswith("└ ")) or .label == $a or .label == $b) | .label')
   [ "$WAVE_ACTUAL" = "$WAVE_EXPECTED" ] \
     || fail "focus wave $ROUND lost stable contiguous ordering: $WAVE_ACTUAL"
-  WAVE_SECOND_ORDER=$(lab workspace list | jq -r '.result.workspaces[] | select(.label | startswith("2ndmate-")) | .workspace_id')
+  WAVE_SECOND_ORDER=$(lab workspace list | jq -r --arg a "$ARCHON_ALPHA" --arg b "$ARCHON_BRAVO" '.result.workspaces[] | select(.label == $a or .label == $b) | .workspace_id')
   [ "$WAVE_SECOND_ORDER" = "$SECOND_ORDER_BEFORE" ] \
     || fail "focus wave $ROUND changed secondmate relative order"
 
@@ -945,7 +924,7 @@ for ROUND in 1 2 3; do
   finish_concurrent_teardown "focus-$ROUND-b" "$WAVE_B_TEARDOWN_STATUS" "$TMP_ROOT/focus-$ROUND-b-teardown.out" "$TMP_ROOT/focus-$ROUND-b-teardown.err"
   assert_focus_is "$CAPTAIN_FOCUS" "focus wave $ROUND concurrent teardowns"
   WAVE_REMAINING=$(lab workspace list | jq -r '.result.workspaces[].label')
-  [ "$WAVE_REMAINING" = $'firstmate\n2ndmate-alpha\n2ndmate-bravo' ] \
+  [ "$WAVE_REMAINING" = "$PROJECT_FLEET"$'\n'"$ARCHON_ALPHA"$'\n'"$ARCHON_BRAVO" ] \
     || fail "focus wave $ROUND cleanup left a projected workspace behind: $WAVE_REMAINING"
 done
 pass "real Herdr lab: three repeated concurrent create/order/cleanup waves have zero active workspace or tab drift"
@@ -995,8 +974,8 @@ SECOND_META="$HOME_DIR/state/alpha.meta"
   || fail "secondmate spawn did not record kind=secondmate"
 SECOND_WSID=$(grep '^herdr_workspace_id=' "$SECOND_META" | cut -d= -f2-)
 SECOND_LABEL=$(lab workspace get "$SECOND_WSID" | jq -r '.result.workspace.label')
-[ "$SECOND_LABEL" = 2ndmate-alpha ] \
-  || fail "secondmate spawn did not use its flat parent workspace: $SECOND_LABEL"
+[ "$SECOND_LABEL" = "TheBridge" ] \
+  || fail "secondmate spawn did not use TheBridge: $SECOND_LABEL"
 [ -z "$(projection_labels_from_log "$SECOND_SPAWN_LOG_START")" ] \
   || fail "secondmate spawn created a corner projection workspace"
 if sed -n "$((SECOND_SPAWN_LOG_START + 1)),\$p" "$HERDR_CALL_LOG" \
@@ -1015,7 +994,8 @@ propagate_inheritable_config "$HOME_DIR/config" "$SECOND_HOME_B/config" \
   || fail "primary presentation setting did not reach secondmate B"
 pass "real Herdr lab: the primary presentation setting inherits into real secondmate homes"
 
-# Keep the pre-existing 2ndmate-alpha/bravo workspaces as owning parents and captain focus.
+# Keep the pre-existing legacy Archon-alpha/bravo workspaces as foreign ordering
+# sentinels and captain focus; new spawn paths never select them as parents.
 assert_focus_is "$CAPTAIN_FOCUS" "multi-home captain focus"
 
 mkdir -p "$SECOND_HOME_A/data/a1" "$SECOND_HOME_A/data/a2" \
@@ -1059,29 +1039,23 @@ B1_LABEL=$(lab workspace get "$(grep '^herdr_workspace_id=' "$SECOND_HOME_B/stat
 B2_LABEL=$(lab workspace get "$(grep '^herdr_workspace_id=' "$SECOND_HOME_B/state/b2.meta" | cut -d= -f2-)" | jq -r '.result.workspace.label')
 case "$P1_LABEL" in $'└ p1 · p:'*) ;; *) fail "primary p1 label wrong: $P1_LABEL" ;; esac
 case "$P2_LABEL" in $'└ p2 · p:'*) ;; *) fail "primary p2 label wrong: $P2_LABEL" ;; esac
-case "$A1_LABEL" in $'└ a1 · p:'*) ;; *) fail "secondmate A a1 label wrong: $A1_LABEL" ;; esac
+case "$A1_LABEL" in "$SM_FLEET") ;; *) fail "secondmate A a1 parent label wrong: $A1_LABEL" ;; esac
 case "$A2_LABEL" in $'└ a2 · p:'*) ;; *) fail "secondmate A a2 label wrong: $A2_LABEL" ;; esac
-case "$B1_LABEL" in $'└ b1 · p:'*) ;; *) fail "secondmate B b1 label wrong: $B1_LABEL" ;; esac
+case "$B1_LABEL" in "$SM_FLEET_B") ;; *) fail "secondmate B b1 parent label wrong: $B1_LABEL" ;; esac
 case "$B2_LABEL" in $'└ b2 · p:'*) ;; *) fail "secondmate B b2 label wrong: $B2_LABEL" ;; esac
 
 MULTI_LIST=$(lab workspace list) || fail "could not list multi-home topology"
-MULTI_LABELS=$(printf '%s' "$MULTI_LIST" | jq -r '
+MULTI_LABELS=$(printf '%s' "$MULTI_LIST" | jq -r --arg fleet "$PROJECT_FLEET" --arg sm_a "$SM_FLEET" --arg sm_b "$SM_FLEET_B" --arg a "$ARCHON_ALPHA" --arg b "$ARCHON_BRAVO" '
   .result.workspaces[]
-  | select(
-      .label == "firstmate"
-      or .label == "2ndmate-alpha"
-      or .label == "2ndmate-bravo"
-      or (.label | startswith("└ "))
-    )
+  | select(.label == $fleet or .label == $sm_a or .label == $sm_b or .label == $a or .label == $b or (.label | startswith("└ ")))
   | .label
 ')
 MULTI_EXPECTED=$(printf '%s\n' \
-  firstmate "$P1_LABEL" "$P2_LABEL" \
-  2ndmate-alpha "$A1_LABEL" "$A2_LABEL" \
-  2ndmate-bravo "$B1_LABEL" "$B2_LABEL")
+  "$PROJECT_FLEET" "$P1_LABEL" "$P2_LABEL" "$ARCHON_ALPHA" "$ARCHON_BRAVO" \
+  "$A1_LABEL" "$A2_LABEL" "$B1_LABEL" "$B2_LABEL")
 [ "$MULTI_LABELS" = "$MULTI_EXPECTED" ] \
-  || fail "multi-home topology was not owning-parent grouped: $MULTI_LABELS"
-pass "real Herdr lab: primary and two secondmate homes each own a top-level contiguous child block"
+  || fail "multi-home topology did not keep each home's children under its numbered fleet parent: $MULTI_LABELS"
+pass "real Herdr lab: each home keeps its presentation children under its numbered fleet parent"
 
 # Concurrent cross-home wave under the one session lock.
 mkdir -p "$HOME_DIR/data/pcw" "$SECOND_HOME_A/data/acw" "$SECOND_HOME_B/data/bcw"
@@ -1104,20 +1078,20 @@ remember_meta_worktree "$SECOND_HOME_B/state/bcw.meta" >/dev/null
 assert_focus_is "$CAPTAIN_FOCUS" "cross-home concurrent wave"
 assert_raw_presentation_mutations_preserved_since "$WAVE_CROSS_FOCUS" "cross-home concurrent wave"
 CROSS_LIST=$(lab workspace list)
-printf '%s' "$CROSS_LIST" | jq -e '
-  ([.result.workspaces[].label] | index("firstmate")) as $fm
-  | ([.result.workspaces[].label] | index("2ndmate-alpha")) as $a
-  | ([.result.workspaces[].label] | index("2ndmate-bravo")) as $b
-  | $fm != null and $a != null and $b != null
-  and $fm < $a and $a < $b
+printf '%s' "$CROSS_LIST" | jq -e --arg fleet "$PROJECT_FLEET" --arg a "$ARCHON_ALPHA" --arg b "$ARCHON_BRAVO" '
+  ([.result.workspaces[].label] | index($fleet)) as $fleet_index
+  | ([.result.workspaces[].label] | index($a)) as $a_index
+  | ([.result.workspaces[].label] | index($b)) as $b_index
+  | $fleet_index != null and $a_index != null and $b_index != null
+  and $fleet_index < $a_index and $a_index < $b_index
 ' >/dev/null 2>&1 || fail "cross-home concurrent wave reordered parents"
 PCW_LABEL=$(lab workspace get "$(grep '^herdr_workspace_id=' "$HOME_DIR/state/pcw.meta" | cut -d= -f2-)" | jq -r '.result.workspace.label')
 ACW_LABEL=$(lab workspace get "$(grep '^herdr_workspace_id=' "$SECOND_HOME_A/state/acw.meta" | cut -d= -f2-)" | jq -r '.result.workspace.label')
 BCW_LABEL=$(lab workspace get "$(grep '^herdr_workspace_id=' "$SECOND_HOME_B/state/bcw.meta" | cut -d= -f2-)" | jq -r '.result.workspace.label')
-case "$PCW_LABEL" in $'└ pcw · p:'*|firstmate) ;; *) fail "cross-home primary label wrong: $PCW_LABEL" ;; esac
-case "$ACW_LABEL" in $'└ acw · p:'*|2ndmate-alpha) ;; *) fail "cross-home A label wrong: $ACW_LABEL" ;; esac
-case "$BCW_LABEL" in $'└ bcw · p:'*|2ndmate-bravo) ;; *) fail "cross-home B label wrong: $BCW_LABEL" ;; esac
-pass "real Herdr lab: concurrent primary/A/B spawns preserve parent order and exact focus"
+case "$PCW_LABEL" in $'└ pcw · p:'*|"$PROJECT_FLEET") ;; *) fail "cross-home primary label wrong: $PCW_LABEL" ;; esac
+case "$ACW_LABEL" in $'└ acw · p:'*|"$PROJECT_FLEET"|"$SM_FLEET") ;; *) fail "cross-home A label wrong: $ACW_LABEL" ;; esac
+case "$BCW_LABEL" in $'└ bcw · p:'*|"$PROJECT_FLEET"|"$SM_FLEET"|"$SM_FLEET_B") ;; *) fail "cross-home B label wrong: $BCW_LABEL" ;; esac
+pass "real Herdr lab: concurrent primary/A/B project workers preserve per-home Fleet grouping and exact focus"
 
 # Hold the shared session lock from a different home and force flat fallback.
 CROSS_LOCK_READY="$TMP_ROOT/cross-lock-ready"
@@ -1150,8 +1124,8 @@ grep -F "presentation focus lock unavailable; using the ordinary flat layout wit
 remember_meta_worktree "$SECOND_HOME_A/state/aflat.meta" >/dev/null
 AFLAT_WSID=$(grep '^herdr_workspace_id=' "$SECOND_HOME_A/state/aflat.meta" | cut -d= -f2-)
 AFLAT_LABEL=$(lab workspace get "$AFLAT_WSID" | jq -r '.result.workspace.label')
-[ "$AFLAT_LABEL" = 2ndmate-alpha ] \
-  || fail "cross-home lock contention did not use the ordinary secondmate home workspace: $AFLAT_LABEL"
+[ "$AFLAT_LABEL" = "$SM_FLEET" ] \
+  || fail "cross-home lock contention did not use SM-fleet-1: $AFLAT_LABEL"
 [ ! -e "$SECOND_HOME_A/state/aflat.herdr-presentation" ] \
   || fail "cross-home lock contention published a projection journal"
 assert_focus_is "$CAPTAIN_FOCUS" "cross-home lock contention flat fallback"
@@ -1163,8 +1137,31 @@ pass "real Herdr lab: session lock contention from a secondmate home falls back 
 # original projected workspace.
 # Exercise both the leading fm- identity style seen in Hi Bit work and the
 # project-name identity style used by Wheelhouse work.
+# The restart sections below stop and reprovision the whole session, which
+# kills every pane's treehouse-get subshell; a later spawn against the SAME
+# project would then be handed a still-recorded worktree and trip the
+# recycled-worktree teardown refusal on the live multi-home tasks above. Give
+# these sections their own scratch project so their spawns draw from a
+# separate treehouse pool, and seed each home's allocator-reserved numbered
+# Fleet parent directly before testing projection reclaim.
+RESTART_PROJECT="$TMP_ROOT/restart-project"
+make_project "$RESTART_PROJECT"
+# shellcheck source=/dev/null
+. "$ROOT/bin/backends/herdr.sh"
+RESTART_PRIMARY_LABEL=$(FM_HOME="$HOME_DIR" fm_backend_herdr_workspace_label ship "$RESTART_PROJECT" "" "$HERDR_LAB_SESSION") \
+  || fail "could not reserve the primary restart Fleet parent label"
+RESTART_A_LABEL=$(FM_HOME="$SECOND_HOME_A" fm_backend_herdr_workspace_label ship "$RESTART_PROJECT" "" "$HERDR_LAB_SESSION") \
+  || fail "could not reserve secondmate A's restart Fleet parent label"
+RESTART_B_LABEL=$(FM_HOME="$SECOND_HOME_B" fm_backend_herdr_workspace_label ship "$RESTART_PROJECT" "" "$HERDR_LAB_SESSION") \
+  || fail "could not reserve secondmate B's restart Fleet parent label"
+lab workspace create --cwd "$RESTART_PROJECT" --label "$RESTART_PRIMARY_LABEL" --no-focus >/dev/null \
+  || fail "could not seed the primary restart Fleet parent"
+lab workspace create --cwd "$RESTART_PROJECT" --label "$RESTART_A_LABEL" --no-focus >/dev/null \
+  || fail "could not seed secondmate A's restart Fleet parent"
+lab workspace create --cwd "$RESTART_PROJECT" --label "$RESTART_B_LABEL" --no-focus >/dev/null \
+  || fail "could not seed secondmate B's restart Fleet parent"
 for RESTART_ID in fm-hibit-resume-r1 wheelhouse-healing-r1; do
-  spawn_task "$RESTART_ID" "$HOME_DIR" "$PROJECT_DIR" > "$TMP_ROOT/$RESTART_ID-first.out" 2> "$TMP_ROOT/$RESTART_ID-first.err" \
+  spawn_task "$RESTART_ID" "$HOME_DIR" "$RESTART_PROJECT" > "$TMP_ROOT/$RESTART_ID-first.out" 2> "$TMP_ROOT/$RESTART_ID-first.err" \
     || fail "$RESTART_ID fixture's projected spawn failed: $(cat "$TMP_ROOT/$RESTART_ID-first.err")"
   RESTART_META="$HOME_DIR/state/$RESTART_ID.meta"
   OLD_RESTART_WT=$(remember_meta_worktree "$RESTART_META")
@@ -1190,7 +1187,7 @@ for RESTART_ID in fm-hibit-resume-r1 wheelhouse-healing-r1; do
     fail "$RESTART_ID restart fixture unexpectedly retained a registered agent"
   fi
   RECLAIM_FOCUS=$(focus_snapshot)
-  spawn_task "$RESTART_ID" "$HOME_DIR" "$PROJECT_DIR" > "$TMP_ROOT/$RESTART_ID-reclaim.out" 2> "$TMP_ROOT/$RESTART_ID-reclaim.err" \
+  spawn_task "$RESTART_ID" "$HOME_DIR" "$RESTART_PROJECT" > "$TMP_ROOT/$RESTART_ID-reclaim.out" 2> "$TMP_ROOT/$RESTART_ID-reclaim.err" \
     || fail "$RESTART_ID same-identity reclaim failed: $(cat "$TMP_ROOT/$RESTART_ID-reclaim.err")"
   NEW_RESTART_WT=$(remember_meta_worktree "$RESTART_META")
   NEW_RESTART_WSID=$(grep '^herdr_workspace_id=' "$RESTART_META" | cut -d= -f2-)
@@ -1215,7 +1212,7 @@ for RESTART_ID in fm-hibit-resume-r1 wheelhouse-healing-r1; do
       || fail "could not reprovision the isolated session for idempotent reclaim"
     PRIOR_RESTART_WT=$NEW_RESTART_WT
     PRIOR_RESTART_PANE=$NEW_RESTART_PANE
-    spawn_task "$RESTART_ID" "$HOME_DIR" "$PROJECT_DIR" > "$TMP_ROOT/$RESTART_ID-idempotent.out" 2> "$TMP_ROOT/$RESTART_ID-idempotent.err" \
+    spawn_task "$RESTART_ID" "$HOME_DIR" "$RESTART_PROJECT" > "$TMP_ROOT/$RESTART_ID-idempotent.out" 2> "$TMP_ROOT/$RESTART_ID-idempotent.err" \
       || fail "$RESTART_ID repeated reclaim failed: $(cat "$TMP_ROOT/$RESTART_ID-idempotent.err")"
     NEW_RESTART_WT=$(remember_meta_worktree "$RESTART_META")
     NEW_RESTART_WSID=$(grep '^herdr_workspace_id=' "$RESTART_META" | cut -d= -f2-)
@@ -1240,7 +1237,7 @@ pass "real Herdr lab: Hi Bit and Wheelhouse-style same-identity restarts reclaim
 CROSS_RESTART_ID=wheel-child-resume
 mkdir -p "$SECOND_HOME_A/data/$CROSS_RESTART_ID"
 printf 'Cross-home restart fixture.\n' > "$SECOND_HOME_A/data/$CROSS_RESTART_ID/brief.md"
-spawn_task "$CROSS_RESTART_ID" "$SECOND_HOME_A" "$PROJECT_DIR" > "$TMP_ROOT/cross-restart-first.out" 2> "$TMP_ROOT/cross-restart-first.err" \
+spawn_task "$CROSS_RESTART_ID" "$SECOND_HOME_A" "$RESTART_PROJECT" > "$TMP_ROOT/cross-restart-first.out" 2> "$TMP_ROOT/cross-restart-first.err" \
   || fail "cross-home restart fixture failed: $(cat "$TMP_ROOT/cross-restart-first.err")"
 CROSS_RESTART_META="$SECOND_HOME_A/state/$CROSS_RESTART_ID.meta"
 CROSS_OLD_WT=$(remember_meta_worktree "$CROSS_RESTART_META")
@@ -1256,7 +1253,7 @@ PATH="$HERDR_ORIGINAL_PATH" "$HERDR_LAB_HELPER" stop "$HERDR_LAB_SESSION" >/dev/
   || fail "could not stop the isolated session for cross-home restart"
 PATH="$HERDR_ORIGINAL_PATH" "$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION" \
   || fail "could not reprovision the isolated session for cross-home restart"
-spawn_task "$CROSS_RESTART_ID" "$SECOND_HOME_A" "$PROJECT_DIR" > "$TMP_ROOT/cross-restart-resume.out" 2> "$TMP_ROOT/cross-restart-resume.err" \
+spawn_task "$CROSS_RESTART_ID" "$SECOND_HOME_A" "$RESTART_PROJECT" > "$TMP_ROOT/cross-restart-resume.out" 2> "$TMP_ROOT/cross-restart-resume.err" \
   || fail "cross-home same-identity reclaim failed: $(cat "$TMP_ROOT/cross-restart-resume.err")"
 CROSS_NEW_WT=$(remember_meta_worktree "$CROSS_RESTART_META")
 CROSS_NEW_WSID=$(grep '^herdr_workspace_id=' "$CROSS_RESTART_META" | cut -d= -f2-)
@@ -1278,9 +1275,9 @@ BRAVO_WAVE_ID=resume-wave-bravo
 mkdir -p "$HOME_DIR/data/$PRIMARY_WAVE_ID" "$SECOND_HOME_B/data/$BRAVO_WAVE_ID"
 printf 'Concurrent primary recovery fixture.\n' > "$HOME_DIR/data/$PRIMARY_WAVE_ID/brief.md"
 printf 'Concurrent secondmate recovery fixture.\n' > "$SECOND_HOME_B/data/$BRAVO_WAVE_ID/brief.md"
-spawn_task "$PRIMARY_WAVE_ID" "$HOME_DIR" "$PROJECT_DIR" > "$TMP_ROOT/primary-wave-first.out" 2> "$TMP_ROOT/primary-wave-first.err" \
+spawn_task "$PRIMARY_WAVE_ID" "$HOME_DIR" "$RESTART_PROJECT" > "$TMP_ROOT/primary-wave-first.out" 2> "$TMP_ROOT/primary-wave-first.err" \
   || fail "primary recovery-wave fixture failed: $(cat "$TMP_ROOT/primary-wave-first.err")"
-spawn_task "$BRAVO_WAVE_ID" "$SECOND_HOME_B" "$PROJECT_DIR" > "$TMP_ROOT/bravo-wave-first.out" 2> "$TMP_ROOT/bravo-wave-first.err" \
+spawn_task "$BRAVO_WAVE_ID" "$SECOND_HOME_B" "$RESTART_PROJECT" > "$TMP_ROOT/bravo-wave-first.out" 2> "$TMP_ROOT/bravo-wave-first.err" \
   || fail "secondmate recovery-wave fixture failed: $(cat "$TMP_ROOT/bravo-wave-first.err")"
 PRIMARY_WAVE_META="$HOME_DIR/state/$PRIMARY_WAVE_ID.meta"
 BRAVO_WAVE_META="$SECOND_HOME_B/state/$BRAVO_WAVE_ID.meta"
@@ -1295,9 +1292,9 @@ PATH="$HERDR_ORIGINAL_PATH" "$HERDR_LAB_HELPER" stop "$HERDR_LAB_SESSION" >/dev/
 PATH="$HERDR_ORIGINAL_PATH" "$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION" \
   || fail "could not reprovision the isolated session for concurrent recovery"
 CONCURRENT_RECOVERY_FOCUS=$(focus_snapshot)
-spawn_task "$PRIMARY_WAVE_ID" "$HOME_DIR" "$PROJECT_DIR" > "$TMP_ROOT/primary-wave-resume.out" 2> "$TMP_ROOT/primary-wave-resume.err" &
+spawn_task "$PRIMARY_WAVE_ID" "$HOME_DIR" "$RESTART_PROJECT" > "$TMP_ROOT/primary-wave-resume.out" 2> "$TMP_ROOT/primary-wave-resume.err" &
 PRIMARY_WAVE_PID=$!
-spawn_task "$BRAVO_WAVE_ID" "$SECOND_HOME_B" "$PROJECT_DIR" > "$TMP_ROOT/bravo-wave-resume.out" 2> "$TMP_ROOT/bravo-wave-resume.err" &
+spawn_task "$BRAVO_WAVE_ID" "$SECOND_HOME_B" "$RESTART_PROJECT" > "$TMP_ROOT/bravo-wave-resume.out" 2> "$TMP_ROOT/bravo-wave-resume.err" &
 BRAVO_WAVE_PID=$!
 wait "$PRIMARY_WAVE_PID" || fail "concurrent primary recovery failed: $(cat "$TMP_ROOT/primary-wave-resume.err")"
 wait "$BRAVO_WAVE_PID" || fail "concurrent secondmate recovery failed: $(cat "$TMP_ROOT/bravo-wave-resume.err")"
@@ -1331,7 +1328,7 @@ LEGACY_OUT=$(lab workspace create --cwd "$PROJECT_DIR" --label "firstmate/legacy
   || fail "could not seed a legacy old-format presentation space"
 LEGACY_WSID=$(printf '%s' "$LEGACY_OUT" | jq -r '.result.workspace.workspace_id // empty')
 [ -n "$LEGACY_WSID" ] || fail "legacy seed returned no workspace id"
-FLAT_TAB_OUT=$(lab tab create --workspace "$(lab workspace list | jq -r '.result.workspaces[] | select(.label == "2ndmate-alpha") | .workspace_id' | head -1)" --cwd "$PROJECT_DIR" --label fm-flat-legacy-tab --no-focus) \
+FLAT_TAB_OUT=$(lab tab create --workspace "$(lab workspace list | jq -r --arg a "$ARCHON_ALPHA" '.result.workspaces[] | select(.label == $a) | .workspace_id' | head -1)" --cwd "$PROJECT_DIR" --label fm-flat-legacy-tab --no-focus) \
   || fail "could not seed a flat secondmate child tab"
 FLAT_TAB_ID=$(printf '%s' "$FLAT_TAB_OUT" | jq -r '.result.tab.tab_id // empty')
 mkdir -p "$HOME_DIR/data/post-legacy"

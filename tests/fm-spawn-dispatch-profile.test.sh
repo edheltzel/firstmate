@@ -12,6 +12,36 @@ set -u
 
 SPAWN="$ROOT/bin/fm-spawn.sh"
 TMP_ROOT=$(fm_test_tmproot fm-spawn-dispatch-profile)
+WORKER_SIGNING_KEY="$TMP_ROOT/worker-signing.pub"
+WORKER_SIGNER_PRINCIPAL="296298943+Atlas-Key@users.noreply.github.com"
+
+worker_signing_fingerprint() {
+  ssh-keygen -lf "$WORKER_SIGNING_KEY" -E sha256 2>/dev/null \
+    | awk 'NF >= 2 { count++; value=$2 } END { if (count != 1) exit 1; print value }'
+}
+
+write_worker_identity_config() {
+  local home=$1 fingerprint private=${WORKER_SIGNING_KEY%.pub}
+  if [ ! -f "$WORKER_SIGNING_KEY" ]; then
+    ssh-keygen -q -t ed25519 -N '' -f "$private" \
+      || fail "could not create the portable worker signing fixture"
+  fi
+  fingerprint=$(worker_signing_fingerprint) \
+    || fail "worker Git signing fixture is unavailable: $WORKER_SIGNING_KEY"
+  mkdir -p "$home/config"
+  cat > "$home/config/worker-git-identity" <<EOF
+[worker]
+	name = Atlas
+	email = atlas@rainyday.media
+	signingKey = $WORKER_SIGNING_KEY
+	fingerprint = $fingerprint
+	principal = $WORKER_SIGNER_PRINCIPAL
+[gpg]
+	format = ssh
+[commit]
+	gpgSign = true
+EOF
+}
 
 make_spawn_pi_probe() {
   local fakebin=$1 tool=$2
@@ -118,8 +148,37 @@ assert_meta_profile() {
   assert_grep "effort=$effort" "$meta" "meta missing effort=$effort"
 }
 
+assert_worker_git_identity() {
+  local config=$1 allowed
+  [ -f "$config" ] || fail "worker Git identity config is missing: $config"
+  [ "$(GIT_CONFIG_GLOBAL="$config" git config user.name)" = Atlas ] \
+    || fail "worker Git name did not resolve to Atlas"
+  [ "$(GIT_CONFIG_GLOBAL="$config" git config user.email)" = atlas@rainyday.media ] \
+    || fail "worker Git email did not resolve to atlas@rainyday.media"
+  [ "$(GIT_CONFIG_GLOBAL="$config" git config gpg.format)" = ssh ] \
+    || fail "worker Git config did not select SSH signing"
+  [ "$(GIT_CONFIG_GLOBAL="$config" git config user.signingKey)" = "$WORKER_SIGNING_KEY" ] \
+    || fail "worker Git config did not select the configured public signing key"
+  [ "$(GIT_CONFIG_GLOBAL="$config" git config --type bool commit.gpgSign)" = true ] \
+    || fail "worker Git config did not enable commit signing"
+  allowed=$(GIT_CONFIG_GLOBAL="$config" git config gpg.ssh.allowedSignersFile)
+  [ -f "$allowed" ] || fail "worker Git config is missing its task-local allowed-signers file"
+  assert_contains "$(cat "$allowed")" "$WORKER_SIGNER_PRINCIPAL" \
+    "allowed-signers file did not contain the configured signer principal"
+}
+
+teardown_spawn_case() {
+  local home=$1 id=$2 fakebin=$3 out status
+  out=$(FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" \
+    FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
+    FM_CONFIG_OVERRIDE="$home/config" PATH="$fakebin:$PATH" \
+    "$ROOT/bin/fm-teardown.sh" "$id" --force 2>&1)
+  status=$?
+  expect_code 0 "$status" "forced cleanup should remove the task-local worker config"$'\n'"$out"
+}
+
 test_no_profile_keeps_claude_profile_defaults() {
-  local rec id out status expected launch
+  local rec id out status expected launch prefix
   id=profile-off-z1
   rec=$(make_spawn_case profile-off claude "$id")
   read_case_record "$rec"
@@ -131,9 +190,41 @@ test_no_profile_keeps_claude_profile_defaults() {
   assert_meta_profile "$HOME_DIR/state/$id.meta" claude default default
 
   launch=$(cat "$LAUNCH_LOG")
-  expected="env -u CURSOR_AGENT -u CURSOR_INVOKED_AS CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions \"\$('${ROOT}/bin/fm-operational-input.sh' encode launch-brief < '$HOME_DIR/data/$id/brief.md')\""
-  [ "$launch" = "$expected" ] || fail "no-profile claude launch did not use the canonical launch kind"$'\n'"expected: $expected"$'\n'"actual:   $launch"
-  pass "no --model/--effort records defaults and types the claude launch instructions"
+  prefix="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME='$HOME_DIR' "
+  expected="${prefix}CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions \"\$('${ROOT}/bin/fm-operational-input.sh' encode launch-brief < '$HOME_DIR/data/$id/brief.md')\""
+  [ "$launch" = "$expected" ] || fail "no-profile claude launch lost its canonical typed input or worker environment boundary"$'\n'"expected: $expected"$'\n'"actual:   $launch"
+  pass "no --model/--effort records defaults, scrubs selectors, retains worker home, and types launch instructions"
+}
+
+test_worker_git_identity_records_signed_atlas_commit_and_cleans_task_config() {
+  local rec id out status worker_config author signature
+  id=git-identity-real-z19
+  rec=$(make_spawn_case git-identity-real claude "$id")
+  read_case_record "$rec"
+  write_worker_identity_config "$HOME_DIR"
+
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR")
+  status=$?
+  expect_code 0 "$status" "signed worker launch should succeed"$'\n'"$out"
+  worker_config="/tmp/fm-$id/gitconfig"
+  assert_worker_git_identity "$worker_config"
+
+  printf '%s\n' 'worker identity commit' > "$WT_DIR/worker-identity.txt"
+  git -C "$WT_DIR" add worker-identity.txt
+  GIT_CONFIG_GLOBAL="$worker_config" git -C "$WT_DIR" commit -qm 'worker identity commit'
+  author=$(GIT_CONFIG_GLOBAL="$worker_config" git -C "$WT_DIR" show -s --format='%an <%ae>|%cn <%ce>' HEAD)
+  [ "$author" = "Atlas <atlas@rainyday.media>|Atlas <atlas@rainyday.media>" ] \
+    || fail "isolated worker commit did not record Atlas author and committer: $author"
+  GIT_CONFIG_GLOBAL="$worker_config" git -C "$WT_DIR" verify-commit --raw HEAD >/dev/null 2>&1 \
+    || fail "isolated worker commit did not verify through its task-local allowed-signers policy"
+  signature=$(GIT_CONFIG_GLOBAL="$worker_config" git -C "$WT_DIR" show -s --format='%G? %GS %GF' HEAD)
+  [ "$signature" = "G $WORKER_SIGNER_PRINCIPAL $(worker_signing_fingerprint)" ] \
+    || fail "isolated worker commit did not report the configured signature identity: $signature"
+
+  teardown_spawn_case "$HOME_DIR" "$id" "$FAKEBIN_DIR"
+  assert_absent "$worker_config" "ordinary cleanup left the task-local worker Git identity"
+  assert_absent "$WT_DIR/.fm-worker-gitconfig" "worker identity material leaked into the project worktree"
+  pass "worker Git config records a signed Atlas commit and is cleaned with the task"
 }
 
 test_non_cursor_launch_clears_inherited_cursor_markers() {
@@ -380,8 +471,9 @@ test_active_dispatch_profile_allows_raw_launch_command() {
   assert_contains "$out" "spawned $id harness=custom-agent" "spawn did not report raw command harness"
   assert_meta_profile "$HOME_DIR/state/$id.meta" custom-agent default default
   launch=$(cat "$LAUNCH_LOG")
-  [ "$launch" = "custom-agent --flag" ] || fail "raw launch command changed"$'\n'"actual: $launch"
-  pass "active crew-dispatch profile allows the raw launch-command escape hatch"
+  [ "$launch" = "FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME='$HOME_DIR' custom-agent --flag" ] \
+    || fail "raw launch command lost its worker environment boundary"$'\n'"actual: $launch"
+  pass "active crew-dispatch profile allows the raw launch-command escape hatch inside the worker environment boundary"
 }
 
 test_claude_threads_model_and_effort() {
@@ -631,34 +723,28 @@ test_pi_signed_threads_shared_pi_profile_and_preserves_identity() {
   pass "pi-signed shares Pi launch semantics while preserving its configured and recorded identity"
 }
 
-test_pi_tui_mode_probe_is_safe_for_old_and_new_pi() {
-  local harness version rec id out status launch
-  for harness in pi pi-signed; do
-    for version in 0.82.0 0.84.0; do
-      id="profile-${harness}-tui-${version//./}-z8d"
-      rec=$(make_spawn_case "profile-__MODELFLAG__-${harness}-tui-${version//./}" "$harness" "$id")
-      read_case_record "$rec"
+test_omp_threads_profile_and_installs_turnend_extension() {
+  local rec id out status launch ext
+  id=profile-omp-z8b
+  rec=$(make_spawn_case profile-omp omp "$id")
+  read_case_record "$rec"
 
-      out=$(FM_TEST_PI_VERSION="$version" \
-        run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" \
-        "$id" "$PROJ_DIR")
-      status=$?
-      expect_code 0 "$status" "$harness $version spawn should succeed"
-      launch=$(cat "$LAUNCH_LOG")
-      assert_contains "$launch" "'$FAKEBIN_DIR/$harness'" \
-        "$harness $version launch must use the executable selected for probing"
-      assert_not_contains "$launch" "FM_PI_HARNESS=$harness $harness" \
-        "$harness $version launch must not re-resolve a bare executable in the worker"
-      if [ "$version" = 0.82.0 ]; then
-        assert_not_contains "$launch" "--tui-mode" \
-          "$harness $version launch must omit unsupported --tui-mode"
-      else
-        assert_contains "$launch" "'$FAKEBIN_DIR/$harness' --tui-mode regular" \
-          "$harness $version launch must preserve the regular TUI"
-      fi
-    done
-  done
-  pass "Pi launch probing omits --tui-mode on older Pi and preserves it on supporting Pi"
+  out=$(run_ship_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" \
+    --model openai-codex/gpt-5.6-sol --effort max)
+  status=$?
+  expect_code 0 "$status" "OMP spawn with max effort should succeed"
+  assert_meta_profile "$HOME_DIR/state/$id.meta" omp openai-codex/gpt-5.6-sol max
+  launch=$(cat "$LAUNCH_LOG")
+  assert_contains "$launch" "OMP_AGENT=1 omp --auto-approve --no-prewalk --model 'openai-codex/gpt-5.6-sol' --thinking 'max' -e" \
+    "OMP launch did not carry its marker, autonomy posture, stable profile, and requested axes"
+  assert_not_contains "$launch" "--no-extensions" \
+    "OMP launch must not suppress its explicit turn-end extension"
+  assert_present "$HOME_DIR/state/$id.omp-ext.ts" "OMP turn-end extension was not generated"
+  ext=$(cat "$HOME_DIR/state/$id.omp-ext.ts")
+  assert_contains "$ext" 'pi.on("turn_end"' "OMP extension lost the verified turn-end notification touch"
+  assert_not_contains "$ext" 'pi.on("agent_start"' "OMP extension claimed an unverified semantic agent_start edge"
+  assert_not_contains "$ext" 'pi.on("agent_settled"' "OMP extension claimed an unverified semantic agent_settled edge"
+  pass "OMP preserves its launch posture and verified turn-end-only extension"
 }
 
 test_pi_signed_missing_binary_refuses_before_endpoint_or_metadata() {
@@ -793,7 +879,7 @@ test_active_dispatch_profile_does_not_block_secondmate_launch() {
 }
 
 test_no_profile_keeps_claude_profile_defaults
-test_non_cursor_launch_clears_inherited_cursor_markers
+test_worker_git_identity_records_signed_atlas_commit_and_cleans_task_config
 test_relative_home_overrides_launch_with_absolute_cross_process_paths
 test_home_defaults_preserve_absolute_or_resolve_relative_paths
 test_absolute_override_spelling_is_preserved_in_launch_paths
@@ -816,6 +902,7 @@ test_opencode_threads_model_and_ignores_effort_axis
 test_pi_threads_model_and_max_effort
 test_pi_tui_mode_probe_is_safe_for_old_and_new_pi
 test_pi_signed_threads_shared_pi_profile_and_preserves_identity
+test_omp_threads_profile_and_installs_turnend_extension
 test_pi_signed_missing_binary_refuses_before_endpoint_or_metadata
 test_pi_signed_persistent_secondmate_uses_pi_extensions_and_identity
 test_batch_forwards_shared_profile_flags

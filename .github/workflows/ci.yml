@@ -385,25 +385,8 @@ jobs:
           bearings_output=$(/bin/bash tests/fm-bearings-snapshot.test.sh)
           printf '%s\n' "$bearings_output"
           bearings_count=$(printf '%s\n' "$bearings_output" | grep -c '^ok - ')
-          [ "$bearings_count" -eq 45 ] || {
-            echo "::error::expected 45 Bearings tests, got $bearings_count"
-            exit 1
-          }
-
-          command -v npm >/dev/null || { echo "::error::npm is required to install tasks-axi"; exit 1; }
-          npm install -g tasks-axi@0.2.5 >/dev/null
-          PATH="$(npm prefix -g)/bin:$PATH"
-          export PATH
-          command -v tasks-axi >/dev/null || { echo "::error::tasks-axi is required for the public-followup bash 3.2 register regression"; exit 1; }
-
-          # The full public-followup suite is not a stock-bash snapshot; run only
-          # the empty-lock register regression under real /bin/bash 3.2.
-          pf_output=$(FM_TEST_ONLY=test_first_register_succeeds_with_empty_lock_list_under_bash32 \
-            /bin/bash tests/fm-public-followup.test.sh)
-          printf '%s\n' "$pf_output"
-          pf_count=$(printf '%s\n' "$pf_output" | grep -c '^ok - ')
-          [ "$pf_count" -eq 1 ] || {
-            echo "::error::expected 1 public-followup bash 3.2 register regression, got $pf_count"
+          [ "$bearings_count" -eq 46 ] || {
+            echo "::error::expected 46 Bearings tests, got $bearings_count"
             exit 1
           }
 

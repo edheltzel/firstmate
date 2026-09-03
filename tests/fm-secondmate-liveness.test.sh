@@ -66,6 +66,42 @@ SH
 # make_failed_probe_tmux <dir> <inventory>: missing and present fail the pane
 # read, while unreadable returns a misleading fallback node process but fails
 # the inventory that must be authoritative.
+make_omp_probe_tmux() {
+  local dir=$1 attributed=$2 fakebin
+  fakebin=$(fm_fakebin "$dir")
+  cat > "$fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+set -u
+case "${1:-}" in
+  display-message)
+    for a in "$@"; do
+      case "$a" in
+        *pane_current_command*) printf '%s\n' bun; exit 0 ;;
+        *pane_pid*) printf '%s\n' 100; exit 0 ;;
+      esac
+    done
+    exit 0 ;;
+  list-windows) printf '%s\n' win; exit 0 ;;
+esac
+exit 0
+SH
+  cat > "$fakebin/ps" <<SH
+#!/usr/bin/env bash
+case "\$*" in
+  *'tpgid='*) printf '4242\n' ;;
+  *'args='*)
+    if [ '$attributed' = yes ]; then
+      printf 'bun bun /Users/test/.bun/bin/omp --auto-approve prompt\n'
+    else
+      printf 'bun unrelated-script.ts\n'
+    fi
+    ;;
+esac
+SH
+  chmod +x "$fakebin/tmux" "$fakebin/ps"
+  printf '%s\n' "$fakebin"
+}
+
 make_failed_probe_tmux() {
   local dir=$1 inventory=$2 fakebin
   fakebin=$(fm_fakebin "$dir")
@@ -102,6 +138,14 @@ test_tmux_agent_state_classifies() {
     out=$(PATH="$fb:$BASE_PATH" bash -c '. "$0/bin/fm-backend.sh"; fm_backend_agent_state tmux sess:win' "$ROOT")
     [ "$out" = alive ] || fail "a live $harness foreground process should classify as alive, got '$out'"
   done
+
+  fb=$(make_omp_probe_tmux "$TMP_ROOT/tmux-omp" yes)
+  out=$(PATH="$fb:$BASE_PATH" bash -c '. "$0/bin/fm-backend.sh"; fm_backend_agent_state tmux sess:win' "$ROOT")
+  [ "$out" = alive ] || fail "OMP's exact Bun foreground ancestry should classify as alive, got '$out'"
+
+  fb=$(make_omp_probe_tmux "$TMP_ROOT/tmux-unrelated-bun" no)
+  out=$(PATH="$fb:$BASE_PATH" bash -c '. "$0/bin/fm-backend.sh"; fm_backend_agent_state tmux sess:win' "$ROOT")
+  [ "$out" = ambiguous ] || fail "an unattributed Bun process should stay ambiguous, got '$out'"
 
   for shell in zsh bash -zsh; do
     fb=$(make_probe_tmux "$TMP_ROOT/tmux-${shell#-}" "$shell")
@@ -207,7 +251,7 @@ make_toolchain() {
   local dir=$1 fakebin
   fakebin=$(fm_fakebin "$dir")
   fm_fake_exit0 "$fakebin" node chrome-devtools-axi pi-signed
-  fm_fake_version_tool "$fakebin" lavish-axi FM_FAKE_LAVISH_AXI_VERSION 0.1.46
+  fm_fake_version_tool "$fakebin" lavish-axi FM_FAKE_LAVISH_AXI_VERSION 0.1.45
   cat > "$fakebin/gh-axi" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = --version ]; then
@@ -252,7 +296,7 @@ SH
   cat > "$fakebin/quota-axi" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = --version ]; then
-  printf '%s\n' '0.1.29'
+  printf '%s\n' '0.1.17'
   exit 0
 fi
 exit 0

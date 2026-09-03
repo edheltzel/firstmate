@@ -96,12 +96,13 @@ test_stale_enqueue_before_suppressor() {
   window="test:fm-stale"
   printf 'idle prompt' > "$capture_file"
   printf 'window=%s\nkind=ship\n' "$window" > "$state/stale.meta"
-  # A stale pane sitting on a captain-relevant status is actionable when the crew
-  # is not provably working, so give the window one and prime the .seen-* marker
-  # to its current signature so the per-poll signal scan does not pre-empt the
-  # stale wake with a signal wake.
-  printf 'done: ready in branch fm/stale\n' > "$state/stale.status"
-  prime_status_seen "$state" "$state/stale.status"
+  # A stale live pane sitting on a terminal failure remains immediately actionable,
+  # unlike a live-idle done pane on the bounded retained-pane cadence. Prime the
+  # .seen-* marker so the per-poll signal scan does not pre-empt the stale wake
+  # with a signal wake.
+  printf 'failed: validation failed\n' > "$state/stale.status"
+  if [ "$(uname)" = Darwin ]; then sig=$(stat -f '%z:%Fm' "$state/stale.status"); else sig=$(stat -c '%s:%Y' "$state/stale.status"); fi
+  printf '%s' "$sig" > "$state/.seen-stale_status"
   key=$(printf '%s' "$window" | tr ':/.' '___')
   pane_hash=$(hash_text "idle prompt")
   printf '%s' "$pane_hash" > "$state/.hash-$key"

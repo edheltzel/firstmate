@@ -72,7 +72,7 @@ new_world() {
 make_fake_toolchain() {
   local fakebin=$1
   fm_fake_exit0 "$fakebin" tmux node chrome-devtools-axi
-  fm_fake_version_tool "$fakebin" lavish-axi FM_FAKE_LAVISH_AXI_VERSION 0.1.46
+  fm_fake_version_tool "$fakebin" lavish-axi FM_FAKE_LAVISH_AXI_VERSION 0.1.45
   cat > "$fakebin/gh-axi" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = --version ]; then
@@ -426,7 +426,7 @@ case "${1:-} ${2:-}" in
     printf '{"sessions":[{"name":"default","running":true,"socket_path":"%s.sock"}]}\n' "$state"
     ;;
   "workspace list")
-    printf '{"result":{"workspaces":[{"workspace_id":"ws1","label":"2ndmate-%s","focused":true,"active_tab_id":"t-focus"}]}}\n' "$mate_id"
+    printf '%s\n' '{"result":{"workspaces":[{"workspace_id":"ws1","label":"TheBridge","focused":true,"active_tab_id":"t-focus"}]}}'
     ;;
   "tab list")
     if [ -e "$spawned" ]; then
@@ -505,18 +505,18 @@ SH
 # Drop every harness env marker from bin/fm-harness.sh detect_own so the
 # surrounding interactive shell cannot leak past the suite's fake ps harness.
 # Markers today: CLAUDECODE (claude), PI_CODING_AGENT plus FM_PI_HARNESS
-# (Pi family), GROK_AGENT (grok).
+# (Pi family), GROK_AGENT (grok), and OMP_AGENT (omp).
 # codex and opencode have no env markers (ancestry only). Without this, a local
 # claude/pi/grok session fails cases that pin a different fake harness while CI
 # (no ambient markers) still passes.
 run_session_start() {
   local home=$1 root=$2 path=$3 pi_harness=${4:-}
   if [ -n "$pi_harness" ]; then
-    env -u CLAUDECODE -u GROK_AGENT PI_CODING_AGENT=true FM_PI_HARNESS="$pi_harness" \
+    env -u CLAUDECODE -u GROK_AGENT -u OMP_AGENT PI_CODING_AGENT=true FM_PI_HARNESS="$pi_harness" \
       FM_HOME="$home" FM_ROOT_OVERRIDE="$root" PATH="$path" \
       "$SESSION_START"
   else
-    env -u CLAUDECODE -u PI_CODING_AGENT -u FM_PI_HARNESS -u GROK_AGENT \
+    env -u CLAUDECODE -u PI_CODING_AGENT -u FM_PI_HARNESS -u GROK_AGENT -u OMP_AGENT \
       FM_HOME="$home" FM_ROOT_OVERRIDE="$root" PATH="$path" \
       "$SESSION_START"
   fi

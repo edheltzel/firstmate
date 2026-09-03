@@ -1,8 +1,7 @@
 # cmux runtime backend
 
 cmux is an experimental macOS GUI terminal backend.
-It provides task workspaces and surfaces while Treehouse continues to provide git worktrees.
-[`configuration.md`](configuration.md#runtime-backend-configbackend--fm_backend) owns shared selection and metadata semantics.
+It provides task workspaces and surfaces while [`configuration.md`](configuration.md#runtime-backend-configbackend--fm_backend) owns shared backend and worktree-provider selection plus metadata semantics.
 
 ## Setup
 
@@ -97,7 +96,7 @@ The composer verifier is a thin adapter: it captures a bounded plain-text tail a
 `read-screen` is plain text with no cursor primitive, so the shared classifier degrades a glyph row carrying trailing text to `unknown` rather than misreading a harness's own idle suggestion as unsent input.
 An unstructured bare prompt is `unknown`, and a slash-popup placeholder remains `pending`, so only Enter is retried and text is never retyped.
 cmux exposes no native generic agent busy signal, so supervision uses capture/hash polling for screen changes and each harness adapter's semantic lifecycle for worker state.
-Grok alone retains its isolated rendered-tail fallback.
+Grok and OMP retain their isolated rendered-tail fallbacks.
 
 A task workspace's last surface cannot be closed directly.
 Cleanup owns the whole workspace and uses `close-workspace`.

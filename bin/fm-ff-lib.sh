@@ -5,7 +5,9 @@
 # This is the one implementation of "advance a firstmate checkout to a base by a
 # clean fast-forward, never forcing, merging, or stashing" used by every sync
 # path:
-#   - /updatefirstmate (bin/fm-update.sh) pulls from origin: base_mode "origin".
+#   - /updatefirstmate (bin/fm-update.sh) fast-forwards secondmate homes from
+#     origin (base_mode "origin"). The running Themis checkout is merged in
+#     fm-update.sh, not here.
 #   - the local-HEAD secondmate sync (bin/fm-spawn.sh on launch, bin/fm-bootstrap.sh
 #     on startup) follows the PRIMARY checkout's current default-branch commit:
 #     base_mode is that local commit, with NO fetch and no origin dependency.
@@ -191,22 +193,23 @@ validate_secondmate_home() {
 }
 
 # A single fetch refreshes every worktree that shares an object store, so fetch
-# each distinct git-common-dir at most once. Used ONLY by the origin base mode;
-# the local-HEAD sync never fetches.
+# each distinct git-common-dir+remote at most once. Used by origin base mode and
+# by fm-update.sh's upstream fetch; the local-HEAD sync never fetches.
 FETCHED=""
 fetch_once() {
-  local dir=$1 common
+  local dir=$1 remote=${2:-origin} refspec=${3:-} common key
   common=$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
-  if [ -n "$common" ]; then
-    case " $FETCHED " in
-      *" $common "*) return 0 ;;
-    esac
+  key="${common:-$dir}::$remote::${refspec:-configured}"
+  case " $FETCHED " in
+    *" $key "*) return 0 ;;
+  esac
+  if [ -n "$refspec" ]; then
+    git -C "$dir" fetch "$remote" --prune --quiet "$refspec" 2>/dev/null || return 1
+  else
+    git -C "$dir" fetch "$remote" --prune --quiet 2>/dev/null || return 1
   fi
-  if git -C "$dir" fetch origin --prune --quiet 2>/dev/null; then
-    [ -n "$common" ] && FETCHED="$FETCHED $common"
-    return 0
-  fi
-  return 1
+  FETCHED="$FETCHED $key"
+  return 0
 }
 
 # Which watched instruction paths changed between HEAD and BASE (comma list).
@@ -259,8 +262,8 @@ live_secondmate_meta_records() {
 #   FF_INSTR  = comma list of changed instruction paths (only when updated)
 #
 # base_mode selects where the fast-forward base comes from:
-#   origin       - fetch origin and advance to origin/<default> (the /updatefirstmate
-#                  path); requires an origin remote and network reachability.
+#   origin       - fetch origin and advance to origin/<default> (the secondmate and
+#                  remote-code-root paths); requires origin and network reachability.
 #   <commit-ish> - advance to that LOCAL commit with NO fetch and no origin
 #                  dependency (the local-HEAD secondmate sync). The commit must
 #                  already exist in the target's object store, which it always does

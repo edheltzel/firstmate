@@ -880,7 +880,8 @@ missing_tool_diagnostic() {
 # Required-tool detection follows the RESOLVED backend, not a one-size default:
 # a universal toolchain every home needs plus the backend-specific delta owned by
 # fm_backend_required_tools (bin/fm-backend.sh). So a herdr/zellij/cmux home is
-# never told tmux is missing, and only orca drops treehouse. A backend value with
+# never told tmux is missing, and the selected worktree provider controls whether
+# treehouse joins that dependency set. A backend value with
 # no verified dependency set is reported before the universal checks continue.
 COMMON_TOOLS="node git gh no-mistakes gh-axi chrome-devtools-axi lavish-axi tasks-axi quota-axi"
 BACKEND=$(fm_backend_name)

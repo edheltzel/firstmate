@@ -267,7 +267,7 @@ This guard is the refresh command after any harness upgrade; it spends a small n
 ## Herdr
 
 The compatibility floor is protocol 14.
-The whole real-Herdr lane's latest active verification uses both Herdr 0.7.4 protocol 16 and Herdr 0.8.0 protocol 19 on macOS aarch64, while focused Herdr 0.7.5 protocol 17, earlier protocol-16, protocol-14, and 0.7.3 evidence is retained where it defines current behavior or fallbacks.
+The presentation-projection suite's latest active verification uses Herdr 0.8.0 protocol 19 on macOS aarch64, every other section's latest uses Herdr 0.7.5 protocol 17 on macOS aarch64, and earlier 0.7.5 protocol-16, 0.7.4, protocol-14, and 0.7.3 evidence is retained where it defines current behavior or fallbacks.
 Protocol 17 keeps every protocol-16 feature gate satisfied; the event and workspace-move floors remain 16.
 Default-on presentation projection has its own floor at Herdr 0.8.0, protocol 19, verified below.
 
@@ -446,7 +446,7 @@ ok - real Herdr lab: missing, renamed, and duplicate tokens trigger zero destruc
 ok - real Herdr lab validation completed on Herdr 0.7.5 with the default-session tripwire intact
 ```
 
-The projection suite ran again on 2026-08-04 against Herdr 0.8.0 protocol 19 for the default-on flip, where an absent `config/herdr-presentation-spaces` enables the projection and the value `off` opts out; since 2026-08-05 an absent file enables the projection only at or above the 0.8.0 floor recorded under "Presentation version floor" below, and `on` is the explicit opt-in that survives the floor:
+The projection suite ran again on 2026-08-04 against Herdr 0.8.0 protocol 19 for the default-on flip, where an absent `config/herdr-presentation-spaces` enables the projection and only the value `off` opts out:
 
 ```sh
 HERDR_LAB_HELPER=bin/fm-herdr-lab.sh \
@@ -464,7 +464,6 @@ ok - real Herdr lab validation completed on Herdr 0.8.0 with the default-session
 
 The projected spawn in that run used the historical empty opt-in file, so a home that had already enabled the projection keeps it without any migration step.
 One concurrent cross-home recovery case refused under contention on a loaded machine and passed on an immediate rerun; recovery-path presentation lock contention is a deliberate hard refusal rather than a flat fallback, which default-on now makes reachable from any Herdr home.
-That run measured the default-on projection on Herdr 0.8.0 only, while the focus-flash regression below was last run on 0.7.5 before the flip, so neither run covered a defective release under default-on projection; the version floor and the focus-flash suite's Part C close that gap.
 
 The restored-shell session-start cleanup ran on 2026-07-24 against Herdr 0.7.5 protocol 17:
 
@@ -713,6 +712,21 @@ result.runtime.state=ready
 `orca terminal create --json` returned `result.terminal.handle`.
 `orca worktree create` returned `result.worktree.id` and `result.worktree.path`.
 Speculative bare ids and nested terminal fields were deliberately rejected.
+
+The worktree-id shape was verified live on 2026-08-05 against `orca status --json` reporting `result.runtime.appVersion=1.4.171`.
+
+```sh
+orca worktree list --json
+```
+
+Every returned worktree carried a composite id of one repository UUID, the literal `::`, and one absolute worktree path, with the sibling `repoId` byte-identical to that prefix (host paths and the UUID redacted here, as elsewhere in this file):
+
+```text
+result.worktrees[].id=<repo-uuid>::/Users/<user>/orca/workspaces/<Project>/<worktree>
+result.worktrees[].repoId=<repo-uuid>
+```
+
+Guarded cleanup in `bin/fm-backend.sh` requires that exact shape before any Orca dispatch, so a drifted or non-conforming id preserves the task instead of removing a worktree.
 
 ```sh
 tests/fm-backend-orca.test.sh

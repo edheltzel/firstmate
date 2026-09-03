@@ -57,9 +57,12 @@ FM_BACKEND_CONFIG_DIR="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 # Verified backend adapters. Extend only after a backend gets its own
 # bin/backends/<name>.sh and empirical verification, mirroring AGENTS.md
 # section 4's harness-verification discipline. herdr is EXPERIMENTAL (P2;
-# data/fm-backend-design-d7/herdr-addendum.md) - verified against the real
-# v0.7.1/protocol-14 binary (data/fm-backend-design-d7/herdr-verification-p2.md)
-# but newer than tmux's long-proven default path. zellij is EXPERIMENTAL (P3;
+# data/fm-backend-design-d7/herdr-addendum.md) - originally verified against
+# the real v0.7.1/protocol-14 binary and currently verified against
+# 0.7.5-preview.2026-07-21-0f10e1453a7f/protocol 17
+# (docs/herdr-backend.md), while the core floor remains protocol 14 and the
+# native event floor remains protocol 16. It is newer than tmux's long-proven
+# default path. zellij is EXPERIMENTAL (P3;
 # data/fm-backend-design-d7/report.md "Zellij Backend") - verified against the
 # real 0.44.0 binary (docs/zellij-backend.md). orca is EXPERIMENTAL and
 # spawn-capable; unlike tmux/herdr/zellij it is also the worktree provider.
@@ -303,17 +306,28 @@ fm_backend_validate_spawn() {  # <name>
 #   - jq, for the JSON-emitting experimental adapters (herdr, zellij, cmux) whose
 #     spawn/liveness paths parse the backend's JSON output (see each adapter's
 #     tool check, e.g. fm_backend_herdr_tool_check);
-#   - the treehouse worktree provider for every session-provider-only backend
-#     (tmux, herdr, zellij, cmux); orca owns its own task worktree and terminal,
-#     so it drops both treehouse and any other backend's session CLI.
+#   - the worktree provider for every session-provider-only backend
+#     (tmux, herdr, zellij, cmux): GitButler worktrees when `but` is present
+#     and capable, else treehouse (bin/fm-worktree-lib.sh). Orca owns its own
+#     task worktree and terminal, so it drops both that provider and every
+#     other backend's session CLI.
 # Prints a single space-separated line and returns 0 for a known backend; returns
 # 1 and prints nothing for an unknown backend.
+fm_backend_worktree_lib_ensure() {
+  declare -F fm_worktree_session_tool >/dev/null 2>&1 && return 0
+  # shellcheck source=bin/fm-worktree-lib.sh disable=SC1091
+  . "$FM_BACKEND_LIB_DIR/fm-worktree-lib.sh"
+}
+
 fm_backend_required_tools() {  # <backend>
+  local wt
+  fm_backend_worktree_lib_ensure || return 1
+  wt=$(fm_worktree_session_tool)
   case "$1" in
-    tmux)   printf '%s' 'tmux treehouse' ;;
-    herdr)  printf '%s' 'herdr jq treehouse' ;;
-    zellij) printf '%s' 'zellij jq treehouse' ;;
-    cmux)   printf '%s' 'cmux jq treehouse' ;;
+    tmux)   printf '%s' "tmux${wt:+ $wt}" ;;
+    herdr)  printf '%s' "herdr jq${wt:+ $wt}" ;;
+    zellij) printf '%s' "zellij jq${wt:+ $wt}" ;;
+    cmux)   printf '%s' "cmux jq${wt:+ $wt}" ;;
     orca)   printf '%s' 'orca' ;;
     *) return 1 ;;
   esac
@@ -321,6 +335,7 @@ fm_backend_required_tools() {  # <backend>
 
 fm_backend_required_tool_available() {  # <backend> <tool>
   local backend=$1 tool=$2 required
+  fm_backend_worktree_lib_ensure || return 1
   required=$(fm_backend_required_tools "$backend") || return 1
   fm_backend_list_contains "$required" "$tool" || return 1
   case "$backend:$tool" in
@@ -380,6 +395,32 @@ fm_backend_meta_exact_value() {  # <meta-file> <key>
 fm_backend_endpoint_atom_valid() {  # <value>
   case "$1" in
     ''|*[!A-Za-z0-9._@%+-]*) return 1 ;;
+  esac
+}
+
+# fm_backend_orca_worktree_id_valid: validate Orca's composite worktree id
+# without applying the generic endpoint-atom grammar. Orca writes exactly one
+# UUID-style repository id, the literal `::` separator, and one canonical
+# absolute worktree path. The path is intentionally not compared here; the
+# existing Orca id-to-path check owns that runtime consistency proof.
+fm_backend_orca_worktree_id_valid() {  # <repo-uuid>::<absolute-worktree-path>
+  local value=${1:-} repo_id repo_hex worktree_path
+  case "$value" in
+    ''|*$'\n'*|*$'\r'*|*$'\t'*|*[[:cntrl:]]*|*::*::*) return 1 ;;
+  esac
+  repo_id=${value%%::*}
+  worktree_path=${value#*::}
+  case "$repo_id" in
+    ????????-????-????-????-????????????) ;;
+    *) return 1 ;;
+  esac
+  repo_hex=${repo_id//-/}
+  case "$repo_hex" in *[!0123456789abcdefABCDEF]*) return 1 ;; esac
+  [ ${#repo_hex} -eq 32 ] || return 1
+  case "$worktree_path" in
+    ''|*/../*|*/..|*/./*|*/.|*/) return 1 ;;
+    /*) return 0 ;;
+    *) return 1 ;;
   esac
 }
 
@@ -503,7 +544,7 @@ fm_backend_validate_task_endpoint() {  # <meta-file> <task-id>
       }
       if [ "$window" != "fm-$id" ] \
         || ! fm_backend_endpoint_atom_valid "$terminal" \
-        || ! fm_backend_endpoint_atom_valid "$worktree_id"; then
+        || ! fm_backend_orca_worktree_id_valid "$worktree_id"; then
         echo "REFUSED: Orca endpoint metadata for task $id is malformed or inconsistent; preserving task state." >&2
         return 1
       fi

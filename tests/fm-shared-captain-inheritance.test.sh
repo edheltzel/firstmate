@@ -220,7 +220,7 @@ SH
 add_bootstrap_compatible_tools() {
   local fakebin=$1
   fm_fake_exit0 "$fakebin" node chrome-devtools-axi gh treehouse
-  fm_fake_version_tool "$fakebin" lavish-axi FM_FAKE_LAVISH_AXI_VERSION 0.1.46
+  fm_fake_version_tool "$fakebin" lavish-axi FM_FAKE_LAVISH_AXI_VERSION 0.1.45
   cat > "$fakebin/gh-axi" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = --version ]; then
@@ -232,7 +232,7 @@ SH
   cat > "$fakebin/no-mistakes" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = --version ]; then
-  printf '%s\n' 'no-mistakes version v1.46.0 (fake)'
+  printf '%s\n' 'no-mistakes version v1.31.2 (fake)'
   exit 0
 fi
 exit 0
@@ -249,7 +249,7 @@ SH
   cat > "$fakebin/quota-axi" <<'SH'
 #!/usr/bin/env bash
 if [ "${1:-}" = --version ]; then
-  printf '%s\n' '0.1.29'
+  printf '%s\n' '0.1.17'
   exit 0
 fi
 exit 0

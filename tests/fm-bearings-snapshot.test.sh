@@ -1615,6 +1615,183 @@ test_captains_call_anti_leak() {
   pass "action-free items (working/done/queued/landed) do not leak into Captain's Call"
 }
 
+# The /bearings skill owns the four-section current chat contract. Preserve the
+# fixed headings and empty states while distinguishing chat-only and explicit
+# file modes.
+test_chat_contract_four_sections() {
+  local skill body headings report_headings expected full
+  skill="$ROOT/.agents/skills/bearings/SKILL.md"
+  [ -f "$skill" ] || fail "bearings SKILL.md missing at $skill"
+  full=$(cat "$skill")
+  body=$(awk '/^## Chat-response contract$/{capture=1; next} capture && /^## /{exit} capture' "$skill")
+  headings=$(printf '%s\n' "$body" | sed -nE "s/^[0-9]+\. \*\*([^*]+)\*\*.*/\1/p")
+  expected=$(printf '%s\n' "Captain's Call" "Recently Landed" "Underway" "Charted Next")
+  [ "$headings" = "$expected" ] || fail "chat contract must contain exactly four numbered sections in fixed order, got: $headings"
+  assert_contains "$body" "Nothing needs your action right now" "Captain's Call empty-state sentence"
+  assert_contains "$body" "No recent completions are in the current baseline" "Recently Landed empty-state sentence"
+  assert_contains "$body" "Nothing is underway" "Underway empty-state sentence"
+  assert_contains "$body" "Nothing is queued" "Charted Next empty-state sentence"
+  report_headings=$(sed -nE 's/^   - \*\*(Captain.s Call|Recently Landed|Underway|Charted Next)\*\*.*/\1/p' "$skill")
+  [ "$report_headings" = "$expected" ] || fail "detailed report contract must contain the same four complete sections, got: $report_headings"
+  grep -Eq 'since the (prior|last) report|Nothing has landed since|unchanged delta' "$skill" \
+    && fail "bearings contract still contains prior-report delta wording"
+  # shellcheck disable=SC2016 # Backticks are literal Markdown in the expected text.
+  assert_contains "$full" 'Never read an earlier `data/status-report-*.md`' "prior reports must not influence current output"
+  assert_contains "$full" "bounded current recent-completions baseline" "Recently Landed must be a current baseline"
+  assert_contains "$body" "no At Anchor section" "the At Anchor exclusion must be documented"
+  assert_contains "$body" "materially shorter" "file-mode chat must be materially shorter than its report"
+  assert_contains "$full" "Plain \`/bearings\` returns only the concise four-section chat digest" "plain Bearings must remain chat-only"
+  assert_contains "$full" "Only \`/bearings file\` writes the dated markdown report artifact" "file output must require explicit file mode"
+  assert_contains "$body" "include the report path or link" "file-mode chat must link to its report"
+  pass "the /bearings skill preserves its current four-section chat and explicit file-mode contracts"
+}
+
+test_project_reporting_model() {
+  local home fakebin json repo
+  home=$(make_home project-model)
+  mkdir -p "$home/projects/alpha-wt"
+  cat > "$home/data/backlog.md" <<'EOF'
+## In flight
+- [ ] build - Build feature (repo: alpha) (kind: ship) (priority: 2) (since 2026-07-21)
+
+## Queued
+- [ ] review - Review release (repo: alpha) (kind: captain) (priority: 1) (hold: choose release path) (hold-kind: captain)
+- [ ] gate - Gated follow-up blocked-by: build - wait for build (repo: alpha) (kind: ship) (priority: 3)
+
+## Done
+- [x] alpha-done - Alpha baseline (repo: alpha) (kind: ship) (done 2026-07-20)
+- [x] beta-done - Beta baseline (repo: beta) (kind: ship) (done 2026-07-20)
+EOF
+  repo="$home/projects/alpha-wt"
+  fm_git_init_commit "$repo"
+  git -C "$repo" branch -M main
+  git -C "$repo" checkout -qb feature/reporting
+  fm_write_meta "$home/state/build.meta" \
+    "window=firstmate:fm-build" "worktree=$repo" "project=alpha" \
+    "harness=codex" "kind=ship" "mode=local-only"
+  printf 'working: build in progress\n' > "$home/state/build.status"
+  fakebin=$(make_fakebin "$home")
+  json=$(run "$home" "$fakebin" --json)
+  printf '%s' "$json" | jq -e '
+    (.projects | map(.id)) == ["alpha", "beta"]
+      and (.projects[] | select(.id == "alpha")
+        | .branch.active == ["feature/reporting"]
+        and .branch.default == ["main"]
+        and .branch.selected == ["feature/reporting"]
+        and .tasks_axi.counts.total == 4
+        and .tasks_axi.counts.current == 3
+        and .tasks_axi.counts.completed == 1
+        and .tasks_axi.counts.in_flight == 1
+        and .tasks_axi.counts.queued == 1
+        and .tasks_axi.counts.held == 1
+        and .tasks_axi.counts.blocked == 1
+        and .tasks_axi.progress.percent == null
+        and .tasks_axi.progress.source == "unknown"
+        and .tasks_axi.progress.evidence.scoped_records == null
+        and (.current_actions | length) == 3
+        and (.decisions_open | any(.[]; .verb == "captain-hold"))
+      )
+      and (.projects[] | select(.id == "beta")
+        | .tasks_axi.progress.percent == null
+        and (.current_actions | length) == 0)
+  ' >/dev/null || fail "project reporting model did not expose state, counts, progress, branches, or decisions: $json"
+  pass "project reporting exposes action counts, progress evidence, branch selection, and decision data"
+}
+
+test_reporting_reconciles_done_local_branch_and_aliases() {
+  local home fakebin json repo
+  home=$(make_home reporting-reconciled)
+  repo="$home/projects/ready-wt"
+  mkdir -p "$repo"
+  fm_git_init_commit "$repo"
+  git -C "$repo" branch -M main
+  git -C "$repo" checkout -qb fm/ready-task
+  cat > "$home/data/backlog.md" <<'EOF'
+## In flight
+- [ ] ready-task - Ready local implementation (repo: Agent-Themis) (kind: ship) (priority: 1)
+
+## Queued
+
+## Done
+- [x] old-firstmate - Older Firstmate completion (repo: Firstmate) (kind: ship) (done 2026-07-20)
+EOF
+  fm_write_meta "$home/state/ready-task.meta" \
+    "window=firstmate:fm-ready-task" "worktree=$repo" \
+    "project=/Users/ed/Developer/Firstmate" "project_key=Agent-Themis" \
+    "harness=codex" "kind=ship" "mode=local-only"
+  printf 'done: ready in branch fm/ready-task\n' > "$home/state/ready-task.status"
+  fakebin=$(make_fakebin "$home")
+  json=$(run "$home" "$fakebin" --json)
+  printf '%s' "$json" | jq -e '
+    (.projects | map(.id)) == ["Agent-Themis"]
+      and (.projects[0].reporting_group == 2)
+      and (.projects[0].branch.active == ["fm/ready-task"])
+      and (.projects[0].branch.default == ["main"])
+      and (.projects[0].tasks_axi.counts.blocked == 0)
+      and (.projects[0].tasks_axi.progress.percent == null)
+      and (.projects[0].current_actions | length) == 1
+      and (.projects[0].current_actions[0].state == "in_flight")
+      and (.projects[0].current_actions[0].current_state == "done")
+      and (.projects[0].current_actions[0].classification == "captain_awaited")
+      and (.projects[0].current_actions[0].needs_human == true)
+      and ((.projects[0].current_actions[0].options | index("approve local merge")) != null)
+      and ((.projects[0].current_actions[0].options | index("hold for changes")) != null)
+      and (.projects[0].recent_completed | length) == 1
+  ' >/dev/null || fail "reconciled local-ready work was not captain-awaited or aliases were not folded: $json"
+  pass "reporting reconciles authoritative done state, local merge readiness, and project-key aliases"
+}
+
+test_reporting_uses_default_branch_for_held_project_without_task_meta() {
+  local home fakebin json repo
+  home=$(make_home reporting-default-branch)
+  repo="$home/projects/LifeOS"
+  mkdir -p "$repo"
+  fm_git_init_commit "$repo"
+  git -C "$repo" branch -M main
+  cat > "$home/data/projects.md" <<'EOF'
+- LifeOS [no-mistakes] - fixture project (added 2026-07-21)
+EOF
+  cat > "$home/data/backlog.md" <<'EOF'
+## In flight
+
+## Queued
+- [ ] life-decision - Choose release path (repo: LifeOS) (kind: captain) (hold: choose path) (hold-kind: captain)
+
+## Done
+EOF
+  fakebin=$(make_fakebin "$home")
+  json=$(run "$home" "$fakebin" --json)
+  printf '%s' "$json" | jq -e '
+    (.projects | map(.id)) == ["LifeOS"]
+      and .projects[0].branch.active == []
+      and .projects[0].branch.default == ["main"]
+      and .projects[0].branch.selected == ["main"]
+      and .projects[0].current_actions[0].needs_human == true
+      and ((.projects[0].current_actions[0].options | length) > 0)
+  ' >/dev/null || fail "held project without task metadata did not use its registered clone default branch: $json"
+  pass "held projects without active task metadata use the registered clone default branch"
+}
+
+test_reporting_project_order_uses_classification_then_priority() {
+  local home fakebin json
+  home=$(make_home reporting-order)
+  cat > "$home/data/backlog.md" <<'EOF'
+## In flight
+- [ ] active - Active work (repo: Active) (kind: ship) (priority: 9)
+
+## Queued
+- [ ] blocked - Blocked work blocked-by: missing - wait (repo: Blocked) (kind: ship) (priority: 1)
+- [ ] awaited - Captain choice (repo: Awaited) (kind: captain) (priority: 1) (hold: choose) (hold-kind: captain)
+
+## Done
+EOF
+  fakebin=$(make_fakebin "$home")
+  json=$(run "$home" "$fakebin" --json)
+  [ "$(printf '%s' "$json" | jq -r '.projects | map(.id) | join(",")')" = "Active,Blocked,Awaited" ] \
+    || fail "project order did not put active, blocked, and captain-awaited groups in order: $json"
+  pass "project ordering follows self-progressing, blocked, then captain-awaited groups"
+}
+
 # R1: main-home orphan in-flight and unstructured current rows must not vanish
 # silently. Meta remains the sole live-work inventory; disclosure is via
 # main_inventory + omitted[] + a Charted Next gate line, never fake Underway.
@@ -2310,6 +2487,11 @@ test_all_landed_keeps_complete_global_order
 test_landed_bounded_and_disclosed
 test_live_blocker_is_not_charted_queue_work
 test_captains_call_anti_leak
+test_chat_contract_four_sections
+test_project_reporting_model
+test_reporting_reconciles_done_local_branch_and_aliases
+test_reporting_uses_default_branch_for_held_project_without_task_meta
+test_reporting_project_order_uses_classification_then_priority
 test_main_orphan_in_flight_is_disclosed_not_invented
 test_main_unstructured_current_is_disclosed_with_structured_sibling
 test_main_orphan_counterfactual_meta_clears_inventory_warning

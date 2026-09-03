@@ -14,6 +14,11 @@ set -u
 CHECK="$ROOT/bin/fm-arm-pretool-check.sh"
 POLICY="$ROOT/bin/fm-arm-command-policy.mjs"
 
+# The wrapper resolves protected config paths against the effective firstmate
+# home, which can differ from this test's code root in an isolated worktree.
+EFFECTIVE_HOME=${FM_HOME:-$ROOT}
+FOREIGN_HOME="$EFFECTIVE_HOME-foreign"
+
 # --- full cross-harness acceptance matrix ----------------------------------
 
 MATRIX_IDS=()
@@ -38,7 +43,7 @@ matrix_case A09 allow "export FM_HOME='$ROOT'; bin/fm-watch-checkpoint.sh --seco
 matrix_case A10 allow 'source config/x-mode.env; bin/fm-watch-checkpoint.sh --seconds 180'
 matrix_case A11 allow "source 'config/x-mode.env'; bin/fm-watch-checkpoint.sh --seconds 180"
 matrix_case A12 allow "source './config/x-mode.env'; bin/fm-watch-checkpoint.sh --seconds 180"
-matrix_case A13 allow "source '$ROOT/config/x-mode.env'; bin/fm-watch-checkpoint.sh --seconds 180"
+matrix_case A13 allow "source '$EFFECTIVE_HOME/config/x-mode.env'; bin/fm-watch-checkpoint.sh --seconds 180"
 matrix_case A14 allow "[ -f 'config/x-mode.env' ] && source 'config/x-mode.env'; exec bin/fm-watch-arm.sh"
 matrix_case A15 allow "cd $ROOT && exec bin/fm-watch-arm.sh"
 matrix_case A16 allow "export FM_HOME=$ROOT && bin/fm-watch-checkpoint.sh --seconds 180"
@@ -129,7 +134,7 @@ matrix_case E03 allow 'bin/fm-watch-arm.sh # output > file &'
 matrix_case E04 allow $'# setup comment with fm-watch.sh; && >\nsource "config/x-mode.env"\nbin/fm-watch-checkpoint.sh --seconds 180'
 matrix_case E05 deny "FM_HOME=$ROOT bin/fm-watch-checkpoint.sh --seconds 180"
 matrix_case E06 deny "env FM_HOME=$ROOT bin/fm-watch-arm.sh"
-matrix_case E07 deny "source '/tmp/not-firstmate/config/x-mode.env'; bin/fm-watch-checkpoint.sh --seconds 180"
+matrix_case E07 deny "source '$FOREIGN_HOME/config/x-mode.env'; bin/fm-watch-checkpoint.sh --seconds 180"
 matrix_case E08 deny "bash -lc 'bin/fm-watch-checkpoint.sh --seconds 180'"
 matrix_case E09 deny '(bin/fm-watch-checkpoint.sh --seconds 180)'
 matrix_case E10 deny "eval 'bin/fm-watch-arm.sh &'"

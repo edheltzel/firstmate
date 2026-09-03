@@ -5,7 +5,7 @@ Must-work continuity now lives above that process boundary instead of depending 
 
 ## Ownership
 
-Pi's `.pi/extensions/fm-primary-pi-watch.ts` and OpenCode's `.opencode/plugins/fm-primary-watch-arm.js` own continuous re-arm after an actionable child close.
+Pi's `.pi/extensions/fm-primary-pi-watch.ts`, OMP's explicit load of that Pi-compatible extension, and OpenCode's `.opencode/plugins/fm-primary-watch-arm.js` own continuous re-arm after an actionable child close.
 Each adapter starts the next arm before delivering the wake prompt, checks current session-lock ownership at launch, preserves one child or scheduled retry at a time, and applies bounded exponential retry after an unexpected or failed close.
 A failed follow-up never cancels continuity restoration.
 Pi same-process session replacement follows the generation-owner contract in `.pi/extensions/fm-primary-pi-watch.ts`: an owning `session_start` arms the replacement generation without waiting for a model turn, and a state-scoped replacement handoff carries every actionable close whose delivery overlapped `session_shutdown`, including a main follow-up Pi accepted but had not yet consumed, branch handling, and a retiring child that reports after the bounded shutdown wait.
@@ -23,9 +23,7 @@ While supervision is still needed and away mode remains inactive, an actionable 
 
 ## Actionable wake ordering
 
-After an actionable Pi or OpenCode child close, the adapter starts and verifies one singleton successor before it delivers the original wake.
-It confirms the handling handoff against that successor before scheduling the follow-up, retries once against the current generation and successor, and treats a failed confirmation as a restoration failure: it classifies the error, retires a successor that is no longer alive, and surfaces exactly one typed message.
-A failed confirmation is never swallowed.
+After an actionable Pi, OMP, or OpenCode child close, the adapter starts and verifies one singleton successor before it delivers the original wake.
 It waits at most one readiness timeout per attempt, then sends TERM and waits a bounded retirement confirmation before the next lock-verified exponential retry.
 If the unready arm does not retire within that bound, the adapter keeps ownership, starts no overlapping retry, and delivers the typed fallback immediately.
 When that retained arm later closes, its actual close is classified as a new supervised event without replaying the earlier fallback.
@@ -115,7 +113,7 @@ It also covers generation-claim single-flight, stuck-claim supersession, superse
 
 ## Active limits and verification
 
-The goal is continuity without a Pi or OpenCode model-memory re-arm step.
+The goal is continuity without a Pi, OMP, or OpenCode model-memory re-arm step.
 No zero-latency guarantee is claimed because lock verification, watcher startup, and bounded retry delays remain deliberate safety work.
 OpenCode support targets persistent TUI sessions rather than headless `opencode run`.
 Claude depends on the Stop `asyncRewake` rewake, Cursor depends on its awaited stop-hook park, Grok retains native background-completion notifications, and Codex retains bounded foreground checkpoints.
