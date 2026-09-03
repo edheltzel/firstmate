@@ -141,10 +141,12 @@ For ship and scout work, `fm-spawn.sh` refuses to launch unless the resolved tas
 
 The firstmate repo has one extra exposure because it can dispatch crewmates to work on itself.
 Its operating checkout (`FM_ROOT`) and the disposable crewmate worktrees are all linked git worktrees of the same repository, so the valid discriminator is branch state, not whether the checkout is linked.
-The primary checkout is healthy on its default branch, and linked worktrees or secondmate homes are healthy at detached HEAD.
-Only a named non-default branch checked out in `FM_ROOT` is a worktree tangle.
+The primary checkout is healthy on the branch that its current operation expects, while linked worktrees or secondmate homes are healthy at detached HEAD.
+Most operations expect the repository default branch, while the Themis self-update expects `Themis`.
+Only a named branch that differs from the expected branch in `FM_ROOT` is a worktree tangle.
 
-`fm-tangle-lib.sh` resolves the default branch from `origin/HEAD`, then local `main` or `master`, and classifies that named non-default primary branch as the tangle.
+`fm-tangle-lib.sh` resolves the default branch from `origin/HEAD`, then local `main` or `master`, and accepts an explicit expected branch from callers with a deliberate long-running branch.
+It classifies a named primary branch that differs from that expected branch as the tangle.
 `fm-guard.sh` prints the repair command on the next mutable fleet action, while `bin/fm-session-start.sh` reports the same condition through bootstrap as a `TANGLE:` line at session start.
 If another live session holds the fleet lock, both surfaces keep the alarm but switch to read-only wording with no repair command.
 Ship briefs also tell the crewmate to verify `pwd -P` and `git rev-parse --show-toplevel` before creating `fm/<id>`, then stop with a blocked status if it landed in the primary checkout.
@@ -304,11 +306,11 @@ The refresh also prunes local branches whose remote is gone and that no worktree
 
 ## Self-updates stay safe
 
-`/updatefirstmate` fast-forwards the running firstmate repo and registered secondmate homes from `origin`, then re-reads updated instructions and nudges updated secondmates without touching project clones.
+`/updatefirstmate` brings Kun into the running Themis checkout without destroying unique Themis commits, then fast-forwards registered secondmate homes from `origin`, re-reads updated instructions, and nudges updated secondmates without touching project clones.
 For a remote route, the configured code root updates from its own origin on that host before the persistent home fast-forwards to the code-root commit.
-The update is fast-forward only: dirty, diverged, offline, and off-default targets are reported and left untouched.
-Local homes share the guarded fast-forward helper, while remote updates delegate the same safety decision to the configured host through the generic transport.
-The mechanics are owned by the `/updatefirstmate` skill and firstmate's operating manual in [`AGENTS.md`](../AGENTS.md) (self-update).
+Local secondmate homes share the guarded fast-forward helper, while the Themis merge lives in `bin/fm-update.sh`.
+`bin/fm-update.sh` and its header own the Git mechanics and status outcomes.
+The `/updatefirstmate` skill owns the re-read, nudge, and reporting procedure, while [`AGENTS.md`](../AGENTS.md) owns its load trigger.
 
 ## Restart-proof
 
